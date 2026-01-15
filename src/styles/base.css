@@ -1,0 +1,29 @@
+/* 全局盒模型重置 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* 可选：其他全局基础样式 */
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  /* 防止 iOS 横屏放大文字 */
+}
+:root {
+  --primary: #1890ff;
+  /* 主题色（已选） */
+  --bg: #f7f9fb;
+  --surface: #ffffff;
+  --text: #27313a;
+  --muted: #8a94a6;
+}
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  background-color: var(--bg);
+  color: #333;
+}

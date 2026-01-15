@@ -1,6 +1,6 @@
 // src/services/bluetoothService.js
 import { BluetoothLe, BleClient } from '@capacitor-community/bluetooth-le';
-
+import { Filesystem, Directory } from '@capacitor/filesystem';
 export class BluetoothService {
   constructor() {
     this.connectedDevice = null;
@@ -9,7 +9,7 @@ export class BluetoothService {
     this.initialized = false;
   }
 
-  // 检查蓝牙是否已开启（无需初始化即可调用）
+  // 检查蓝牙是否已开启
   async isBluetoothEnabled() {
     try {
       return await BleClient.isEnabled();
@@ -68,16 +68,20 @@ export class BluetoothService {
 
     return new Promise((resolve) => {
       try {
-        // 👇 使用 BleClient.requestLEScan（新 API）
+        //  使用 BleClient.requestLEScan（新 API）
         BleClient.requestLEScan(
           {},
           (result) => {
             if (result.device?.deviceId) {
               const device = {
                 deviceId: result.device.deviceId,
-                name: result.device.name || '未知设备',
-                rssi: result.device.rssi || 0,
-                ...result.device
+                name: result.device.name || result.localName || 'N/A',
+                rssi: result.rssi || 0,
+                txPower: result.txPower,
+                manufacturerData: result.manufacturerData,
+                serviceData: result.serviceData,
+                uuids: result.uuids,
+                rawAdvertisement: result.rawAdvertisement,
               };
               this.devices.set(device.deviceId, device);
               console.log('发现设备:', device.name, device.deviceId);
@@ -97,7 +101,7 @@ export class BluetoothService {
 
   async stopScan() {
     try {
-      await BleClient.stopLEScan(); // 👈 新方法名
+      await BleClient.stopLEScan(); //  新方法名
       console.log('停止扫描');
     } catch (error) {
       console.error('停止扫描失败:', error);
@@ -106,7 +110,7 @@ export class BluetoothService {
 
   async connectDevice(deviceId) {
     try {
-      await BleClient.connect(deviceId); // 👈 参数是字符串，不是对象
+      await BleClient.connect(deviceId); //  参数是字符串，不是对象
       this.connectedDevice = { deviceId };
       this.connected = true;
       console.log('设备连接成功:', deviceId);
@@ -118,7 +122,7 @@ export class BluetoothService {
 
   async disconnectDevice(deviceId) {
     try {
-      await BleClient.disconnect(deviceId); // 👈 参数是字符串
+      await BleClient.disconnect(deviceId); //  参数是字符串
       this.connectedDevice = null;
       this.connected = false;
       console.log('设备已断开连接');
@@ -198,7 +202,6 @@ export class BluetoothService {
     }
   }
 
-  // ... 其他方法保持不变
   getDiscoveredDevices() {
     return Array.from(this.devices.values());
   }
@@ -214,6 +217,32 @@ export class BluetoothService {
   clearDevices() {
     this.devices.clear();
   }
+  async saveBleDataToFile (dataLines) {
+    if (!Array.isArray(dataLines) || dataLines.length === 0) {
+      throw new Error('无数据可保存');
+    }
+
+    const content = dataLines.join('\n');
+    const timestamp = new Date(Date.now() + 28800000)
+      .toISOString()
+      .replace(/[-:T.Z]/g, '')
+      .slice(0, 14);
+
+    const filename = `ble_data_${timestamp}.txt`;
+
+    await Filesystem.writeFile({
+      path: filename,
+      data: content,
+      directory: Directory.Documents,
+      encoding: 'utf8'
+    });
+
+    return {
+      path: Directory.Documents,
+      filePath: filename,
+      lineCount: dataLines.length
+    };
+  };
 }
 
 export const bluetoothService = new BluetoothService();
