@@ -95,7 +95,7 @@ const savePhoto = async () => {
 <style scoped>
 .camera-page {
   padding: 16px 0;
-  height: calc(100vh - 72px);
+  height: 100%;
   display: flex;
   flex-direction: column;
 }

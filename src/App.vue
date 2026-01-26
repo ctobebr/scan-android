@@ -15,8 +15,14 @@
     <router-link to="/bluetooth" class="tab-item" active-class="active">
       蓝牙
     </router-link>
+    <router-link to="/pointCloud" class="tab-item" active-class="active">
+      点云
+    </router-link>
     <router-link to="/caremaView" class="tab-item" active-class="active">
       拍照
+    </router-link>
+    <router-link to="/fileSave" class="tab-item" active-class="active">
+      文件
     </router-link>
   </div>
 </div>
@@ -46,8 +52,7 @@
   box-sizing: border-box;
   max-width: 980px;
   margin: 0 auto;
-  padding-bottom: 72px; /* 为底部导航留空间 */
-  /* min-height: calc(100vh - 56px); */
+  height: calc(100vh - 56px); /* 为底部导航留空间56px， 且每个页面总高度都为这么高，子页面直接使用100% */
 }
 
 .tab-bar {
@@ -78,7 +83,7 @@
 }
 
 /* 小屏时确保页面高度自适应 */
-@media (max-width: 420px) {
+/* @media (max-width: 420px) {
   .page-wrapper{ padding-left: 20px; padding-right: 20px; }
-}
+} */
 </style>
