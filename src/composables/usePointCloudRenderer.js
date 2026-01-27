@@ -13,7 +13,7 @@ export function usePointCloudRenderer(container) {
   let globalMaxY = -Infinity
 
   // === 新增：预分配上限和计数器 ===
-  const MAX_POINTS = 100_000
+  const MAX_POINTS = 2_000_000
   let currentPointCount = 0
 
   // 初始化
@@ -143,7 +143,7 @@ export function usePointCloudRenderer(container) {
       if (!pointsGeometry || newPoints.length === 0) return
 
       if (currentPointCount + newPoints.length > MAX_POINTS) {
-        showToast(`点云数量已达上限  $ {MAX_POINTS} 点`)
+        showToast(`点云数量已达上限  ${MAX_POINTS} 点`)
         return
       }
 
@@ -238,9 +238,9 @@ export function usePointCloudRenderer(container) {
     camera.aspect = container.clientWidth / container.clientHeight
     camera.updateProjectionMatrix()
     renderer.setSize(container.clientWidth, container.clientHeight)
-    if (animationId) {
-      console.log(animationId)
-    }
+    // if (animationId) {
+    //   console.log(animationId)
+    // }
   }
   return {
     init,

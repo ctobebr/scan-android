@@ -123,7 +123,7 @@ export class parseBinaryToCartesian {
                 this.protocolState.packetLength = byte
                 if (this.protocolState.packetLength % 6 !== 0) {
                     this.resetProtocolState()
-                    console.log('帧头后的第一个字节不是6的倍数，重新拿下一个字节，并且重新开始寻找帧头')
+                    // console.log('帧头后的第一个字节不是6的倍数，重新拿下一个字节，并且重新开始寻找帧头')
                     continue
                 }
                 this.protocolState.packetData = new Uint8Array(this.protocolState.packetLength + 1)

@@ -6,7 +6,6 @@
       <button class="control-btn" @click="startDataStream">开始采集</button>
       <button class="control-btn" @click="stopDataStream">暂停采集</button>
       <button class="control-btn" @click="clearPointCloudData">清空点云</button>
-      <!-- <button class="control-btn" @click="savePointCloud">保存点云</button> -->
     </div>
     <div class="data-stats">
       <div class="stat-item">
@@ -34,7 +33,7 @@
 <script setup>
 import { ref, onMounted,onUnmounted, watchEffect } from 'vue'
 import { useBluetoothStore } from '@/stores/bluetooth'
-import { usePointCloudRenderer } from '@/composables/usePointCluudRenderer'
+import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
 import { showToast } from '@/utils/toast'
 
 const bluetoothStore = useBluetoothStore()
@@ -65,32 +64,36 @@ onMounted(() => {
 
 // 清理资源
 onUnmounted(() => {
-  // 清理资源
-  renderer.dispose()
-  console.log('清理资源完毕')
-  window.removeEventListener('resize', renderer?.onResize)
-  // 如果 usePointCloudRenderer 有 destroy 方法，这里调用：
-  // renderer?.destroy?.()
+  // 1. 停止数据采集
+  isCollecting.value = false
+
+  // 2. 移除 resize 监听器
+  if (renderer?.onResize) {
+    window.removeEventListener('resize', renderer.onResize)
+  }
+
+  // 3. 调用渲染器的 dispose 方法
+  if (renderer?.dispose && typeof renderer.dispose === 'function') {
+    renderer.dispose()
+  }
+
+  // 4. 显式置空引用，帮助 GC
+  renderer = null
+
 })
 
 // 开始数据流
 function startDataStream() {
-  // 这里可以添加开始数据流的逻辑
-  console.log('开始数据采集')
   isCollecting.value = true
   hasStarted.value = true
 }
 
 // 停止数据流
 function stopDataStream() {
-  // 这里可以添加停止数据流的逻辑
-  console.log('暂停数据采集')
   isCollecting.value = false
 }
 
 function clearPointCloudData() {
-  console.log('清空点云数据')
-
   if (renderer?.resetPointCloud) {
     renderer.resetPointCloud()//  只重置点云
   }
@@ -104,7 +107,12 @@ function clearPointCloudData() {
 }
 // 监听 store 中的 connectedPoints 变化
 watchEffect(() => {
+  // Vue 会自动追踪这个函数中访问的所有响应式数据
+  // 包括：ref、reactive、computed 等
   if (!isRendererReady.value || !isCollecting.value) return
+    // 显式声明依赖：读取connectedPoints 是否变化，建立依赖
+  bluetoothStore.connectedPoints // 建立依赖
+  // const currentPoints = bluetoothStore.connectedPoints
   try {
     // watchEffect自动监听内部的响应式数据，即connectedPoints，每次新增点时触发回调将connectedPoints赋值给 points（新增加的点），并且清空connectedPoints（不会再次触发当前正在执行的watcheffect,vue自动避免了这种情况）（vue2中这样做会死循环）
 
@@ -157,7 +165,6 @@ watchEffect(() => {
 }
 
 .page-title {
-  text-align: center;
   font-size: 24px;
   font-weight: 600;
   color: var(--text);

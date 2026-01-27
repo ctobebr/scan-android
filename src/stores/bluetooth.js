@@ -3,12 +3,20 @@ import { showToast } from '@/utils/toast'
 import { bluetoothService } from '@/services/bluetoothService'
 import { parseBinaryToCartesian } from '@/utils/parseBinaryToCartesian'
 
+let rawMessagesForSave = []
+
+
 export const useBluetoothStore = defineStore('bluetooth', {
   state: () => ({
     devices: [],
     scanning: false,
     connectingStatus: 0,  // 0: 未连接, 1: 连接中, 2: 已连接
     connectingDeviceId: null,
+     // 完整原始数据（用于保存）
+    // rawMessagesForSave: [],
+    // 仅用于UI显示
+    displayedMessages: [],
+    MAX_DISPLAY_MESSAGES: 200, // UI 最多显示 200 条
     messages: [],
     parser: new parseBinaryToCartesian(),
     connectedPoints: [], // 解析后的点云数据
@@ -76,31 +84,29 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
         const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e'
         const CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
-
+        // let timeNow = performance.now()
+        // let timeLast = timeNow
+        // let count = 0
         await bluetoothService.subscribeToNotifications(
           device.deviceId,
           SERVICE_UUID,
           CHAR_UUID,
           (dataStr) => {
-            //  dataStr 是 Uint8Array
-            // 保存可读的十六进制日志（用于显示和保存）
-            // const hexStr = Array.from(dataStr)
-            //   .map(b => b.toString(16).padStart(2, '0'))
-            //   .join(' ')
-                // console.log('✅ 收到原始数据:', dataStr) // 👈 关键！看这里有没有输出
-
-
-    // console.log('解析出点数:', points.length) // 👈 看是否解析成功
+            // count = count + 1
+            // timeNow = performance.now()
+            // if (timeNow - timeLast >= 1000) {
+            //   timeLast = timeNow
+            //   console.log("每秒点数：", count)
+            //   count = 0
+            // }
             const { points, errors } = this.parser.parse(dataStr)
             points.forEach(point => {
               const { x, y, z } = point
               this.appendMessage(`x: ${x}\ny: ${y}\nz: ${z}`)
-              // console.log('调试mess',JSON.stringify(this.messages))
             })
-            // this.points, errors:  [{"x":22.385643930238793,"y":2.5159214375472674,"z":-16.342031243044826,"pitch":3.0510658444444445,"yaw":2.511,"distance":27830,"intensity":1,"pitchDeg":174.81319590318523,"yawDeg":143.86970235734972,"distanceM":27.83}] []
-            // console.log("this.points, errors: ",JSON.stringify(points), JSON.stringify(errors))
-            this.connectedPoints = [...this.connectedPoints, ...points]
-            // console.log('======',JSON.stringify( this.connectedPoints))
+            // this.connectedPoints = [...this.connectedPoints, ...points]  // 时间复杂度O(n + k) 读取旧connectedPoints大数据，新建大数据数组，在蓝牙快速回调中导致数据量变大时严重卡顿问题
+            this.connectedPoints.push(...points)  // 时间复杂度O(k)
+            // 解决此处的数量和速率非响应式的问题，而且没有性能杀手问题
             if (errors.length > 0) {
               console.warn('Parse errors:', errors)
             }
@@ -117,12 +123,27 @@ export const useBluetoothStore = defineStore('bluetooth', {
     },
     consumeConnectedPoints() {
       const points = [...this.connectedPoints] // 复制一份
-      this.connectedPoints = [] // 清空原数组
+      this.connectedPoints.length = 0 // 清空原数组, 但是不改变引用，保持响应式
+      // this.connectedPoints = []  // 这行修改了引用，响应式丢失，无法使用
       return points
     },
     appendMessage(msg) {
-      this.messages.push(msg)
+      // 解决展示消息越来越多导致卡顿的问题
+      // 1. 始终保存完整数据（用于后续保存）
+      rawMessagesForSave.push(msg)
+      // 2. 限制 UI 显示数量
+      if (this.displayedMessages.length >= this.MAX_DISPLAY_MESSAGES) {
+        this.displayedMessages.shift() // 移除最旧的一条
+      }
+      this.displayedMessages.push(msg)
     },
+    clearMessages() {
+      rawMessagesForSave = [] // 重置外部数组
+      this.displayedMessages = []
+    },
+    getRawMessages() {
+      return rawMessagesForSave
+    }
   },
   getters: {
     isConnected: (state) => state.connectingStatus === 2,
