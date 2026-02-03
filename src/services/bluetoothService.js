@@ -69,25 +69,22 @@ export class BluetoothService {
     return new Promise((resolve) => {
       try {
         //  使用 BleClient.requestLEScan（新 API）
-        BleClient.requestLEScan(
-          {},
-          (result) => {
-            if (result.device?.deviceId) {
-              const device = {
-                deviceId: result.device.deviceId,
-                name: result.device.name || result.localName || 'N/A',
-                rssi: result.rssi || 0,
-                txPower: result.txPower,
-                manufacturerData: result.manufacturerData,
-                serviceData: result.serviceData,
-                uuids: result.uuids,
-                rawAdvertisement: result.rawAdvertisement,
-              }
-              this.devices.set(device.deviceId, device)
-              console.log('发现设备:', device.name, device.deviceId)
+        BleClient.requestLEScan({}, (result) => {
+          if (result.device?.deviceId) {
+            const device = {
+              deviceId: result.device.deviceId,
+              name: result.device.name || result.localName || 'N/A',
+              rssi: result.rssi || 0,
+              txPower: result.txPower,
+              manufacturerData: result.manufacturerData,
+              serviceData: result.serviceData,
+              uuids: result.uuids,
+              rawAdvertisement: result.rawAdvertisement,
             }
+            this.devices.set(device.deviceId, device)
+            console.log('发现设备:', device.name, device.deviceId)
           }
-        )
+        })
       } catch (error) {
         console.error('开始扫描失败:', error)
       }
@@ -147,12 +144,7 @@ export class BluetoothService {
     try {
       const encoder = new TextEncoder()
       const data = encoder.encode(value)
-      await BleClient.write(
-        deviceId,
-        serviceUUID,
-        characteristicUUID,
-        data
-      )
+      await BleClient.write(deviceId, serviceUUID, characteristicUUID, data)
       console.log('数据发送成功:', value)
     } catch (error) {
       console.error('数据发送失败:', error)
@@ -175,33 +167,25 @@ export class BluetoothService {
 
   async subscribeToNotifications(deviceId, serviceUUID, characteristicUUID, callback) {
     try {
-      await BleClient.startNotifications(
-        deviceId,
-        serviceUUID,
-        characteristicUUID,
-        (value) => {
-          //  统一处理 ArrayBuffer / DataView
-          let buffer
-          if (value instanceof ArrayBuffer) {
-            buffer = value
-          } else if (value?.buffer instanceof ArrayBuffer) {
-            // 处理 DataView 或 TypedArray取偏移量后的数据，都能用typedarray去新建
-            buffer = value.buffer.slice(
-              value.byteOffset,
-              value.byteOffset + value.byteLength
-            )
-          } else {
-            console.error('不支持的数据类型:', typeof value, value)
-            return
-          }
-
-          // 转为 Uint8Array 供parser.parse使用
-          const uint8 = new Uint8Array(buffer)
-
-          // 透传给业务逻辑
-          callback(uint8)
+      await BleClient.startNotifications(deviceId, serviceUUID, characteristicUUID, (value) => {
+        //  统一处理 ArrayBuffer / DataView
+        let buffer
+        if (value instanceof ArrayBuffer) {
+          buffer = value
+        } else if (value?.buffer instanceof ArrayBuffer) {
+          // 处理 DataView 或 TypedArray取偏移量后的数据，都能用typedarray去新建
+          buffer = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
+        } else {
+          console.error('不支持的数据类型:', typeof value, value)
+          return
         }
-      )
+
+        // 转为 Uint8Array 供parser.parse使用
+        const uint8 = new Uint8Array(buffer)
+
+        // 透传给业务逻辑
+        callback(uint8)
+      })
       console.log('已订阅通知')
     } catch (error) {
       console.error('订阅失败:', error)
@@ -234,11 +218,10 @@ export class BluetoothService {
   clearDevices() {
     this.devices.clear()
   }
-  async saveBleDataToFile (dataLines) {
+  async saveBleDataToFile(dataLines) {
     if (!Array.isArray(dataLines) || dataLines.length === 0) {
       throw new Error('无数据可保存')
     }
-
     const content = dataLines.join('\n')
     const timestamp = new Date(Date.now() + 28800000)
       .toISOString()
@@ -246,20 +229,118 @@ export class BluetoothService {
       .slice(0, 14)
 
     const filename = `ble_data_${timestamp}.txt`
-
     await Filesystem.writeFile({
       path: filename,
       data: content,
       directory: Directory.Documents,
-      encoding: 'utf8'
+      encoding: 'utf8',
     })
 
     return {
       path: Directory.Documents,
       filePath: filename,
-      lineCount: dataLines.length
+      lineCount: dataLines.length,
     }
   }
+  /**
+   * 列出 Documents 目录下的蓝牙数据文件
+   * @param {string} [pattern='ble_data_'] - 文件名匹配模式，默认查找 'ble_data_' 开头的文件
+   * @returns {Promise<{name: string, size: number, ctime: number, mtime: number}[]>} - 文件信息列表
+   */
+  async listBleDataFiles(pattern = 'ble_data_') {
+    try {
+      const result = await Filesystem.readdir({
+        path: '', // 空字符串表示根目录（根据 Directory 指定）
+        directory: Directory.Documents,
+      })
+
+      // 过滤出符合条件的 .txt 文件
+      const filteredFiles = result.files
+        .filter((file) => {
+          // 检查文件名是否以 pattern 开头且扩展名为 .txt
+          return file.name.startsWith(pattern) && file.name.endsWith('.txt')
+        })
+        .map((file) => ({
+          name: file.name,
+          size: file.size, // 文件大小（字节）
+          ctime: file.mtime, // 返回 mtime，赋给 ctime
+          mtime: file.mtime, // 最后修改时间（毫秒时间戳）
+        }))
+
+      // 可选：按修改时间倒序排列，最新的在前
+      filteredFiles.sort((a, b) => b.mtime - a.mtime)
+
+      return filteredFiles
+    } catch (error) {
+      console.error('读取文件列表失败:', error)
+      throw new Error('读取文件列表失败: ' + error.message)
+    }
+  }
+  /**
+   * 读取指定的蓝牙数据文件内容
+   * @param {string} filename - 文件名
+   * @returns {Promise<string>} - 文件内容
+   */
+  async readBleDataFile(filename) {
+    try {
+      const result = await Filesystem.readFile({
+        path: filename,
+        directory: Directory.Documents,
+        encoding: 'utf8', // 读取时也要指定编码
+      })
+      return result.data // Capacitor 返回的是 { data: 'file_content' }
+    } catch (error) {
+      console.log('读取失败')
+      console.log(`读取文件 " ${filename}" 失败:`, error)
+      throw new Error(`读取文件失败:  ${error.message}`)
+    }
+  }
+
+  async getURL(filename) {
+    try {
+      const uriResult = await Filesystem.getUri({
+        directory: Directory.Documents, // 确保与 bluetoothService 存储文件的目录一致
+        path: filename,
+      })
+      console.log('URL', uriResult.uri)
+      return uriResult.uri
+    } catch (error) {
+      console.log('获取URL出错', error)
+    }
+  }
+    /**
+   * 从本地 Documents 目录删除指定的蓝牙数据文件
+   * @param {string} filename - 要删除的文件名
+   * @returns {Promise<void>}
+   */
+  async deleteBleDataFile(filename) {
+    try {
+      // 验证文件名是否存在
+      if (!filename) {
+        throw new Error('文件名不能为空');
+      }
+
+      console.log(`开始删除本地文件:  ${filename}`);
+
+      // 调用 Capacitor Filesystem API 删除文件
+      await Filesystem.deleteFile({
+        path: filename,
+        directory: Directory.Documents, // 确保与存储文件时的目录一致
+      });
+
+      console.log(`文件 " ${filename}" 删除成功`);
+
+    } catch (error) {
+      console.error(`删除文件 " ${filename}" 失败:`, error);
+      // 如果是文件不存在的错误，可以提供更友好的提示
+      if (error.message.includes('File does not exist')) {
+         throw new Error(`文件 " ${filename}" 不存在，无法删除。`);
+      }
+      // 抛出原始错误或包装后的错误
+      throw new Error(`删除文件失败:  ${error.message}`);
+    }
+  }
+
 }
 
 export const bluetoothService = new BluetoothService()

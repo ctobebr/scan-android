@@ -1,5 +1,61 @@
 package com.example.app;
 
+import android.os.Build;
+import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.webkit.JavascriptInterface;
+
 import com.getcapacitor.BridgeActivity;
 
-public class MainActivity extends BridgeActivity {}
+public class MainActivity extends BridgeActivity {
+    @Override
+    public void onCreate(android.os.Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // 添加一个简单的 JS 接口，供 Web 层直接调用，以切换沉浸式模式
+        try {
+            getBridge().getWebView().addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public void setImmersive(final boolean immersive) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    WindowInsetsController controller = getWindow().getInsetsController();
+                                    if (controller != null) {
+                                        if (immersive) {
+                                            controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                                            controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                                        } else {
+                                            controller.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                                        }
+                                    }
+                                } else {
+                                    View decorView = getWindow().getDecorView();
+                                    if (immersive) {
+                                        decorView.setSystemUiVisibility(
+                                            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                        );
+                                    } else {
+                                        decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    });
+                }
+            }, "AndroidImmersive");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}

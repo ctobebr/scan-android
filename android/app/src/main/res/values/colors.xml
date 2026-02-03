@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 与 PointCloud 背景一致的深色，用于状态栏和导航栏（与 CSS 变量 bg-very-dark 同色） -->
+    <color name="color_bg_deep">#0e1420</color>
+</resources>

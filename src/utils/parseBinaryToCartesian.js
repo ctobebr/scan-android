@@ -62,7 +62,7 @@ export class parseBinaryToCartesian {
 
         // 转换为实际值（弧度 = int16_t / 1000.0）
         const yaw_rad = yaw_int16 / 1000.0
-        const pitch_rad = -pitch_int16 / 1000.0 + 20 / 180 * 3.1415926
+        const pitch_rad = -pitch_int16 / 1000.0 + 68 / 180 * 3.1415926
         const distance_m = distance_u16 / 100.0
 
         // 转换为笛卡尔坐标
@@ -78,9 +78,9 @@ export class parseBinaryToCartesian {
   // intensity: 强度
   sphericalToCartesian(pitch, yaw, r, intensity) {
     // 计算笛卡尔坐标
-    const x = r * Math.cos(pitch) * Math.cos(yaw)
-    const y = r * Math.sin(pitch)  // 高度
-    const z = r * Math.cos(pitch) * Math.sin(yaw)
+    const x = (r * Math.cos(pitch) * Math.cos(yaw))
+    const y = (r * Math.sin(pitch)) // 高度
+    const z = (r * Math.cos(pitch) * Math.sin(yaw))
 
     // 返回点对象，包含原始数据方便调试
     return {

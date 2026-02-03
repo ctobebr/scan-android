@@ -3,16 +3,16 @@ import { showToast } from '@/utils/toast'
 import { bluetoothService } from '@/services/bluetoothService'
 import { parseBinaryToCartesian } from '@/utils/parseBinaryToCartesian'
 
-let rawMessagesForSave = []
+
 
 
 export const useBluetoothStore = defineStore('bluetooth', {
   state: () => ({
     devices: [],
     scanning: false,
-    connectingStatus: 0,  // 0: 未连接, 1: 连接中, 2: 已连接
+    connectingStatus: 0, // 0: 未连接, 1: 连接中, 2: 已连接
     connectingDeviceId: null,
-     // 完整原始数据（用于保存）
+    // 完整原始数据（用于保存）
     // rawMessagesForSave: [],
     // 仅用于UI显示
     displayedMessages: [],
@@ -20,6 +20,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
     messages: [],
     parser: new parseBinaryToCartesian(),
     connectedPoints: [], // 解析后的点云数据
+    rawMessagesForSave: [],
   }),
   actions: {
     // 请求蓝牙相关权限
@@ -39,7 +40,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
     // 流程：权限 → 初始化 → 蓝牙状态 → 扫描
     async autoScanOnEnter() {
       // 权限
-      if (!await this.requestRequirePermissions()) {
+      if (!(await this.requestRequirePermissions())) {
         showToast('需要蓝牙和位置权限才能扫描设备')
         return
       }
@@ -100,18 +101,19 @@ export const useBluetoothStore = defineStore('bluetooth', {
             //   count = 0
             // }
             const { points, errors } = this.parser.parse(dataStr)
-            points.forEach(point => {
+            points.forEach((point) => {
               const { x, y, z } = point
-              this.appendMessage(`x: ${x}\ny: ${y}\nz: ${z}`)
+              this.appendMessage(`${x/10} ${y/10} ${z/10}`)
             })
             // this.connectedPoints = [...this.connectedPoints, ...points]  // 时间复杂度O(n + k) 读取旧connectedPoints大数据，新建大数据数组，在蓝牙快速回调中导致数据量变大时严重卡顿问题
-            this.connectedPoints.push(...points)  // 时间复杂度O(k)
+            this.connectedPoints.push(...points) // 时间复杂度O(k)
+            // console.log('points', points)
             // 解决此处的数量和速率非响应式的问题，而且没有性能杀手问题
             if (errors.length > 0) {
               console.warn('Parse errors:', errors)
             }
             // showToast('接收端到端的unit8Array成功',points ,errors)
-          }
+          },
         )
         this.connectingStatus = 2 // 已连接
       } catch (err) {
@@ -130,23 +132,35 @@ export const useBluetoothStore = defineStore('bluetooth', {
     appendMessage(msg) {
       // 解决展示消息越来越多导致卡顿的问题
       // 1. 始终保存完整数据（用于后续保存）
-      rawMessagesForSave.push(msg)
+      this.rawMessagesForSave.push(msg)
       // 2. 限制 UI 显示数量
       if (this.displayedMessages.length >= this.MAX_DISPLAY_MESSAGES) {
         this.displayedMessages.shift() // 移除最旧的一条
       }
       this.displayedMessages.push(msg)
     },
+    async handleDisconnect(device) {
+      try {
+        await bluetoothService.disconnectDevice(device.deviceId)
+        this.connectingStatus = 0
+      } catch (e) {
+        this.connectingStatus = 2
+        console.log('断开连接失败', e)
+      }
+    },
     clearMessages() {
-      rawMessagesForSave = [] // 重置外部数组
       this.displayedMessages = []
     },
     getRawMessages() {
-      return rawMessagesForSave
-    }
+      return this.rawMessagesForSave
+    },
+    clearRawMessagesForSave() {
+      // 添加一个清空动作
+      this.rawMessagesForSave = []
+    },
   },
   getters: {
     isConnected: (state) => state.connectingStatus === 2,
-    getConnectedPoints: (state) => state.connectedPoints
-  }
+    getConnectedPoints: (state) => state.connectedPoints,
+  },
 })

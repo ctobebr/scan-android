@@ -12,13 +12,30 @@ export function usePointCloudRenderer(container) {
   let globalMinY = Infinity
   let globalMaxY = -Infinity
 
-  // === 新增：预分配上限和计数器 ===
-  const MAX_POINTS = 2_000_000
+  // === 新增：懒分配和可扩容的缓冲 ===
+  const MAX_POINTS = 2_000_000 // 上限，防止无限增长
+  const INITIAL_CAPACITY = 200_000 // 初始容量（避免在页面加载时一次性分配太大）
+  let capacity = INITIAL_CAPACITY
   let currentPointCount = 0
+
+  // 创建初始 buffer 的函数（避免一次性大分配）
+  const createBuffers = (cap) => {
+    const positions = new Float32Array(cap * 3)
+    const colors = new Float32Array(cap * 3)
+
+    pointsGeometry = new THREE.BufferGeometry()
+    pointsGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage),
+    )
+    pointsGeometry.setAttribute(
+      'color',
+      new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage),
+    )
+  }
 
   // 初始化
   const init = () => {
-
     // 移动端：降低渲染质量保流畅
     const pixelRatio = Math.min(window.devicePixelRatio, 2) // 最多 2x，避免过耗电
 
@@ -31,7 +48,7 @@ export function usePointCloudRenderer(container) {
       70, // 更宽视角
       container.clientWidth / container.clientHeight,
       0.1,
-      200 // 缩短远裁剪面，提升性能  200
+      200, // 缩短远裁剪面，提升性能  200
     )
     // 50  0  0
     camera.position.set(50, 0, 0)
@@ -41,26 +58,22 @@ export function usePointCloudRenderer(container) {
     // 渲染器
     renderer = new THREE.WebGLRenderer({
       antialias: false, // 移动端关闭抗锯齿（性能优先）
-      alpha: true
+      alpha: true,
     })
     renderer.setPixelRatio(pixelRatio)
     renderer.setSize(container.clientWidth, container.clientHeight)
     // Canvas画布插入到HTML元素中
     container.appendChild(renderer.domElement)
 
-    // === 修改：预分配最大 buffer ===
-    const positions = new Float32Array(MAX_POINTS * 3)
-    const colors = new Float32Array(MAX_POINTS * 3) // 使用 Float32Array 避免驱动问题
+    // === 懒分配：使用初始较小的 buffer，按需扩容 ===
+    createBuffers(capacity)
 
-    // 点云几何体(形状和材质)
-    pointsGeometry = new THREE.BufferGeometry()
-    pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage))
-    pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage))
+    // 点云材质
     pointsMaterial = new THREE.PointsMaterial({
-      size: 0.3,  // 0.3
+      size: 0.3, // 0.3
       // color: 0x00ffff,  // 固定颜色
-      vertexColors: true,   // 使用 geometry 中的 color attribute
-      sizeAttenuation: true // 远小近大
+      vertexColors: true, // 使用 geometry 中的 color attribute
+      sizeAttenuation: true, // 远小近大
     })
     pointCloud = new THREE.Points(pointsGeometry, pointsMaterial)
     scene.add(pointCloud)
@@ -138,6 +151,49 @@ export function usePointCloudRenderer(container) {
   }
 
   // === 修改：改为增量写入，不再重建 buffer ===
+  const ensureCapacity = (additional) => {
+    const needed = currentPointCount + additional
+    if (needed <= capacity) return
+
+    // 不能超出最大上限
+    if (needed > MAX_POINTS) {
+      showToast(`点云数量已达上限 ${MAX_POINTS} 点`)
+      throw new Error('capacity exceed')
+    }
+
+    // 扩容到至少 needed，通常按倍数增长
+    let newCap = capacity
+    while (newCap < needed) {
+      newCap = Math.min(newCap * 2, MAX_POINTS)
+    }
+
+    // 拷贝旧数据到新数组（尽量减少频率）
+    try {
+      const oldPos = pointsGeometry.attributes.position.array
+      const oldCol = pointsGeometry.attributes.color.array
+
+      const newPos = new Float32Array(newCap * 3)
+      const newCol = new Float32Array(newCap * 3)
+      newPos.set(oldPos)
+      newCol.set(oldCol)
+
+      // 重新设置 attribute（替换引用，Three 会自动上传）
+      pointsGeometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(newPos, 3).setUsage(THREE.DynamicDrawUsage),
+      )
+      pointsGeometry.setAttribute(
+        'color',
+        new THREE.BufferAttribute(newCol, 3).setUsage(THREE.DynamicDrawUsage),
+      )
+
+      capacity = newCap
+    } catch (err) {
+      console.error('ensureCapacity 失败:', err)
+      throw err
+    }
+  }
+
   const addPoints = (newPoints) => {
     try {
       if (!pointsGeometry || newPoints.length === 0) return
@@ -147,16 +203,18 @@ export function usePointCloudRenderer(container) {
         return
       }
 
-      // 1. 更新全局 Y 范围
+      // 1. 确保有足够容量（可能会触发较少次数的拷贝）
+      ensureCapacity(newPoints.length)
+
+      // 2. 更新全局 Y 范围
       updateYRange(newPoints)
 
-      // 2. 获取预分配数组（直接写入！）
+      // 3. 获取 buffer 并写入新点
       const posArr = pointsGeometry.attributes.position.array // Float32Array
-      const colArr = pointsGeometry.attributes.color.array     // Float32Array
+      const colArr = pointsGeometry.attributes.color.array // Float32Array
 
       let offset = currentPointCount * 3
 
-      // 3. 写入新点（直接操作 array）
       for (let i = 0; i < newPoints.length; i++) {
         const p = newPoints[i]
         posArr[offset] = p.x
@@ -164,7 +222,7 @@ export function usePointCloudRenderer(container) {
         posArr[offset + 2] = p.z
 
         const color = getColorByHeight(p.y)
-        colArr[offset] = color.r     // 直接存 [0,1]，因为 color 是 Float32Array
+        colArr[offset] = color.r // 直接存 [0,1]，因为 color 是 Float32Array
         colArr[offset + 1] = color.g
         colArr[offset + 2] = color.b
 
@@ -180,7 +238,6 @@ export function usePointCloudRenderer(container) {
 
       // 6. 只渲染有效点
       pointsGeometry.setDrawRange(0, currentPointCount)
-
     } catch (err) {
       console.error('addPoints 失败:', err)
       showToast('点云数据异常')
@@ -196,14 +253,21 @@ export function usePointCloudRenderer(container) {
     // 不要调用 setAttribute！
   }
 
-  // 限制帧率（节省电量）
+  // 限制帧率（默认为 30 FPS，以保持显示平滑）
   let lastFrameTime = 0
-  const TARGET_FPS = 30
-  const FRAME_INTERVAL = 1000 / TARGET_FPS // 30 FPS
+  let targetFps = 30 // 默认帧率 30
+  let frameInterval = 1000 / targetFps
+
+  const setTargetFps = (fps) => {
+    if (typeof fps !== 'number' || fps <= 0) return
+    targetFps = fps
+    frameInterval = 1000 / targetFps
+  }
+
   const animate = () => {
     animationId = requestAnimationFrame((time) => {
       try {
-        if (time - lastFrameTime >= FRAME_INTERVAL) {
+        if (time - lastFrameTime >= frameInterval) {
           controls.update() // 必须调用 damping
           renderer.render(scene, camera)
           lastFrameTime = time
@@ -245,9 +309,9 @@ export function usePointCloudRenderer(container) {
   return {
     init,
     addPoints,
-    TARGET_FPS,
+    setTargetFps,
     resetPointCloud,
     dispose,
-    onResize
+    onResize,
   }
 }

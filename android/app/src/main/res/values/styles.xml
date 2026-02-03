@@ -7,12 +7,22 @@
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
+        <!-- 全局默认使用深色状态栏与导航栏来避免白色间隙 -->
+        <item name="android:statusBarColor">@color/color_bg_deep</item>
+        <item name="android:navigationBarColor">@color/color_bg_deep</item>
     </style>
 
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- 状态栏颜色与导航栏颜色设为深色背景，减少与页面不一致的视觉差异 -->
+        <item name="android:statusBarColor">@color/color_bg_deep</item>
+        <item name="android:navigationBarColor">@color/color_bg_deep</item>
+        <!-- 允许内容延伸到刘海区域（shortEdges） -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <!-- 窗口背景设置为与页面一致，避免应用启动/切换时看到白条 -->
+        <item name="android:windowBackground">@color/color_bg_deep</item>
     </style>
 
 
