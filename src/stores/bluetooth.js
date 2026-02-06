@@ -100,14 +100,26 @@ export const useBluetoothStore = defineStore('bluetooth', {
             //   console.log("每秒点数：", count)
             //   count = 0
             // }
-            const { points, errors } = this.parser.parse(dataStr)
-            points.forEach((point) => {
-              const { x, y, z } = point
-              this.appendMessage(`${x/10} ${y/10} ${z/10}`)
-            })
+            const { points, errors, tempPoints } = this.parser.parse(dataStr)
+            // console.log('points.length', points.length, 'pointempPoints.length', tempPoints.length)
+            console.log('points', JSON.stringify(points), 'temppoints', JSON.stringify(tempPoints))
+            for (let i = 0; i < tempPoints.length; i++){
+              const { x, y, z } = tempPoints[i]
+              const { yaw, pitchDeg, distanceM } = points[i]
+              this.appendMessage(
+                `${x / 10} ${y / 10} ${z / 10}  ${yaw} ${pitchDeg} ${distanceM / 10} \n`,
+              )
+            }
+            // tempPoints.forEach((tempPoint) => {
+            //   const { x, y, z } = tempPoint[i]
+            //   this.appendMessage(`${x / 10} ${y / 10} ${z / 10} `)
+            // })
+            // points.forEach((point) => {
+            //   const {  yaw, pitchDeg, distanceM } = point
+            //   this.appendMessage(`${yaw} ${pitchDeg} ${distanceM} \n`)
+            // })
             // this.connectedPoints = [...this.connectedPoints, ...points]  // 时间复杂度O(n + k) 读取旧connectedPoints大数据，新建大数据数组，在蓝牙快速回调中导致数据量变大时严重卡顿问题
             this.connectedPoints.push(...points) // 时间复杂度O(k)
-            // console.log('points', points)
             // 解决此处的数量和速率非响应式的问题，而且没有性能杀手问题
             if (errors.length > 0) {
               console.warn('Parse errors:', errors)

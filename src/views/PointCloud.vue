@@ -201,7 +201,7 @@ const saveMessages = async () => {
     const result = await bluetoothService.saveBleDataToFile(fullMessages)
     // alert(JSON.stringify(result))
     showToast(`已保存 ${result.lineCount} 行数据`)
-    bluetoothStore.clearRawMessagesForSave()
+    // bluetoothStore.clearRawMessagesForSave()
   } catch (error) {
     console.error('保存失败:', error)
     showToast('保存失败：' + (error.message || '未知错误'))

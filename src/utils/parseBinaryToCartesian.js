@@ -48,7 +48,8 @@ export class parseBinaryToCartesian {
     if (pointCount * 6 !== dataLength) return
     // console.log('点计数pointCount：', pointCount)
 
-    const points = []
+     const points = []
+     const tempPoints = []
     // 目前是单点，代码也适用后续可能的多点发送，一个点云6Byte
     for (let i = 0; i < pointCount; i++) {
         const startIndex = i * 6
@@ -63,18 +64,20 @@ export class parseBinaryToCartesian {
         // 转换为实际值（弧度 = int16_t / 1000.0）
         const yaw_rad = yaw_int16 / 1000.0
         const pitch_rad = -pitch_int16 / 1000.0 + 68 / 180 * 3.1415926
-        const distance_m = distance_u16 / 100.0
+        const distance_m = distance_u16 / 100.0  // 分米
 
         // 转换为笛卡尔坐标
-        const point = this.sphericalToCartesian(pitch_rad, yaw_rad, distance_m, 1.0)
-        points.push(point)
+      const point = this.sphericalToCartesian(pitch_rad, yaw_rad, distance_m, 1.0)
+      const tempPoint = this.sphericalToCartesian1(pitch_rad, yaw_rad, distance_m, -18, 14.1, -52.25)
+      points.push(point)
+      tempPoints.push(tempPoint)
         //console.log(point)
     }
-     return points
+     return [points, tempPoints]
    }
   // pitch: 俯仰角（从水平面向上的角度，-π/2到π/2）
   // yaw: 方位角（在水平面上的角度，-π到π）
-  // r: 距离（米）
+  // r: 距离（分米）
   // intensity: 强度
   sphericalToCartesian(pitch, yaw, r, intensity) {
     // 计算笛卡尔坐标
@@ -84,16 +87,16 @@ export class parseBinaryToCartesian {
 
     // 返回点对象，包含原始数据方便调试
     return {
-        x, y, z,
-        pitch: pitch,           // 弧度
-        yaw: yaw,               // 弧度
-        distance: r * 1000,     // 毫米
+        x, y, z,                 // 分米
+        pitch: pitch,
+        yaw: yaw,
+        distance: r * 1000,
         intensity: intensity,
 
         // 角度版本（方便查看）
         pitchDeg: pitch * 180 / Math.PI,
         yawDeg: yaw * 180 / Math.PI,
-        distanceM: r
+        distanceM: r     // 这里是分米，这里如果转成米，点云显示会很密集
     }
   }
   /**
@@ -101,6 +104,7 @@ export class parseBinaryToCartesian {
    */
   parse(data) {
     const points = []
+    const tempPoints = []
     const errors = []
     for (let i = 0; i < data.length; i++) {
         const byte = data[i]
@@ -137,8 +141,11 @@ export class parseBinaryToCartesian {
                 if (this.protocolState.packetDataIndex === this.protocolState.packetLength + 1) {
                   if (this.validateBinaryPacket(this.protocolState.packetData)) {
                     try {
-                      const point = this.parseBinaryPointData(this.protocolState.packetData)
+                      const [point, tempPoint] = this.parseBinaryPointData(
+                        this.protocolState.packetData,
+                      )
                       points.push(...point)
+                      tempPoints.push(...tempPoint)
                     } catch (err) {
                       errors.push('解析失败: ' + err.message)
                       console.log('解析失败: ' + JSON.stringify(err.message))
@@ -153,6 +160,42 @@ export class parseBinaryToCartesian {
             }
         }
     }
-    return { points, errors}
+    return { points, errors, tempPoints }
   }
+  // 将原始数据输入该函数 + dx dy dz 做一下校正保存
+  sphericalToCartesian1(pitch, yaw, r, intensity, dx = 0, dy = 0, dz = 0) {
+    // 理想点坐标
+    const x = r * Math.cos(pitch) * Math.cos(yaw);
+    const y = r * Math.sin(pitch); // 高度方向
+    const z = r * Math.cos(pitch) * Math.sin(yaw);
+
+    // 偏移量旋转补偿
+    // 先绕 x 轴（pitch），再绕 y 轴（yaw）
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+
+    // 偏移量在全局坐标系下的分量
+    const dxPrime = cosYaw * dx + sinYaw * cosPitch * dz + sinYaw * sinPitch * dy;
+    const dyPrime = -sinPitch * dz + cosPitch * dy;
+    const dzPrime = -sinYaw * dx + cosYaw * cosPitch * dz + cosYaw * sinPitch * dy;
+
+    // 修正后的点坐标
+    const xCorrected = x + dxPrime;
+    const yCorrected = y + dyPrime;
+    const zCorrected = z + dzPrime;
+
+    // 返回点对象
+    return {
+        x: xCorrected, y: yCorrected, z: zCorrected,
+        pitch: pitch,
+        yaw: yaw,
+        distance: r * 1000,
+        intensity: intensity,
+        pitchDeg: pitch * 180 / Math.PI,
+        yawDeg: yaw * 180 / Math.PI,
+        distanceM: r
+    };
+}
 }
