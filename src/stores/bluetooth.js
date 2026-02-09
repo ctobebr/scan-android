@@ -105,9 +105,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
             console.log('points', JSON.stringify(points), 'temppoints', JSON.stringify(tempPoints))
             for (let i = 0; i < tempPoints.length; i++){
               const { x, y, z } = tempPoints[i]
-              const { yaw, pitchDeg, distanceM } = points[i]
+              const { yaw, pitch, distanceM, x1, y1, z1 } = points[i]
               this.appendMessage(
-                `${x / 10} ${y / 10} ${z / 10}  ${yaw} ${pitchDeg} ${distanceM / 10} \n`,
+                `${x / 10} ${y / 10} ${z / 10}  ${yaw} ${pitch} ${distanceM / 10}  ${x1 / 10} ${y1 / 10} ${z1 / 10}\n`,
               )
             }
             // tempPoints.forEach((tempPoint) => {

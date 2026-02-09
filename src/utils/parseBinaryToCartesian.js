@@ -52,26 +52,36 @@ export class parseBinaryToCartesian {
      const tempPoints = []
     // 目前是单点，代码也适用后续可能的多点发送，一个点云6Byte
     for (let i = 0; i < pointCount; i++) {
-        const startIndex = i * 6
+      const startIndex = i * 6
 
-        // 小端序读取有符号16位整数（角度）
-        const yaw_int16 = (packetData[startIndex + 1] << 24 >> 16) | packetData[startIndex]
-        const pitch_int16 = (packetData[startIndex + 3] << 24 >> 16) | packetData[startIndex + 2]
+      // 小端序读取有符号16位整数（角度）
+      const yaw_int16 = ((packetData[startIndex + 1] << 24) >> 16) | packetData[startIndex]
+      const pitch_int16 = ((packetData[startIndex + 3] << 24) >> 16) | packetData[startIndex + 2]
 
-        // 小端序读取无符号16位整数（距离）
-        const distance_u16 = (packetData[startIndex + 5] << 8) | packetData[startIndex + 4]
+      // 小端序读取无符号16位整数（距离）
+      const distance_u16 = (packetData[startIndex + 5] << 8) | packetData[startIndex + 4]
 
-        // 转换为实际值（弧度 = int16_t / 1000.0）
-        const yaw_rad = yaw_int16 / 1000.0
-        const pitch_rad = -pitch_int16 / 1000.0 + 68 / 180 * 3.1415926
-        const distance_m = distance_u16 / 100.0  // 分米
+      // 转换为实际值（弧度 = int16_t / 1000.0）
+      const yaw_rad = yaw_int16 / 1000.0 // 弧度
+      const pitch_rad = -pitch_int16 / 1000.0 + (68 / 180) * 3.1415926 // 弧度
+      const distance_m = distance_u16 / 100.0 // 分米
+      // const pitch_rad1 = -pitch_int16 / 1000.0  //
 
-        // 转换为笛卡尔坐标
+      // 转换为笛卡尔坐标
       const point = this.sphericalToCartesian(pitch_rad, yaw_rad, distance_m, 1.0)
-      const tempPoint = this.sphericalToCartesian1(pitch_rad, yaw_rad, distance_m, -18, 14.1, -52.25)
+      // pitch 和 yaw 是 弧度（radians）
+      // distance_m 是分米 ，所以此处dy，dy，dz也传入分米单位数据
+      const tempPoint = this.sphericalToCartesian1(
+        pitch_rad,
+        yaw_rad,
+        distance_m,
+        0.18,
+        -0.141,
+        0.5225,
+      )
       points.push(point)
       tempPoints.push(tempPoint)
-        //console.log(point)
+      //console.log(point)
     }
      return [points, tempPoints]
    }
@@ -81,21 +91,24 @@ export class parseBinaryToCartesian {
   // intensity: 强度
   sphericalToCartesian(pitch, yaw, r, intensity) {
     // 计算笛卡尔坐标
-    const x = (r * Math.cos(pitch) * Math.cos(yaw))
-    const y = (r * Math.sin(pitch)) // 高度
-    const z = (r * Math.cos(pitch) * Math.sin(yaw))
-
+    const x1 = (r * Math.cos(pitch) * Math.cos(yaw))
+    const y1 = (r * Math.sin(pitch)) // 高度
+    const z1 = (r * Math.cos(pitch) * Math.sin(yaw))
+    const x = r * Math.cos(pitch) * Math.cos(yaw)
+    const y = r * Math.sin(pitch) // 高度
+    const z = r * Math.cos(pitch) * Math.sin(yaw)
     // 返回点对象，包含原始数据方便调试
     return {
-        x, y, z,                 // 分米
-        pitch: pitch,
-        yaw: yaw,
+        x1, y1, z1,       // 分米
+        x,y,z,
+        pitch: pitch,     // 弧度
+        yaw: yaw,         // 弧度
         distance: r * 1000,
         intensity: intensity,
 
-        // 角度版本（方便查看）
-        pitchDeg: pitch * 180 / Math.PI,
-        yawDeg: yaw * 180 / Math.PI,
+        // 角度版本（方便查看） => 弧度转角度  (degree * 180 / π)
+        pitchDeg: pitch * 180 / Math.PI,  // 角度
+        yawDeg: yaw * 180 / Math.PI,  // 角度
         distanceM: r     // 这里是分米，这里如果转成米，点云显示会很密集
     }
   }
@@ -188,14 +201,16 @@ export class parseBinaryToCartesian {
 
     // 返回点对象
     return {
-        x: xCorrected, y: yCorrected, z: zCorrected,
-        pitch: pitch,
-        yaw: yaw,
-        distance: r * 1000,
-        intensity: intensity,
-        pitchDeg: pitch * 180 / Math.PI,
-        yawDeg: yaw * 180 / Math.PI,
-        distanceM: r
-    };
-}
+      x: xCorrected,
+      y: yCorrected,
+      z: zCorrected,
+      pitch: pitch, // 弧度
+      yaw: yaw, // 弧度
+      distance: r * 1000,
+      intensity: intensity,
+      pitchDeg: (pitch * 180) / Math.PI, // 角度
+      yawDeg: (yaw * 180) / Math.PI, // 角度
+      distanceM: r,
+    }
+  }
 }
