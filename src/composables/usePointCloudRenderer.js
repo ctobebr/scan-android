@@ -199,7 +199,10 @@ export function usePointCloudRenderer(container) {
       if (!pointsGeometry || newPoints.length === 0) return
 
       if (currentPointCount + newPoints.length > MAX_POINTS) {
-        showToast(`点云数量已达上限  ${MAX_POINTS} 点`)
+        console.warn(
+          `[Renderer] Point limit reached: current=${currentPointCount}, incoming=${newPoints.length}, max=${MAX_POINTS}`,
+        )
+        showToast(`点云数量已达上限 ${MAX_POINTS} 点`)
         return
       }
 
@@ -238,19 +241,25 @@ export function usePointCloudRenderer(container) {
 
       // 6. 只渲染有效点
       pointsGeometry.setDrawRange(0, currentPointCount)
+
+      // 7. 调试日志
+      // if (process.env.NODE_ENV === 'development' && newPoints.length > 0) {
+      //   console.log(
+      //     `[Renderer] Added ${newPoints.length} points. Total: ${currentPointCount}, Y range: [${globalMinY.toFixed(2)}, ${globalMaxY.toFixed(2)}]`,
+      //   )
+      // }
     } catch (err) {
-      console.error('addPoints 失败:', err)
-      showToast('点云数据异常')
+      console.error('[Renderer] addPoints failed:', err)
+      showToast('点云数据异常，请重试')
     }
   }
 
-  // === 修改：重置只改 drawRange，不重建 buffer ===
   const resetPointCloud = () => {
     currentPointCount = 0
     globalMinY = Infinity
     globalMaxY = -Infinity
     pointsGeometry.setDrawRange(0, 0) // 关键：不渲染任何点
-    // 不要调用 setAttribute！
+    console.log('[Renderer] Point cloud reset')
   }
 
   // 限制帧率（默认为 30 FPS，以保持显示平滑）

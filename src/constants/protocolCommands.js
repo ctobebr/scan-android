@@ -1,0 +1,52 @@
+/**
+ * 协议帧结构
+ *
+ * [字节位置] [字段名称]       [大小] [说明]
+ *   0       帧头(高字节)     1字节  固定为 0xAA
+ *   1       帧头(低字节)     1字节  固定为 0x55
+ *   2       命令字           1字节  标识命令类型（见下表）
+ *   3       数据长度         1字节  数据区字节数（不含校验和）
+ *   4~N+3   数据区          N字节  根据命令字内容，数据不同
+ *   N+4     校验和           1字节  校验和，见下说明
+ *
+ * 帧总长度 = 5 + N 字节
+ *
+ * 校验和计算：
+ *   只对 CMD + Length + Data 三部分求和，取低 8 位
+ */
+/**
+ * 协议命令字常量
+ * 该文件集中定义了所有蓝牙协议相关的命令字，
+ * 便于在项目各处统一引用，避免硬编码。
+ * 分类说明：
+ * - CONTROL_COMMANDS: 上位机发送给设备的控制指令
+ * - DEVICE_DATA_COMMANDS: 设备发送给上位机的数据指令
+ */
+// ========== 协议常量 ==========
+export const PROTOCOL_HEADER_HIGH = 0xaa
+export const PROTOCOL_HEADER_LOW = 0x55
+export const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e'
+export const NUS_WRITE_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e' // 手机 → 设备
+export const NUS_NOTIFY_CHAR_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e' // 设备 → 手机
+// 上位机 -> 设备 的控制命令
+export const CONTROL_COMMANDS = Object.freeze({
+  CMD_START: 0x01, // 开始自动任务 data:N/A
+  CMD_STOP: 0x02, // 停止自动任务 data:N/A
+  CMD_ROTATE_TO_TARGET: 0x03, // 转动到目标点
+
+  CMD_SET_CALIB_PARAM: 0x11, // 设置标定参数
+  CMD_SET_ROTATE_SPEED: 0x12, // 设置转动速度
+  CMD_SET_SCAN_CYCLES: 0x13, // 设置扫描圈数
+  CMD_SET_PITCH_LIMIT: 0x14, // 设置俯仰角上下限
+
+  CMD_READ_CALIB_PARAM: 0x31, // 读取标定参数
+  CMD_READ_ROTATE_SPEED: 0x32, // 读取转动速度
+  CMD_READ_SCAN_CYCLES: 0x33, // 读取扫描圈数
+  CMD_READ_PITCH_LIMIT: 0x34, // 读取俯仰角上下限
+
+  CMD_CTRL_CAMERA: 0x81, // 控制上位机拍照（附带角度值回传）data{float:yaw,float:pitch}单位：弧度
+})
+export const DEVICE_DATA_COMMANDS = Object.freeze({
+  CMD_OUTPUT_XYZ: 0xa1, // 输出XYZ值 (下行，设备发给上位机) - 用于接收点云数据
+  CMD_OUTPUT_POLAR: 0xa2, // 输出极坐标值 (下行，设备发给上位机)
+})

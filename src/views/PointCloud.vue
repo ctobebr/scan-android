@@ -8,27 +8,31 @@
           <img src="@/assets/img/back.png" alt="返回" />
         </button>
         <!-- <div class="point-cloud-controls"> -->
-          <!-- <button class="control-btn" @click="startDataStream">开始采集</button> -->
-          <!-- 暂停采集按钮已注释掉 -->
-          <!-- <button class="control-btn" @click="stopDataStream">暂停采集</button> -->
-          <!-- <button class="control-btn" @click="clearPointCloudData">清空点云</button> -->
+        <!-- <button class="control-btn" @click="startDataStream">开始采集</button> -->
+        <!-- 暂停采集按钮已注释掉 -->
+        <!-- <button class="control-btn" @click="stopDataStream">暂停采集</button> -->
+        <!-- <button class="control-btn" @click="clearPointCloudData">清空点云</button> -->
         <!-- </div> -->
         <!-- 右侧大圆形捕获按钮（与示例视觉位置一致） -->
-    <button @click="saveMessages" class="save-btn" :disabled="displayedMessages.length === 0 || saving">
-      {{ saving ? '保存中...' : '保存' }}
-    </button>
+        <button
+          @click="saveMessages"
+          class="save-btn"
+          :disabled="displayedMessages.length === 0 || saving"
+        >
+          {{ saving ? '保存中...' : '保存' }}
+        </button>
         <button class="capture-btn" @click="startDataStream" aria-label="Capture"></button>
         <div class="data-stats">
           <div class="stat-item">
             <span>点云数量</span>
             <span id="point-count">{{ pointCount }}</span>
           </div>
-          <!-- <div class="stat-item">
+          <div class="stat-item">
             <span>点云速率</span>
             <span id="data-rate">
               {{ !hasStarted ? '0 点/秒' : isCollecting ? ` ${pointsPerSecond} 点/秒` : '已暂停' }}
             </span>
-          </div> -->
+          </div>
           <!-- <div class="stat-item">
             <span>帧率</span>
             <span id="storage-status">{{ frameRate }}</span>
@@ -56,9 +60,7 @@ const router = useRouter()
 const goBack = () => {
   router.back()
 }
-const {
-  displayedMessages
-} = storeToRefs(bluetoothStore)
+const { displayedMessages } = storeToRefs(bluetoothStore)
 const container = ref(null)
 let renderer = null
 let isRendererReady = ref(false)
@@ -85,7 +87,9 @@ async function lockToLandscape() {
 }
 async function unlockOrientation() {
   try {
-    await ScreenOrientation.unlock()
+    await ScreenOrientation.unlock({
+      orientation: 'portrait', // 强制设置为竖屏
+    })
     // console.log('Screen orientation unlocked.')
   } catch (error) {
     console.warn('Failed to unlock screen orientation:', error)
@@ -161,7 +165,7 @@ onUnmounted(async () => {
 
   // 4. 显式置空引用，帮助 GC
   renderer = null
-
+  bluetoothStore.handleSendEnd()
   // 5.
   await unlockOrientation()
 })
@@ -169,11 +173,13 @@ onUnmounted(async () => {
 function startDataStream() {
   isCollecting.value = true
   hasStarted.value = true
-  // 切换到高帧率以提高采集和渲染流畅度
-  if (renderer?.setTargetFps) {
-    renderer.setTargetFps(30)
-    frameRate.value = 30
-  }
+  bluetoothStore.handleSendStart()
+  console.log('startDataStream click', '发送了开始指令，现在开始采集')
+  // 切换帧率可以提高采集和渲染流畅度
+  // if (renderer?.setTargetFps) {
+  //   renderer.setTargetFps(30)
+  //   frameRate.value = 30
+  // }
 }
 // 停止数据流
 // function stopDataStream() {
@@ -227,11 +233,14 @@ watchEffect(() => {
     if (newPoints.length === 0) return
 
     renderer.addPoints(newPoints)
-    pointCount.value += newPoints.length //  只加本次新增数量
-    // console.log(' 添加新点:',JSON.stringify(newPoints), newPoints.length, '累计:', pointCount.value)
+    pointCount.value += newPoints.length
+
+    // if (process.env.NODE_ENV === 'development') {
+    //   console.log(`[PointCloud] Rendered ${newPoints.length} points, total: ${pointCount.value}`)
+    // }
 
     // ===== 计算 PPS（每秒点数）=====
-    const now = performance.now() // 高精度时间（毫秒，带小数）
+    const now = performance.now()
 
     // 首次初始化
     if (lastReportTime.value === 0) {
@@ -248,13 +257,18 @@ watchEffect(() => {
 
       pointsPerSecond.value = pps
 
-      // 更新“上次”状态
+      // 更新"上次"状态
       lastReportTime.value = now
       lastReportPointCount.value = pointCount.value
+
+      // if (process.env.NODE_ENV === 'development') {
+      //   console.log(`[PointCloud] PPS: ${pps}, Total points: ${pointCount.value}`)
+      // }
     }
   } catch (err) {
-    console.error('点云渲染异常，watchEffect 已中断！', err)
-    showToast('重启应用')
+    console.error('[PointCloud] watchEffect failed:', err)
+    isCollecting.value = false
+    showToast('点云渲染异常，已自动停止采集')
   }
 })
 </script>
@@ -367,8 +381,8 @@ watchEffect(() => {
   right: calc(36px + env(safe-area-inset-right, 0px));
   top: 50%;
   transform: translateY(-50%);
-  width: 96px;
-  height: 96px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   /* 移除边框 */
   border: none;
@@ -488,7 +502,7 @@ watchEffect(() => {
   height: 48px;
   border-radius: 8px;
   font-size: 8px;
-  border:none;
+  border: none;
   z-index: 11;
   pointer-events: auto;
 }

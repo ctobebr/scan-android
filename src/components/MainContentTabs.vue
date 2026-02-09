@@ -159,16 +159,13 @@ const switchTo = (tabId) => {
   activeTab.value = tabId
 }
 
-// 连接状态管理
-const connectionStatus = ref('disconnected'); // 'disconnected', 'connected', 'failed'
-
 // 获取连接状态图标路径
 const getConnectIconSrc = () => {
-  switch (connectionStatus.value) {
-    case 'connected':
+  switch (connectingStatus.value) {
+    case 2:
       return new URL('@/assets/img/connect_suc.png', import.meta.url).href; // 连接成功
-    case 'failed':
-      return new URL('@/assets/img/connect_fail.png', import.meta.url).href; // 连接失败
+    // case 'failed':
+    //   return new URL('@/assets/img/connect_fail.png', import.meta.url).href; // 连接失败
     default:
       return new URL('@/assets/img/connect.png', import.meta.url).href; // 未连接
   }
@@ -191,15 +188,7 @@ const closeConnectionDialog = () => {
   showConnectionDialog.value = false
 }
 
-// 点击某个设备进行连接
-// const connectToDevice = (deviceId) => {
-//   console.log('Connecting to device:', deviceId)
-//   // 模拟连接过程
-//   setTimeout(() => {
-//     connectionStatus.value = Math.random() > 0.5 ? 'connected' : 'failed';
-//     closeConnectionDialog()
-//   }, 1000);
-// }
+
 
 // const handleRefresh = () => {
 //   console.log('handleRefresh device')
