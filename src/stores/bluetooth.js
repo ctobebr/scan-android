@@ -105,9 +105,12 @@ export const useBluetoothStore = defineStore('bluetooth', {
             console.log('points', JSON.stringify(points), 'temppoints', JSON.stringify(tempPoints))
             for (let i = 0; i < tempPoints.length; i++){
               const { x, y, z } = tempPoints[i]
-              const { yaw, pitch, distanceM, x1, y1, z1 } = points[i]
+              // const { yaw, pitch, distanceM, x1, y1, z1 } = points[i]
+              // this.appendMessage(
+              //   `${x / 10} ${y / 10} ${z / 10}  ${yaw} ${pitch} ${distanceM / 10}  ${x1 / 10} ${y1 / 10} ${z1 / 10}\n`,
+              // )
               this.appendMessage(
-                `${x / 10} ${y / 10} ${z / 10}  ${yaw} ${pitch} ${distanceM / 10}  ${x1 / 10} ${y1 / 10} ${z1 / 10}\n`,
+                `${x / 10} ${y / 10} ${z / 10} \n`,
               )
             }
             // tempPoints.forEach((tempPoint) => {
@@ -119,7 +122,8 @@ export const useBluetoothStore = defineStore('bluetooth', {
             //   this.appendMessage(`${yaw} ${pitchDeg} ${distanceM} \n`)
             // })
             // this.connectedPoints = [...this.connectedPoints, ...points]  // 时间复杂度O(n + k) 读取旧connectedPoints大数据，新建大数据数组，在蓝牙快速回调中导致数据量变大时严重卡顿问题
-            this.connectedPoints.push(...points) // 时间复杂度O(k)
+            // this.connectedPoints.push(...points) // 时间复杂度O(k)
+            this.connectedPoints.push(...tempPoints)  // 使用校准后的数据渲染
             // 解决此处的数量和速率非响应式的问题，而且没有性能杀手问题
             if (errors.length > 0) {
               console.warn('Parse errors:', errors)
