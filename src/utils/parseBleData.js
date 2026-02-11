@@ -14,8 +14,10 @@
  * 校验和计算：
  *   只对 CMD + Length + Data 三部分求和，取低 8 位
  */
-import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from "@/constants/protocolCommands"
-export class parseBinaryToCartesian {
+import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from '@/constants/protocolCommands'
+// import { bluetoothService } from '@/services/bluetoothService'
+import cameraHelper from '@/utils/cameraHelper'
+export class parseBleData {
   constructor() {
     this.protocolState = {
       buffer: new Uint8Array(512), // 增大缓冲区
@@ -27,7 +29,12 @@ export class parseBinaryToCartesian {
       packetData: null,
       checksum: 0, // 校验和需要包含 Cmd, Len, Data
       accumulatedPoints: [], // 用于累积解析出的点
+      photoSession: {
+        active: false,
+        previewStarted: false,
+      },
     }
+    this.cameraReadyPromise = null
   }
   // 验证数据包
   validateBinaryPacket(receivedChecksum) {
@@ -47,18 +54,28 @@ export class parseBinaryToCartesian {
   }
 
   /**
+   * 在这里根据命令字处理下位机传过来的数据包（开始和结束是上位机传给下位机不在此处）
    * 处理协议数据包
    * @param {number} cmd - 命令字节 (0xA1: CMD_POINT_DATA)
    * @param {Uint8Array} data - 数据区内容
    */
   handleProtocolPacket(cmd, data) {
+    // if (typeof cmd === 'number') {
+    //   console.log('cmd::', cmd.toString(16).padStart(2, '0'))
+    // } else {
+    //   console.log('cmd::', cmd)
+    // }
     // 使用对象映射查找处理器
     const commandHandlers = {
-      [CONTROL_COMMANDS.CMD_START]: this._handleStart,
+      // [CONTROL_COMMANDS.CMD_START]: this._handleStart,
       [CONTROL_COMMANDS.CMD_STOP]: this._handleStop,
       [DEVICE_DATA_COMMANDS.CMD_OUTPUT_XYZ]: this._handlePointData,
       [DEVICE_DATA_COMMANDS.CMD_OUTPUT_POLAR]: this._handleRawPointData,
-      // [CONTROL_COMMANDS.CMD_CTRL_CAMERA]: this._handleTakePhoto,
+
+      [CONTROL_COMMANDS.CMD_CTRL_CAMERA_START]: this._handleStartTakePhoto,
+      [CONTROL_COMMANDS.CMD_CTRL_CAMERA]: this._handleTakePhoto,
+      [CONTROL_COMMANDS.CMD_CTRL_CAMERA_COMPLETE]: this._handleEndTakePhoto,
+
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
       // [CONTROL_COMMANDS.CMD_GET_POS]: this._handleGetPos,
       // [CONTROL_COMMANDS.CMD_SET_HOME]: this._handleSetHome,
@@ -70,30 +87,8 @@ export class parseBinaryToCartesian {
       // 调用对应的处理器
       handler.call(this, data)
     } else {
-      console.log(`[Protocol] Received unknown command: 0x ${cmd.toString(16).padStart(2, '0')}`)
+      console.log(` Received unknown command: 0x ${cmd.toString(16).padStart(2, '0')}`)
     }
-    // CMD_POINT_DATA = 0xA1：发送点云数据
-    // if (cmd === 0xa1) {
-    //   if (data && data.length > 0) {
-    //     // 数据长度必须是 6 的倍数（每个点占 6 字节）
-    //     if (data.length % 6 === 0) {
-    //       // 解析笛卡尔坐标 (XYZ) 数据
-    //       const points = this.parseBinaryPointDataXYZ(data)
-    //       if (points && points.length > 0) {
-    //         this.protocolState.accumulatedPoints.push(...points)
-    //         // if (process.env.NODE_ENV === 'development') {
-    //         //   console.log(`[Protocol] Parsed ${points.length} points from CMD_POINT_DATA`)
-    //         // }
-    //       }
-    //     } else {
-    //       console.warn(
-    //         `[Protocol] CMD_POINT_DATA (0xA1) has invalid data length: ${data.length}. Expected multiple of 6.`,
-    //       )
-    //     }
-    //   }
-    // } else {
-    //   console.log(`[Protocol] Received unknown command: 0x${cmd.toString(16).padStart(2, '0')}`)
-    // }
   }
 
   /**
@@ -144,6 +139,7 @@ export class parseBinaryToCartesian {
 
         const point = { x, y, z }
         points.push(point)
+        // console.log('parseBinaryPointDataXYZ', '处理直角系坐标结束')
       } catch (err) {
         console.error(`[Parser] Failed to parse point ${i}:`, err)
         return null
@@ -169,7 +165,7 @@ export class parseBinaryToCartesian {
       return null
     }
 
-     const points = []
+    const points = []
     // 目前是单点，代码也适用后续可能的多点发送，一个点云6Byte
     for (let i = 0; i < pointCount; i++) {
       const startIndex = i * 6
@@ -195,14 +191,15 @@ export class parseBinaryToCartesian {
         pitch_rad,
         yaw_rad,
         distance_m,
+        1.0,
         0.18,
         -0.141,
         0.5225,
       )
       points.push(point)
     }
-     return points
-   }
+    return points
+  }
   // pitch: 俯仰角（从水平面向上的角度，-π/2到π/2）
   // yaw: 方位角（在水平面上的角度，-π到π）
   // r: 距离（分米）
@@ -238,9 +235,9 @@ export class parseBinaryToCartesian {
    * 1. 逐字节解析协议帧（状态机）
    * 2. 完整帧校验成功时，调用 handleProtocolPacket 处理
    * 3. handleProtocolPacket 将解析的点累积到内部缓冲
-   * 4. parse() 返回累积的点，并清空内部缓冲
+   * 4. parse() 返回累积的点，并清空内部缓冲==============目前因为每帧只有一个点所以不会累积点，都是一个点返回，代码对于后续一帧多点具有可扩展性
    *
-   * 这种设计与 bluetooth.js 的累积渲染机制相匹配：
+   * bluetooth.js 中实现累积渲染：
    * parse() → accumulationBuffer → flushAccumulatedPoints() → renderer
    */
   parse(data) {
@@ -316,12 +313,21 @@ export class parseBinaryToCartesian {
               // 校验成功，处理协议数据包
               this.handleProtocolPacket(this.protocolState.cmd, this.protocolState.packetData)
             } catch (err) {
-              const errMsg = `[Parser] Failed to handle packet (cmd=0x${this.protocolState.cmd.toString(16)}): ${err.message}`
+              let cmdStr =
+                typeof this.protocolState.cmd === 'number'
+                  ? '0x' + this.protocolState.cmd.toString(16)
+                  : String(this.protocolState.cmd)
+              const errMsg = `[Parser] Failed to handle packet (cmd=${cmdStr}): ${err && err.message ? err.message : err}`
               errors.push(errMsg)
               console.error(errMsg, err)
             }
           } else {
-            const errMsg = `[Parser] Checksum mismatch: calculated=0x${(this.protocolState.checksum & 0xff).toString(16)}, received=0x${byte.toString(16)}`
+            let calcStr =
+              typeof (this.protocolState.checksum & 0xff) === 'number'
+                ? (this.protocolState.checksum & 0xff).toString(16)
+                : String(this.protocolState.checksum & 0xff)
+            let byteStr = typeof byte === 'number' ? byte.toString(16) : String(byte)
+            const errMsg = `[Parser] Checksum mismatch: calculated=0x${calcStr}, received=0x${byteStr}`
             errors.push(errMsg)
             console.warn(errMsg)
           }
@@ -331,7 +337,7 @@ export class parseBinaryToCartesian {
       }
     }
 
-    // 关键改进：返回当前批次内累积的点（而非空数组）
+    // 返回当前批次内累积的点（目前只有一个点）
     // 这样 bluetooth.js 可以直接使用 parse() 的返回值
     const points = this.protocolState.accumulatedPoints.slice()
     this.protocolState.accumulatedPoints = [] // 清空内部缓冲
@@ -339,51 +345,187 @@ export class parseBinaryToCartesian {
     return { points, errors }
   }
 
-  _handleStart(data) {
-    // TODO: 实现启动扫描逻辑
-    console.log('_handleStart成功')
-    console.log('[Protocol] CMD_START (0x' + CONTROL_COMMANDS.CMD_START.toString(16) + ') received')
-  }
+  // _handleStart(data) {
+  //   // TODO: 实现启动扫描逻辑
+  //   console.log('_handleStart成功')
+  //   console.log(' CMD_START (0x' + CONTROL_COMMANDS.CMD_START.toString(16) + ') received')
+  // }
 
   _handleStop(data) {
     // TODO: 实现停止扫描逻辑
-    console.log('[Protocol] CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
+    console.log(' CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
   }
 
-  // _handleTakePhoto(data) {
-  //   // TODO: 实现拍照逻辑
-  //   console.log(
-  //     '[Protocol] CMD_TAKE_PHOTO (0x' +
-  //       CONTROL_COMMANDS.CMD_TAKE_PHOTO.toString(16) +
-  //       ') received',
-  //   )
-  // }
+  _handleStartTakePhoto() {
+    // 收到开始拍照命令：进入拍照预览页面并启动相机预览
+    if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
+      return // 已启动，避免重复
+    }
+    console.log('收到开始拍照指令_handleStartTakePhoto')
+    this.protocolState.photoSession.active = true
+    this.protocolState.photoSession.previewStarted = false
 
+    // 创建一个新的 Promise，让后续拍照可以等待
+    this.cameraReadyPromise = cameraHelper
+      .startPreview('cameraPreview')
+      .then((ok) => {
+        // 仅在仍处于拍照会话时把 previewStarted 置为 true，避免 race 导致在已退出时仍认为相机运行
+        if (this.protocolState.photoSession.active) {
+          if (ok) {
+            this.protocolState.photoSession.previewStarted = true
+            console.log('相机预览启动成功')
+          } else {
+            console.warn(' 相机预览启动失败')
+            this.protocolState.photoSession.previewStarted = false
+          }
+        } else {
+          // 如果会话已被取消，确保立即停止预览（幂等）
+          if (ok) {
+            cameraHelper.stopPreview().catch((e) => console.warn('stopPreview after canceled session failed', e))
+          }
+        }
+        return ok
+      })
+      .catch((err) => {
+        console.error('相机预览启动异常:', err)
+        this.protocolState.photoSession.previewStarted = false
+        throw err
+      })
+    //   cameraHelper
+    //     .startPreview('cameraPreview')
+    //     .then((ok) => {
+    //       if (ok) {
+    //         this.protocolState.photoSession.previewStarted = true
+    //         console.log('进入相机预览页面')
+    //       } else {
+    //         console.warn(' Camera preview could not be started')
+    //       }
+    //     })
+    //     .catch((err) => {
+    //       console.error('进入相机预览页面失败:', err)
+    //     })
+    // } catch (err) {
+    //   console.error(' _handleStartTakePhoto 错误:', err)
+    // }
+  }
+
+  async _handleTakePhoto(data) {
+    // 拍照命令：解析下位机发送的角度并拍照保存
+    try {
+      const meta = this.parseBinaryTakePhotoData(data)
+      if (!meta) {
+        console.warn('_handleTakePhoto: 无效的拍照数据')
+        return
+      }
+
+      // 生成文件名：时间戳_俯仰_方位（保留两位小数）
+      const timestamp = Date.now()
+      const yawStr = meta.yawDeg !== undefined ? meta.yawDeg.toFixed(2) : meta.yawRaw
+      const pitchStr = meta.pitchDeg !== undefined ? meta.pitchDeg.toFixed(2) : meta.pitchRaw
+      const fileBaseName = `${timestamp}_${pitchStr}_${yawStr}`
+
+      // 如果不在拍照会话中，启动会话
+      if (!this.protocolState.photoSession.active) {
+        console.warn('收到拍照命令但未处于拍照会话，自动进入预览')
+        this._handleStartTakePhoto()
+      }
+
+      let cameraReady = false
+      if (this.cameraReadyPromise) {
+        try {
+          cameraReady = await this.cameraReadyPromise
+        } catch (e) {
+          console.warn('等待相机就绪时出错:', e)
+          cameraReady = false
+        }
+      }
+
+      if (!cameraReady) {
+        console.warn('相机未就绪，跳过本次拍照')
+        return
+      }
+
+      // 触发拍照并保存（CameraPreview 或回退到 bluetoothService）
+      await cameraHelper.captureAndSave(fileBaseName)
+    } catch (err) {
+      console.error('_handleTakePhoto 错误:', err)
+    }
+    console.log(
+      ' CMD_CTRL_CAMERA (0x' +
+        CONTROL_COMMANDS.CMD_CTRL_CAMERA.toString(16) +
+        ') received',
+    )
+  }
+  _handleEndTakePhoto() {
+    // 结束拍照，停止预览并退出相机页面
+    try {
+      this.protocolState.photoSession.active = false
+      if (this.protocolState.photoSession.previewStarted) {
+        cameraHelper.stopPreview().catch((e) => console.warn('stopPreview failed', e))
+        this.protocolState.photoSession.previewStarted = false
+      }
+      this.cameraReadyPromise = null
+      // 不跳转页面，仅停止预览，回到点云视图
+      console.log('[_handleEndTakePhoto  结束拍照退出相机预览页面')
+    } catch (err) {
+      console.error(' _handleEndTakePhoto 错误:', err)
+    }
+  }
+
+  // 解析下位机发送的拍照数据（uint16 小端序）
+  parseBinaryTakePhotoData(packetData) {
+    if (!packetData || packetData.length < 4) {
+      console.warn('[Parser] parseBinaryTakePhotoData: 数据长度不足')
+      return null
+    }
+    // 创建 DataView（默认大端，需显式指定小端）
+    const view = new DataView(packetData.buffer, packetData.byteOffset, packetData.byteLength)
+
+    // 读取两个小端序的 int16（有符号 16 位整数）
+    const yawRaw = view.getInt16(0, true) // true 表示小端序
+    const pitchRaw = view.getInt16(2, true)
+
+    // 按照既有代码惯例，下位机传角度为弧度*1000（int16/int16），这里假设为弧度*1000
+    const yawRad = yawRaw / 1000.0
+    const pitchRad = pitchRaw / 1000.0
+
+    const yawDeg = (yawRad * 180) / Math.PI
+    const pitchDeg = (pitchRad * 180) / Math.PI
+
+    return {
+      yawRaw,
+      pitchRaw,
+      yawRad,
+      pitchRad,
+      yawDeg,
+      pitchDeg,
+    }
+  }
   // _handleSetSpeed(data) {
   //   // TODO: 实现设置速度逻辑
   //   console.log(
-  //     '[Protocol] CMD_SET_SPEED (0x' + CONTROL_COMMANDS.CMD_SET_SPEED.toString(16) + ') received',
+  //     ' CMD_SET_SPEED (0x' + CONTROL_COMMANDS.CMD_SET_SPEED.toString(16) + ') received',
   //   )
   // }
 
   // _handleGetPos(data) {
   //   // TODO: 实现查询位置逻辑
   //   console.log(
-  //     '[Protocol] CMD_GET_POS (0x' + CONTROL_COMMANDS.CMD_GET_POS.toString(16) + ') received',
+  //     ' CMD_GET_POS (0x' + CONTROL_COMMANDS.CMD_GET_POS.toString(16) + ') received',
   //   )
   // }
 
   // _handleSetHome(data) {
   //   // TODO: 实现设置零点逻辑
   //   console.log(
-  //     '[Protocol] CMD_SET_HOME (0x' + CONTROL_COMMANDS.CMD_SET_HOME.toString(16) + ') received',
+  //     ' CMD_SET_HOME (0x' + CONTROL_COMMANDS.CMD_SET_HOME.toString(16) + ') received',
   //   )
   // }
 
   // _handleGetStatus(data) {
   //   // TODO: 实现查询状态逻辑
   //   console.log(
-  //     '[Protocol] CMD_GET_STATUS (0x' +
+  //     ' CMD_GET_STATUS (0x' +
   //       CONTROL_COMMANDS.CMD_GET_STATUS.toString(16) +
   //       ') received',
   //   )
@@ -392,11 +534,16 @@ export class parseBinaryToCartesian {
   // _handleSetAccel(data) {
   //   // TODO: 实现设置加速度逻辑
   //   console.log(
-  //     '[Protocol] CMD_SET_ACCEL (0x' + CONTROL_COMMANDS.CMD_SET_ACCEL.toString(16) + ') received',
+  //     ' CMD_SET_ACCEL (0x' + CONTROL_COMMANDS.CMD_SET_ACCEL.toString(16) + ') received',
   //   )
   // }
-
+  // 传递的xyz坐标是毫米单位
   _handlePointData(data) {
+    // 如果处于拍照会话，忽略点云数据
+    if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
+      console.log('处于拍照会话，忽略点云数据')
+      return
+    }
     if (data && data.length > 0) {
       // 数据长度必须是 6 的倍数（每个点占 6 字节）
       if (data.length % 6 === 0) {
@@ -405,16 +552,21 @@ export class parseBinaryToCartesian {
         if (points && points.length > 0) {
           this.protocolState.accumulatedPoints.push(...points)
           // if (process.env.NODE_ENV === 'development') {
-          // console.log(`[Protocol] Parsed ${points.length} points from CMD_POINT_DATA`)
+          // console.log(` Parsed ${points.length} points from CMD_POINT_DATA`)
         } else {
           console.warn(
-            `[Protocol] CMD_POINT_DATA (0x ${CONTROL_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
+            ` CMD_POINT_DATA (0x ${CONTROL_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
           )
         }
       }
     }
   }
   _handleRawPointData(data) {
+    // 如果处于拍照会话，忽略点云数据
+    if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
+      console.log('处于拍照会话，忽略点云数据')
+      return
+    }
     if (data && data.length > 0) {
       // 数据长度必须是 6 的倍数（每个点占 6 字节）
       if (data.length % 6 === 0) {
@@ -423,10 +575,10 @@ export class parseBinaryToCartesian {
         if (points && points.length > 0) {
           this.protocolState.accumulatedPoints.push(...points)
           // if (process.env.NODE_ENV === 'development') {
-          // console.log(`[Protocol] Parsed ${points.length} points from CMD_POINT_DATA`)
+          // console.log(` Parsed ${points.length} points from CMD_POINT_DATA`)
         } else {
           console.warn(
-            `[Protocol] CMD_POINT_DATA (0x ${CONTROL_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
+            ` CMD_POINT_DATA (0x ${CONTROL_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
           )
         }
       }
@@ -435,26 +587,26 @@ export class parseBinaryToCartesian {
   // 将原始数据输入该函数 + dx dy dz 做一下校正保存
   sphericalToCartesian1(pitch, yaw, r, intensity, dx = 0, dy = 0, dz = 0) {
     // 理想点坐标
-    const x = r * Math.cos(pitch) * Math.cos(yaw);
-    const y = r * Math.sin(pitch); // 高度方向
-    const z = r * Math.cos(pitch) * Math.sin(yaw);
+    const x = r * Math.cos(pitch) * Math.cos(yaw)
+    const y = r * Math.sin(pitch) // 高度方向
+    const z = r * Math.cos(pitch) * Math.sin(yaw)
 
     // 偏移量旋转补偿
     // 先绕 x 轴（pitch），再绕 y 轴（yaw）
-    const cosPitch = Math.cos(pitch);
-    const sinPitch = Math.sin(pitch);
-    const cosYaw = Math.cos(yaw);
-    const sinYaw = Math.sin(yaw);
+    const cosPitch = Math.cos(pitch)
+    const sinPitch = Math.sin(pitch)
+    const cosYaw = Math.cos(yaw)
+    const sinYaw = Math.sin(yaw)
 
     // 偏移量在全局坐标系下的分量
-    const dxPrime = cosYaw * dx + sinYaw * cosPitch * dz + sinYaw * sinPitch * dy;
-    const dyPrime = -sinPitch * dz + cosPitch * dy;
-    const dzPrime = -sinYaw * dx + cosYaw * cosPitch * dz + cosYaw * sinPitch * dy;
+    const dxPrime = cosYaw * dx + sinYaw * cosPitch * dz + sinYaw * sinPitch * dy
+    const dyPrime = -sinPitch * dz + cosPitch * dy
+    const dzPrime = -sinYaw * dx + cosYaw * cosPitch * dz + cosYaw * sinPitch * dy
 
     // 修正后的点坐标
-    const xCorrected = x + dxPrime;
-    const yCorrected = y + dyPrime;
-    const zCorrected = z + dzPrime;
+    const xCorrected = x + dxPrime
+    const yCorrected = y + dyPrime
+    const zCorrected = z + dzPrime
 
     // 返回点对象
     return {

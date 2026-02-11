@@ -41,10 +41,12 @@ export const CONTROL_COMMANDS = Object.freeze({
 
   CMD_READ_CALIB_PARAM: 0x31, // 读取标定参数
   CMD_READ_ROTATE_SPEED: 0x32, // 读取转动速度
-  CMD_READ_SCAN_CYCLES: 0x33, // 读取扫描圈数
+  CMD_READ_SCAN_CYCLES: 0x33, // 读取扫描圈数读取扫描时间 data{uint16:秒}
   CMD_READ_PITCH_LIMIT: 0x34, // 读取俯仰角上下限
 
-  CMD_CTRL_CAMERA: 0x81, // 控制上位机拍照（附带角度值回传）data{float:yaw,float:pitch}单位：弧度
+  CMD_CTRL_CAMERA: 0x81, // 控制上位机拍照（附带角度值回传）data{int:yaw,int:pitch}单位：弧度
+  CMD_CTRL_CAMERA_COMPLETE: 0x82,  // 自动拍摄任务完成
+  CMD_CTRL_CAMERA_START: 0x83  // 开始自动拍摄任务
 })
 export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_OUTPUT_XYZ: 0xa1, // 输出XYZ值 (下行，设备发给上位机) - 用于接收点云数据

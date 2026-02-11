@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onActivated, defineOptions } from 'vue'
 import ProjectList from './projects/ProjectList.vue' // 导入组件
 import FileList from './files/FileList.vue' // 导入组件
 // import { bluetoothService } from '@/services/bluetoothService'
@@ -100,7 +100,7 @@ import { showToast } from '@/utils/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { defineOptions } from 'vue'
+import { lockToPortrait } from '@/utils/screen'
 defineOptions({
   name: 'MainContentTabs'
 })
@@ -118,9 +118,12 @@ const {
 const filteredDevices = computed(() => {
   return devices.value.filter(device => device.name !== "N/A")
 })
-
-onMounted(() => {
+onMounted(async() => {
+  await lockToPortrait()
   bluetoothStore.autoScanOnEnter()
+})
+onActivated(async () => {
+ await lockToPortrait()
 })
 const handleStartRecord = () => {
   if (connectingStatus.value != 2) {

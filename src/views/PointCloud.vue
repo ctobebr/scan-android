@@ -2,6 +2,8 @@
   <div class="point-cloud-page">
     <div class="fullscreen-bg" aria-hidden="true"></div>
     <div ref="container" class="three-container">
+      <!-- 摄像头预览容器（供 CameraPreview.attach 使用） -->
+      <div id="cameraPreview" class="camera-preview-overlay"></div>
       <!-- 将按钮和统计信息放在 three-container 内部 -->
       <div class="overlay-controls">
         <button class="back-btn" @click="goBack" aria-label="Back">
@@ -27,12 +29,12 @@
             <span>点云数量</span>
             <span id="point-count">{{ pointCount }}</span>
           </div>
-          <div class="stat-item">
+          <!-- <div class="stat-item">
             <span>点云速率</span>
             <span id="data-rate">
               {{ !hasStarted ? '0 点/秒' : isCollecting ? ` ${pointsPerSecond} 点/秒` : '已暂停' }}
             </span>
-          </div>
+          </div> -->
           <!-- <div class="stat-item">
             <span>帧率</span>
             <span id="storage-status">{{ frameRate }}</span>
@@ -44,17 +46,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watchEffect } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onUnmounted, watchEffect, onBeforeMount } from 'vue'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
 import { showToast } from '@/utils/toast'
-import { ScreenOrientation } from '@capacitor/screen-orientation'
 import { StatusBar } from '@capacitor/status-bar'
 import { setImmersive } from '@/utils/immersive'
 import { storeToRefs } from 'pinia'
 import { bluetoothService } from '@/services/bluetoothService'
-
+import cameraHelper from '@/utils/cameraHelper'
+import { App } from '@capacitor/app'
+import { lockToLandscape, lockToPortrait } from '@/utils/screen'
 const bluetoothStore = useBluetoothStore()
 const router = useRouter()
 const goBack = () => {
@@ -73,34 +76,11 @@ const isCollecting = ref(false) // true = 正在采集（向渲染器加点）
 const hasStarted = ref(false)
 const saving = ref(false) // 保存中状态
 const fullMessages = bluetoothStore.getRawMessages()
-async function lockToLandscape() {
-  try {
-    await ScreenOrientation.lock({
-      orientation: 'landscape',
-    })
-    // console.log('Screen orientation locked to landscape.')
-  } catch (error) {
-    console.warn('Failed to lock screen orientation:', error)
-    // Optionally, show a toast to the user
-    // showToast('无法锁定屏幕方向');
-  }
-}
-async function unlockOrientation() {
-  try {
-    await ScreenOrientation.unlock({
-      orientation: 'portrait', // 强制设置为竖屏
-    })
-    // console.log('Screen orientation unlocked.')
-  } catch (error) {
-    console.warn('Failed to unlock screen orientation:', error)
-  }
-}
-// 初始化渲染器
-onMounted(async () => {
+let pauseListener = null
+let resumeListener = null
+async function init() {
+  if (isRendererReady.value) return
   await lockToLandscape()
-  // bluetoothStore.consumeConnectedPoints()
-  // bluetoothStore.clearRawMessagesForSave()
-  // 使 WebView 覆盖状态栏并设置统一的背景色与亮色图标，增加沉浸式的重试以提高兼容性
   try {
     await StatusBar.setOverlaysWebView({ overlay: true })
     await StatusBar.setBackgroundColor({ color: '#0e1420' })
@@ -113,7 +93,6 @@ onMounted(async () => {
   try {
     setImmersive(true)
     setTimeout(() => setImmersive(true), 120)
-    setTimeout(() => setImmersive(true), 420)
     setTimeout(async () => {
       await setImmersive(true)
       try {
@@ -125,7 +104,7 @@ onMounted(async () => {
   } catch (err) {
     console.warn('setImmersive initial calls failed', err)
   }
-
+  // 使 WebView 覆盖状态栏并设置统一的背景色与亮色图标，增加沉浸式的重试以提高兼容性
   // 延迟初始化，确保容器高度已计算
   setTimeout(() => {
     if (container.value) {
@@ -138,9 +117,11 @@ onMounted(async () => {
       window.addEventListener('resize', renderer.onResize)
     }
   }, 100)
-})
-onUnmounted(async () => {
-  // 退出时恢复 StatusBar 覆盖策略并关闭沉浸式，恢复图标样式为 DARK
+}
+
+// 清理资源
+async function cleanupResources() {
+  console.log('[PointCloudPage] 正在清理资源...')
   try {
     await StatusBar.setOverlaysWebView({ overlay: false })
     await StatusBar.setBackgroundColor({ color: '#0a0a1a' })
@@ -165,10 +146,70 @@ onUnmounted(async () => {
 
   // 4. 显式置空引用，帮助 GC
   renderer = null
-  bluetoothStore.handleSendEnd()
+  isRendererReady.value = false
   // 5.
-  await unlockOrientation()
+
+  // 6. 停止相机预览（幂等，多次调用安全）
+  await cameraHelper.stopPreview()
+
+  // 7. 清理 parser 中的拍照会话标志，防止残留导致后续忽略点云或尝试拍照失败
+  try {
+    if (bluetoothStore && bluetoothStore.parser && bluetoothStore.parser.protocolState) {
+      bluetoothStore.parser.protocolState.photoSession.active = false
+      bluetoothStore.parser.protocolState.photoSession.previewStarted = false
+      bluetoothStore.parser.cameraReadyPromise = null
+    }
+  } catch (e) {
+    console.warn('[PointCloudPage] 清理 parser.photoSession 失败', e)
+  }
+
+  // 7. 发送蓝牙结束指令
+  bluetoothStore.handleSendEnd()
+
+  // 8. 强制锁定为竖屏，确保返回主页面后保持竖屏状态
+  try {
+    await lockToPortrait()
+  } catch (e) {
+    console.warn('[PointCloudPage] lockToPortrait failed', e)
+  }
+}
+// 路由切换时清理资源
+onBeforeRouteLeave((to, from, next) => {
+  cleanupResources()
+  next() // 允许跳转
 })
+// 初始化渲染器
+onMounted(async () => {
+  await init()
+  // 监听进入后台
+  pauseListener = await App.addListener('pause', () => {
+    cleanupResources()
+  })
+  // 监听从后台回到前台
+  resumeListener = await App.addListener('resume', async () => {
+    console.log('[App] 从后台恢复到前台')
+    await init()
+    // 在这里执行你需要的操作，例如：
+    // - 重新启动相机预览
+    // - 恢复数据采集
+    // - 刷新状态等
+    // handleAppResume()
+  })
+})
+onUnmounted(() => {
+  if (pauseListener) {
+    pauseListener.remove()
+    pauseListener = null
+  }
+  if (resumeListener) {
+    resumeListener.remove()
+    resumeListener = null
+  }
+})
+// onUnmounted(async () => {
+//   // 退出时恢复 StatusBar 覆盖策略并关闭沉浸式，恢复图标样式为 DARK
+
+// })
 // 开始数据流
 function startDataStream() {
   isCollecting.value = true
@@ -321,6 +362,17 @@ watchEffect(() => {
   /* border-radius: 8px; */
   overflow: hidden;
   position: relative;
+}
+
+.camera-preview-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5; /* 低于 overlay-controls (10) 以显示控制按钮在上层 */
+  pointer-events: none; /* 预览不捕获鼠标/触摸，除非需要 */
+  background: transparent;
 }
 
 .point-cloud-controls {

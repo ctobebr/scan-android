@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { showToast } from '@/utils/toast'
 import { bluetoothService } from '@/services/bluetoothService'
-import { parseBinaryToCartesian } from '@/utils/parseBinaryToCartesian'
+import { parseBleData } from '@/utils/parseBleData'
 import {
   NUS_SERVICE_UUID,
   NUS_WRITE_CHAR_UUID,
@@ -20,7 +20,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
     displayedMessages: [],
     MAX_DISPLAY_MESSAGES: 200, // UI 最多显示 200 条
     messages: [],
-    parser: new parseBinaryToCartesian(),
+    parser: new parseBleData(),
     connectedPoints: [], // 解析后的点云数据
     rawMessagesForSave: [],
 
@@ -111,6 +111,14 @@ export const useBluetoothStore = defineStore('bluetooth', {
             // 1. 解析蓝牙二进制数据
             // parse() 现在返回当前批次解析的点（来自内部累积缓冲）
             const { points, errors } = this.parser.parse(dataStr)
+            // 如果处于拍照会话，跳过点云解析渲染（下位机可能在发送拍照相关命令）
+            if (this.parser.protocolState?.photoSession?.active) {
+              // 处于拍照阶段仅记录错误并不渲染点
+              if (errors.length > 0) {
+                console.warn('[Bluetooth] Parse errors (photo session):', errors)
+              }
+              return
+            }
             // 2. 将解析的点加入累积缓冲（交给 bluetooth.js 的累积机制）
             if (points && points.length > 0) {
               this.accumulationBuffer.push(...points)
@@ -125,7 +133,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
               //   )
               // }
             }
-            console.log('points和errors的内容', JSON.stringify(points), JSON.stringify(errors))
+            // console.log('points和errors的内容', JSON.stringify(points), JSON.stringify(errors))
             // 3. 为了保存的原始消息（仅用于文件保存）
             // 这里只记录成功解析的点数据
             points.forEach((point) => {
