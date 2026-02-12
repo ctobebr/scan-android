@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // 示例：导入你的页面组件
 // import About from '../views/About.vue'
-import BluetoothView from '@/views/BluetoothView.vue'
+// import BluetoothView from '@/views/BluetoothView.vue'
 import PointCloud from '@/views/PointCloud.vue'
 import CaremaView from '@/views/CaremaView.vue'
 import FileSave from '@/views/FileSave.vue'
@@ -12,11 +12,11 @@ const routes = [
   //   path: '/',
   //   redirect: '/bluetooth' // 默认进入蓝牙页
   // },
-  {
-    path: '/bluetooth',
-    name: 'Bluetooth',
-    component: BluetoothView,
-  },
+  // {
+  //   path: '/bluetooth',
+  //   name: 'Bluetooth',
+  //   component: BluetoothView,
+  // },
   {
     path: '/',
     redirect: '/mainContentTabs',

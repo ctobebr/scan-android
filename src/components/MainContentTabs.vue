@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, onActivated, defineOptions } from 'vue'
+import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount } from 'vue'
 import ProjectList from './projects/ProjectList.vue' // 导入组件
 import FileList from './files/FileList.vue' // 导入组件
 // import { bluetoothService } from '@/services/bluetoothService'
@@ -110,8 +110,7 @@ const {
   devices,
   scanning,
   connectingStatus,
-  connectingDeviceId,
-  displayedMessages
+  connectingDeviceId
 } = storeToRefs(bluetoothStore)
 
 // 计算属性：过滤掉 name 为 "N/A" 的设备
@@ -120,10 +119,13 @@ const filteredDevices = computed(() => {
 })
 onMounted(async() => {
   await lockToPortrait()
-  bluetoothStore.autoScanOnEnter()
+
 })
 onActivated(async () => {
  await lockToPortrait()
+})
+onBeforeUnmount(() => {
+
 })
 const handleStartRecord = () => {
   if (connectingStatus.value != 2) {
@@ -183,6 +185,7 @@ const toggleConnectionDialog = () => {
   //   // 打开对话框时，触发一次扫描
   //   bluetoothStore.autoScanOnEnter()
   // }
+  bluetoothStore.autoScanOnEnter()
   showConnectionDialog.value = !showConnectionDialog.value
 }
 

@@ -1,12 +1,12 @@
 // src/services/bluetoothService.js
 import { BluetoothLe, BleClient } from '@capacitor-community/bluetooth-le'
-import { Filesystem, Directory } from '@capacitor/filesystem'
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
 // ========== 协议常量 ==========
 import {
   PROTOCOL_HEADER_HIGH,
   PROTOCOL_HEADER_LOW,
   CONTROL_COMMANDS,
-  DEVICE_DATA_COMMANDS
+  DEVICE_DATA_COMMANDS,
 } from '@/constants/protocolCommands'
 
 /**
@@ -31,14 +31,7 @@ function buildProtocolFrame(cmd, data = []) {
   checksum &= 0xff // 取低 8 位
 
   // 构造完整帧
-  const frame = [
-    PROTOCOL_HEADER_HIGH,
-    PROTOCOL_HEADER_LOW,
-    cmd,
-    len,
-    ...payload,
-    checksum,
-  ]
+  const frame = [PROTOCOL_HEADER_HIGH, PROTOCOL_HEADER_LOW, cmd, len, ...payload, checksum]
 
   return new Uint8Array(frame)
 }
@@ -288,7 +281,7 @@ export class BluetoothService {
       .replace(/[-:T.Z]/g, '')
       .slice(0, 14)
 
-    const filename = `ble_data_${timestamp}.txt`
+    const filename = `pointCloud_data_${timestamp}.txt`
     await Filesystem.writeFile({
       path: filename,
       data: content,
@@ -303,11 +296,129 @@ export class BluetoothService {
     }
   }
   /**
+   * 在 Documents/pointcloud/<sessionId>/ 目录下保存 BLE 数据和照片
+   * @param {string[]} dataLines - 要保存的数据行数组
+   * @param {string} sessionID - 会话 ID，用于创建子文件夹
+   * @param {Array<{path?: string, base64?: string, name: string}>} photos - 照片数组，
+   *                        每项应包含 path (本地路径) 或 base64 (Base64字符串) 和 name (文件名)。
+   *                        例如: [{base64: "...", name: "photo1.jpg"}, {path: "/path/to/photo2.jpg", name: "photo2.jpg"}]
+   * @returns {Promise<{path: string, filePath: string, photoPaths: string[], lineCount: number}>} 保存结果对象
+   */
+
+  async saveBleDataToFileWithSessionStructure(dataLines, sessionID, photos = []) {
+    console.log('--- [saveBleDataToFileWithSessionStructure] 开始执行 ---')
+
+    if (!Array.isArray(dataLines) || dataLines.length === 0) {
+      const error = new Error('无数据可保存')
+      console.error(error.message)
+      throw error
+    }
+    if (!sessionID || typeof sessionID !== 'string') {
+      const error = new Error('无效的 sessionID')
+      console.error(error.message)
+      throw error
+    }
+    if (!Array.isArray(photos)) {
+      const error = new Error('photos 必须是一个数组')
+      console.error(error.message)
+      throw error
+    }
+
+    try {
+      const baseDirPath = 'pointcloud'
+      const sessionDirPath = `${baseDirPath}/${sessionID}`
+
+      await Filesystem.mkdir({
+        path: sessionDirPath,
+        directory: Directory.Documents,
+        recursive: true,
+      })
+
+      const content = dataLines.join('\n')
+      const timestamp = new Date(Date.now() + 28800000) // 注意：这是东八区时间戳
+        .toISOString()
+        .replace(/[-:T.Z]/g, '')
+        .slice(0, 14)
+      const txtFilename = `pointCloud_data_${timestamp}.txt`
+      const txtFilePath = `${sessionDirPath}/${txtFilename}`
+
+      await Filesystem.writeFile({
+        path: txtFilePath,
+        data: content,
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8,
+      })
+
+      const fullTxtUri = await Filesystem.getUri({
+        path: txtFilePath,
+        directory: Directory.Documents,
+      })
+
+      const savedPhotoPaths = []
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i]
+
+        if (!photo || typeof photo !== 'object' || Array.isArray(photo)) {
+          console.warn(`照片 ${i} 格式不正确，跳过。`)
+          continue
+        }
+
+        // --- 只处理 base64 数据 ---
+        if (photo.base64 && typeof photo.base64 === 'string') {
+          const targetFileName = photo.name || `unnamed_photo_${i}.jpg`
+          const photoPath = `${sessionDirPath}/${targetFileName}` // 直接构建最终路径
+
+          try {
+            await Filesystem.writeFile({
+              path: photoPath, // 写入最终目录
+              data: photo.base64,
+              directory: Directory.Documents,
+            })
+            const fullPhotoUri = await Filesystem.getUri({
+              path: photoPath,
+              directory: Directory.Documents,
+            })
+            savedPhotoPaths.push(fullPhotoUri.uri)
+          } catch (writeError) {
+            console.error('写入 base64 照片失败:', photo.name || photoPath, writeError)
+          }
+        } else {
+          // 不再处理 photo.path 路径
+          console.warn(`照片 ${i} 缺少有效的 base64 字段，跳过。`, photo)
+        }
+      }
+
+      // --- 关键输出 ---
+      console.log(`本次共保存了 ${savedPhotoPaths.length} 张照片。`)
+      console.log(`数据文件保存路径: ${fullTxtUri.uri}`)
+      if (savedPhotoPaths.length > 0) {
+        console.log(`照片保存路径列表:`, savedPhotoPaths)
+      } else {
+        console.log(`没有照片被保存。`)
+      }
+      // --- End of 关键输出 ---
+
+      const result = {
+        path: Directory.Documents,
+        filePath: txtFilePath,
+        fullUri: fullTxtUri.uri,
+        photoPaths: savedPhotoPaths,
+        lineCount: dataLines.length,
+      }
+
+      console.log('--- [saveBleDataToFileWithSessionStructure] 执行完成 ---')
+      return result
+    } catch (error) {
+      console.error('--- [saveBleDataToFileWithSessionStructure] 执行失败 ---', error)
+      throw error
+    }
+  }
+  /**
    * 列出 Documents 目录下的蓝牙数据文件
-   * @param {string} [pattern='ble_data_'] - 文件名匹配模式，默认查找 'ble_data_' 开头的文件
+   * @param {string} [pattern='pointCloud_data_'] - 文件名匹配模式，默认查找 'pointCloud_data_' 开头的文件
    * @returns {Promise<{name: string, size: number, ctime: number, mtime: number}[]>} - 文件信息列表
    */
-  async listBleDataFiles(pattern = 'ble_data_') {
+  async listBleDataFiles(pattern = 'pointCloud_data_') {
     try {
       const result = await Filesystem.readdir({
         path: '', // 空字符串表示根目录（根据 Directory 指定）
@@ -434,7 +545,10 @@ export class BluetoothService {
 
     const frame = buildProtocolFrame(command, payload)
     await this.writeBinaryData(deviceId, serviceUUID, characteristicUUID, frame)
-    console.log(`[指令] 已发送 0x ${command.toString(16).padStart(2, '0').toUpperCase()}: `, JSON.stringify(frame))
+    console.log(
+      `[指令] 已发送 0x ${command.toString(16).padStart(2, '0').toUpperCase()}: `,
+      JSON.stringify(frame),
+    )
   }
   /**
    * 发送“启动扫描”指令：AA55 01 00 [checksum]

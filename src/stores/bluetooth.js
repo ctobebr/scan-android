@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { showToast } from '@/utils/toast'
 import { bluetoothService } from '@/services/bluetoothService'
-import { parseBleData } from '@/utils/parseBleData'
 import {
   NUS_SERVICE_UUID,
   NUS_WRITE_CHAR_UUID,
@@ -14,23 +13,8 @@ export const useBluetoothStore = defineStore('bluetooth', {
     scanning: false,
     connectingStatus: 0, // 0: 未连接, 1: 连接中, 2: 已连接
     connectingDeviceId: null, // 已连接设备的deviceId
-    // 完整原始数据（用于保存）
-    // rawMessagesForSave: [],
-    // 仅用于UI显示
-    displayedMessages: [],
     MAX_DISPLAY_MESSAGES: 200, // UI 最多显示 200 条
     messages: [],
-    parser: new parseBleData(),
-    connectedPoints: [], // 解析后的点云数据
-    rawMessagesForSave: [],
-
-    // === 累积渲染机制 ===
-    // 统计数据：每秒接收 ~100 个点，目标 30 FPS → 每帧累积 3-4 个点
-    accumulationBuffer: [], // 累积缓冲（临时存放点数据）
-    accumulationTimer: null, // 定时器 ID
-    ACCUMULATION_INTERVAL: 33, // 毫秒（约 30 FPS）
-    MIN_BATCH_SIZE: 3, // 最少累积点数（防止过于频繁的渲染）
-    maxAccumulatedPoints: 0, // 峰值追踪（用于调试）
   }),
   actions: {
     // 请求蓝牙相关权限
@@ -92,61 +76,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
       try {
         await bluetoothService.connectDevice(device.deviceId)
         await bluetoothService.discoverServices(device.deviceId)
-        this.startAccumulationTimer()
-        let timeNow = performance.now()
-        let timeLast = timeNow
-        let count = 0
-        await bluetoothService.subscribeToNotifications(
-          device.deviceId,
-          NUS_SERVICE_UUID,
-          NUS_NOTIFY_CHAR_UUID,
-          (dataStr) => {
-            count = count + 1
-            timeNow = performance.now()
-            if (timeNow - timeLast >= 1000) {
-              timeLast = timeNow
-              // console.log("每秒点数：", count)
-              count = 0
-            }
-            // 1. 解析蓝牙二进制数据
-            // parse() 现在返回当前批次解析的点（来自内部累积缓冲）
-            const { points, errors } = this.parser.parse(dataStr)
-            // 如果处于拍照会话，跳过点云解析渲染（下位机可能在发送拍照相关命令）
-            if (this.parser.protocolState?.photoSession?.active) {
-              // 处于拍照阶段仅记录错误并不渲染点
-              if (errors.length > 0) {
-                console.warn('[Bluetooth] Parse errors (photo session):', errors)
-              }
-              return
-            }
-            // 2. 将解析的点加入累积缓冲（交给 bluetooth.js 的累积机制）
-            if (points && points.length > 0) {
-              this.accumulationBuffer.push(...points)
-
-              // 记录峰值（调试用）
-              if (this.accumulationBuffer.length > this.maxAccumulatedPoints) {
-                this.maxAccumulatedPoints = this.accumulationBuffer.length
-              }
-              // if (process.env.NODE_ENV === 'development') {
-              //   console.log(
-              //     `[Bluetooth] Parsed ${points.length} points, accumulation buffer: ${this.accumulationBuffer.length}`,
-              //   )
-              // }
-            }
-            // console.log('points和errors的内容', JSON.stringify(points), JSON.stringify(errors))
-            // 3. 为了保存的原始消息（仅用于文件保存）
-            // 这里只记录成功解析的点数据
-            points.forEach((point) => {
-              const { x, y, z } = point
-              this.appendMessage(`${x / 10} ${y / 10} ${z / 10} \n`)
-            })
-
-            // 4. 报告解析错误
-            if (errors.length > 0) {
-              console.warn('[Bluetooth] Parse errors:', errors)
-            }
-          },
-        )
+        // 连接成功：不在全局 store 中订阅通知，通知订阅应由会话页面（如 PointCloud）自行管理
         this.connectingStatus = 2 // 已连接
       } catch (err) {
         console.error('连接失败:', err)
@@ -183,60 +113,31 @@ export const useBluetoothStore = defineStore('bluetooth', {
      * 停止累积定时器
      */
     stopAccumulationTimer() {
-      if (this.accumulationTimer !== null) {
-        clearInterval(this.accumulationTimer)
-        this.accumulationTimer = null
-
-        // 清空未渲染的数据
-        if (this.accumulationBuffer.length > 0) {
-          console.log(
-            `[Accumulation] Timer stopped, flushing ${this.accumulationBuffer.length} remaining points`,
-          )
-          this.flushAccumulatedPoints()
-        }
-        console.log(
-          `[Accumulation] Timer stopped - Peak buffer size was: ${this.maxAccumulatedPoints} points`,
-        )
-      }
+      // 已移除累积渲染管理，session 应在页面层面管理
     },
 
     /**
      * 将累积缓冲中的点推送到 connectedPoints（触发渲染）
      */
     flushAccumulatedPoints() {
-      const pointsToRender = this.accumulationBuffer
-      this.accumulationBuffer = [] // 清空缓冲
-
-      if (pointsToRender.length === 0) return
-
-      // 一次性推送到 connectedPoints，触发单次 watchEffect
-      this.connectedPoints.push(...pointsToRender)
-
-      // 可选：打印日志用于性能监控
-      // if (process.env.NODE_ENV === 'development') {
-      //   console.log(`[Accumulation] Flushed ${pointsToRender.length} points to renderer`)
-      // }
+      // 已移除累积渲染管理，session 层负责处理
     },
     consumeConnectedPoints() {
-      const points = [...this.connectedPoints] // 复制一份
-      this.connectedPoints.length = 0 // 清空原数组, 但是不改变引用，保持响应式
-      // this.connectedPoints = []  // 这行修改了引用，响应式丢失，无法使用
-      return points
+      return []
     },
-    appendMessage(msg) {
-      // 解决展示消息越来越多导致卡顿的问题
-      // 1. 始终保存完整数据（用于后续保存）
-      this.rawMessagesForSave.push(msg)
-      // 2. 限制 UI 显示数量
-      if (this.displayedMessages.length >= this.MAX_DISPLAY_MESSAGES) {
-        this.displayedMessages.shift() // 移除最旧的一条
-      }
-      this.displayedMessages.push(msg)
-    },
+    // appendMessage(msg) {
+    //   // 仅用于 UI 展示（不保存会话数据于全局 store）
+    //   if (this.displayedMessages.length >= this.MAX_DISPLAY_MESSAGES) {
+    //     this.displayedMessages.shift()
+    //   }
+    //   this.displayedMessages.push(msg)
+    // },
     async handleDisconnect(device) {
       try {
         // 断开连接时停止定时器
-        this.stopAccumulationTimer()
+        await bluetoothService
+          .unsubscribeFromNotifications(device.deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID)
+          .catch(() => {})
 
         await bluetoothService.disconnectDevice(device.deviceId)
         this.connectingDeviceId = null
@@ -270,19 +171,14 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('发送结束指令失败：', err)
       }
     },
-    clearMessages() {
-      this.displayedMessages = []
-    },
-    getRawMessages() {
-      return this.rawMessagesForSave
-    },
-    clearRawMessagesForSave() {
-      // 添加一个清空动作
-      this.rawMessagesForSave = []
-    },
+    // clearMessages() {
+    //   this.displayedMessages = []
+    // },
   },
   getters: {
     isConnected: (state) => state.connectingStatus === 2,
-    getConnectedPoints: (state) => state.connectedPoints,
+    // getConnectedPoints: (state) => {
+    //   return []
+    // },
   },
 })

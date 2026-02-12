@@ -1,7 +1,9 @@
 import { CameraPreview } from '@capacitor-community/camera-preview'
-import { Filesystem, Directory } from '@capacitor/filesystem'
+// import { Filesystem, Directory } from '@capacitor/filesystem' // 不再需要直接写入
 import { bluetoothService } from '@/services/bluetoothService'
+
 let isPreviewRunning = false
+
 const cameraHelper = {
   async startPreview(parentId = 'cameraPreview') {
     if (isPreviewRunning) {
@@ -44,13 +46,17 @@ const cameraHelper = {
   },
 
   /**
-   * 拍照并保存为文件，fileBaseName 不带扩展名
-   * 返回 { fileName, uri }
+   * 拍照并返回 base64 数据，fileBaseName 不带扩展名
+   * 返回 { fileName, base64Data }
+   * 照片不会立即写入磁盘，而是由保存函数统一处理
    */
   async captureAndSave(fileBaseName) {
     if (!isPreviewRunning) {
       throw new Error('无法拍照：相机预览未启动')
     }
+
+    const fileName = `${fileBaseName}.jpg`
+
     // 优先使用 CameraPreview.capture
     try {
       if (CameraPreview && typeof CameraPreview.capture === 'function') {
@@ -59,45 +65,30 @@ const cameraHelper = {
         if (!base64) {
           throw new Error('CameraPreview.capture 未返回数据')
         }
-        // 如果包含 data:image 前缀，去掉
         if (base64.indexOf(',') !== -1) {
           base64 = base64.split(',')[1]
         }
-
-        const fileName = `${fileBaseName}.jpg`
-        const path = `CameraPhotos/${fileName}`
-        const writeRes = await Filesystem.writeFile({
-          path,
-          data: base64,
-          directory: Directory.Documents,
-          recursive: true,
-        })
-        return { fileName, uri: writeRes.uri }
+        // 不再写入 CameraPhotos 目录，直接返回 base64
+        return { fileName, base64Data: base64 }
       }
     } catch (err) {
-      console.warn('使用 CameraPreview.capture 拍照保存失败，尝试回退到 Camera.getPhoto：', err)
+      console.warn('使用 CameraPreview.capture 拍照失败，尝试回退到 Camera.getPhoto：', err)
     }
 
-    // 回退方案：使用 bluetoothService.takePhotoConfirmed (Camera.getPhoto)
+    // 回退方案
     try {
       const dataUrl = await bluetoothService.takePhotoConfirmed()
       if (!dataUrl) throw new Error('takePhotoConfirmed 未返回数据')
       let base64 = dataUrl
       if (base64.indexOf(',') !== -1) base64 = base64.split(',')[1]
-      const fileName = `${fileBaseName}.jpg`
-      const path = `CameraPhotos/${fileName}`
-      const writeRes = await Filesystem.writeFile({
-        path,
-        data: base64,
-        directory: Directory.Documents,
-        recursive: true,
-      })
-      return { fileName, uri: writeRes.uri }
+      // 不再写入 CameraPhotos 目录，直接返回 base64
+      return { fileName, base64Data: base64 }
     } catch (err) {
       console.error('captureAndSave 回退方案也失败:', err)
       throw err
     }
   },
+
   isRunning() {
     return isPreviewRunning
   },

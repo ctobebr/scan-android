@@ -16,9 +16,9 @@
  */
 import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from '@/constants/protocolCommands'
 // import { bluetoothService } from '@/services/bluetoothService'
-import cameraHelper from '@/utils/cameraHelper'
 export class parseBleData {
-  constructor() {
+  constructor(options = {}) {
+    this.options = options || {}
     this.protocolState = {
       buffer: new Uint8Array(512), // 增大缓冲区
       bufferIndex: 0,
@@ -35,6 +35,9 @@ export class parseBleData {
       },
     }
     this.cameraReadyPromise = null
+
+    this.isProcessingPhoto = false // 标记是否正在处理拍照
+    this.pendingEndRequests = [] // 存储等待处理的结束请求
   }
   // 验证数据包
   validateBinaryPacket(receivedChecksum) {
@@ -357,121 +360,159 @@ export class parseBleData {
   }
 
   _handleStartTakePhoto() {
-    // 收到开始拍照命令：进入拍照预览页面并启动相机预览
+    // 收到开始拍照指令：进入拍照预览并让调用方启动预览
     if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
-      return // 已启动，避免重复
+      return
     }
-    console.log('收到开始拍照指令_handleStartTakePhoto')
     this.protocolState.photoSession.active = true
     this.protocolState.photoSession.previewStarted = false
 
-    // 创建一个新的 Promise，让后续拍照可以等待
-    this.cameraReadyPromise = cameraHelper
-      .startPreview('cameraPreview')
-      .then((ok) => {
-        // 仅在仍处于拍照会话时把 previewStarted 置为 true，避免 race 导致在已退出时仍认为相机运行
-        if (this.protocolState.photoSession.active) {
-          if (ok) {
-            this.protocolState.photoSession.previewStarted = true
-            console.log('相机预览启动成功')
-          } else {
-            console.warn(' 相机预览启动失败')
-            this.protocolState.photoSession.previewStarted = false
+    if (this.options.onStartPreview) {
+      this.cameraReadyPromise = Promise.resolve()
+        .then(() => this.options.onStartPreview())
+        .then((ok) => {
+          if (this.protocolState.photoSession.active) {
+            this.protocolState.photoSession.previewStarted = !!ok
+            if (ok) console.log('相机预览已通过回调启动')
           }
-        } else {
-          // 如果会话已被取消，确保立即停止预览（幂等）
-          if (ok) {
-            cameraHelper.stopPreview().catch((e) => console.warn('stopPreview after canceled session failed', e))
-          }
-        }
-        return ok
-      })
-      .catch((err) => {
-        console.error('相机预览启动异常:', err)
-        this.protocolState.photoSession.previewStarted = false
-        throw err
-      })
-    //   cameraHelper
-    //     .startPreview('cameraPreview')
-    //     .then((ok) => {
-    //       if (ok) {
-    //         this.protocolState.photoSession.previewStarted = true
-    //         console.log('进入相机预览页面')
-    //       } else {
-    //         console.warn(' Camera preview could not be started')
-    //       }
-    //     })
-    //     .catch((err) => {
-    //       console.error('进入相机预览页面失败:', err)
-    //     })
-    // } catch (err) {
-    //   console.error(' _handleStartTakePhoto 错误:', err)
-    // }
+          return ok
+        })
+        .catch((err) => {
+          console.error('onStartPreview 回调抛错:', err)
+          this.protocolState.photoSession.previewStarted = false
+          throw err
+        })
+    } else {
+      this.cameraReadyPromise = Promise.resolve(false)
+    }
+    console.log('_handleStartTakePhoto  over')
   }
 
   async _handleTakePhoto(data) {
-    // 拍照命令：解析下位机发送的角度并拍照保存
-    try {
-      const meta = this.parseBinaryTakePhotoData(data)
-      if (!meta) {
-        console.warn('_handleTakePhoto: 无效的拍照数据')
-        return
-      }
+    console.log('CMD_CTRL_CAMERA received')
 
-      // 生成文件名：时间戳_俯仰_方位（保留两位小数）
-      const timestamp = Date.now()
-      const yawStr = meta.yawDeg !== undefined ? meta.yawDeg.toFixed(2) : meta.yawRaw
-      const pitchStr = meta.pitchDeg !== undefined ? meta.pitchDeg.toFixed(2) : meta.pitchRaw
-      const fileBaseName = `${timestamp}_${pitchStr}_${yawStr}`
-
-      // 如果不在拍照会话中，启动会话
-      if (!this.protocolState.photoSession.active) {
-        console.warn('收到拍照命令但未处于拍照会话，自动进入预览')
-        this._handleStartTakePhoto()
-      }
-
-      let cameraReady = false
-      if (this.cameraReadyPromise) {
+    // --- 将拍照请求加入处理流程 ---
+    return new Promise((resolve, reject) => {
+      const task = async () => {
         try {
-          cameraReady = await this.cameraReadyPromise
-        } catch (e) {
-          console.warn('等待相机就绪时出错:', e)
-          cameraReady = false
+          // 设置处理标志
+          this.isProcessingPhoto = true
+
+          // ... 你原来的 _handleTakePhoto 逻辑 ...
+          const meta = this.parseBinaryTakePhotoData(data)
+          if (!meta) {
+            console.warn('_handleTakePhoto: 无效的拍照数据')
+            return
+          }
+
+          const currentBatchCounter = this.options.getDataBatchCounter
+            ? this.options.getDataBatchCounter()
+            : 'unknown'
+
+          const yawStr = meta.yawDeg !== undefined ? meta.yawDeg.toFixed(2) : meta.yawRaw
+          const pitchStr = meta.pitchDeg !== undefined ? meta.pitchDeg.toFixed(2) : meta.pitchRaw
+          const fileBaseName = `${currentBatchCounter}_${pitchStr}_${yawStr}`
+
+          if (!this.protocolState.photoSession.active) {
+            console.warn('收到拍照命令但未处于拍照会话，自动进入预览')
+            this._handleStartTakePhoto()
+          }
+
+          let cameraReady = false
+          if (this.cameraReadyPromise) {
+            try {
+              cameraReady = await this.cameraReadyPromise
+            } catch (e) {
+              console.warn('等待相机就绪时出错:', e)
+              cameraReady = false
+            }
+          }
+
+          if (!cameraReady) {
+            console.warn('相机未就绪，跳过本次拍照')
+            return
+          }
+
+          if (this.options.onTakePhoto && typeof this.options.onTakePhoto === 'function') {
+            console.log('即将执行 onTakePhoto 回调')
+            await this.options.onTakePhoto({ fileBaseName, meta })
+            console.log('onTakePhoto 回调执行完成')
+          }
+        } catch (err) {
+          console.error('HandleTakePhoto 内部发生错误:', err)
+        } finally {
+          // 清理处理标志
+          this.isProcessingPhoto = false
+          // 尝试处理挂起的结束请求
+          this._tryProcessPendingEndRequests()
+          resolve() // 完成当前任务
         }
       }
 
-      if (!cameraReady) {
-        console.warn('相机未就绪，跳过本次拍照')
-        return
+      // 如果正在处理，等待；否则立即执行
+      if (this.isProcessingPhoto) {
+        console.log('拍照正在进行，将此请求加入等待队列')
+        resolve()
+      } else {
+        task() // 立即执行
       }
-
-      // 触发拍照并保存（CameraPreview 或回退到 bluetoothService）
-      await cameraHelper.captureAndSave(fileBaseName)
-    } catch (err) {
-      console.error('_handleTakePhoto 错误:', err)
-    }
-    console.log(
-      ' CMD_CTRL_CAMERA (0x' +
-        CONTROL_COMMANDS.CMD_CTRL_CAMERA.toString(16) +
-        ') received',
-    )
+    })
   }
   _handleEndTakePhoto() {
-    // 结束拍照，停止预览并退出相机页面
+    console.log('收到结束拍照请求')
+
+    // --- 新增：检查是否有拍照正在进行 ---
+    if (this.isProcessingPhoto) {
+      console.log('拍照正在进行，将结束请求加入等待队列')
+      return new Promise((resolve) => {
+        this.pendingEndRequests.push(resolve) // 将 resolve 函数存起来，以便稍后调用
+      })
+    }
+
+    // 如果没有拍照在进行，则立即执行结束逻辑
+    this._executeEndTakePhotoLogic()
+  }
+  _executeEndTakePhotoLogic() {
+    // --- 执行真正的结束逻辑 ---
     try {
       this.protocolState.photoSession.active = false
       if (this.protocolState.photoSession.previewStarted) {
-        cameraHelper.stopPreview().catch((e) => console.warn('stopPreview failed', e))
+        if (this.options.onEndPreview) {
+          try {
+            this.options.onEndPreview()
+          } catch (e) {
+            console.warn('onEndPreview 回调失败', e)
+          }
+        }
         this.protocolState.photoSession.previewStarted = false
       }
       this.cameraReadyPromise = null
-      // 不跳转页面，仅停止预览，回到点云视图
       console.log('[_handleEndTakePhoto  结束拍照退出相机预览页面')
+
+      if (
+        this.options.onPhotoSessionEnded &&
+        typeof this.options.onPhotoSessionEnded === 'function'
+      ) {
+        try {
+          this.options.onPhotoSessionEnded()
+        } catch (callbackErr) {
+          console.error('onPhotoSessionEnded callback failed:', callbackErr)
+        }
+      }
     } catch (err) {
       console.error(' _handleEndTakePhoto 错误:', err)
     }
   }
-
+  _tryProcessPendingEndRequests() {
+    // 当一个拍照任务完成后，检查是否有挂起的结束请求
+    if (!this.isProcessingPhoto && this.pendingEndRequests.length > 0) {
+      console.log('处理挂起的结束请求')
+      // 取出并执行一个挂起的结束请求
+      const resolvePending = this.pendingEndRequests.shift()
+      this._executeEndTakePhotoLogic() // 执行逻辑
+      resolvePending() // 解决挂起的 Promise
+    }
+  }
   // 解析下位机发送的拍照数据（uint16 小端序）
   parseBinaryTakePhotoData(packetData) {
     if (!packetData || packetData.length < 4) {

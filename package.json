@@ -14,6 +14,7 @@
     "@byteowls/capacitor-filesharer": "^5.0.0",
     "@capacitor-community/bluetooth-le": "^3.0.0",
     "@capacitor-community/camera-preview": "^5.0.0",
+    "@capacitor-community/keep-awake": "^4.0.0",
     "@capacitor/android": "^5.7.8",
     "@capacitor/app": "^5.0.8",
     "@capacitor/camera": "^5.0.2",
