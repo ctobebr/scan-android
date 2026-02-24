@@ -161,7 +161,7 @@ const projectListItems = ref([
 
 <!-- 注意：这里使用了 scoped 样式，它只会影响当前组件 -->
 <style scoped>
-/* 新增：项目列表容器 */
+/* 项目列表容器 */
 .project-list-container {
   width: 100%;
   height: 100%; /* 占满父容器 */
@@ -169,7 +169,7 @@ const projectListItems = ref([
   flex-direction: column;
 }
 
-/* 新增：内容区域 - 可滚动 */
+/* 内容区域 - 可滚动 */
 .content-area {
   flex: 1; /* 占据剩余空间 */
   overflow-y: auto; /* 关键：当内容超出时允许垂直滚动 */

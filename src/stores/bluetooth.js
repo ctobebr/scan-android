@@ -15,6 +15,8 @@ export const useBluetoothStore = defineStore('bluetooth', {
     connectingDeviceId: null, // 已连接设备的deviceId
     MAX_DISPLAY_MESSAGES: 200, // UI 最多显示 200 条
     messages: [],
+    // 存储断开监听的取消函数
+    disconnectUnregister: null,
   }),
   actions: {
     // 请求蓝牙相关权限
@@ -66,6 +68,56 @@ export const useBluetoothStore = defineStore('bluetooth', {
         this.scanning = false
       }
     },
+
+    // ========== 统一处理设备断开 ==========
+    /**
+     * 处理设备断开事件
+     * @param {string} deviceId - 断开的设备ID
+     * @param {boolean} isManualDisconnect - 是否为手动断开
+     */
+    handleDeviceDisconnected(deviceId, isManualDisconnect = false) {
+      console.log(`[BluetoothStore] 设备断开处理: ${deviceId}, 手动: ${isManualDisconnect}`)
+
+      // 只处理当前连接的设备
+      if (this.connectingDeviceId !== deviceId) {
+        return
+      }
+
+      // 更新状态
+      this.connectingStatus = 0
+      this.connectingDeviceId = null
+
+      // 清理断开监听
+      if (this.disconnectUnregister) {
+        this.disconnectUnregister()
+        this.disconnectUnregister = null
+      }
+
+      // 非手动断开才显示提示
+      if (!isManualDisconnect) {
+        showToast('设备已断开连接', 3000)
+      }
+    },
+
+    /**
+     * 注册设备断开监听
+     */
+    registerDisconnectListener() {
+      // 先移除旧的监听
+      if (this.disconnectUnregister) {
+        this.disconnectUnregister()
+        this.disconnectUnregister = null
+      }
+
+      // 注册新监听
+      this.disconnectUnregister = bluetoothService.onDeviceDisconnected(
+        (deviceId, isManualDisconnect) => {
+          this.handleDeviceDisconnected(deviceId, isManualDisconnect)
+        },
+      )
+    },
+    // ========== 结束：统一处理设备断开 ==========
+
     async handleConnect(device) {
       // 防止重复点击
       if (this.connectingStatus === 1) return
@@ -76,7 +128,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
       try {
         await bluetoothService.connectDevice(device.deviceId)
         await bluetoothService.discoverServices(device.deviceId)
-        // 连接成功：不在全局 store 中订阅通知，通知订阅应由会话页面（如 PointCloud）自行管理
+
+        // 连接成功：注册断开监听
+        this.registerDisconnectListener()
+
         this.connectingStatus = 2 // 已连接
       } catch (err) {
         console.error('连接失败:', err)
@@ -140,8 +195,12 @@ export const useBluetoothStore = defineStore('bluetooth', {
           .catch(() => {})
 
         await bluetoothService.disconnectDevice(device.deviceId)
-        this.connectingDeviceId = null
+
+        // handleDeviceDisconnected 会被 disconnectDevice 触发的回调调用
+        // 这里不需要手动更新状态
+        // 为了保险，可以清理一下
         this.connectingStatus = 0
+        this.connectingDeviceId = null
       } catch (e) {
         this.connectingStatus = 2
         console.log('断开连接失败', e)

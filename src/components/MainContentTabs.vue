@@ -92,10 +92,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount } from 'vue'
+import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount, watch } from 'vue'
 import ProjectList from './projects/ProjectList.vue' // 导入组件
 import FileList from './files/FileList.vue' // 导入组件
-// import { bluetoothService } from '@/services/bluetoothService'
+import { bluetoothService } from '@/services/bluetoothService'
 import { showToast } from '@/utils/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { storeToRefs } from 'pinia'
@@ -117,12 +117,38 @@ const {
 const filteredDevices = computed(() => {
   return devices.value.filter(device => device.name !== "N/A")
 })
+
+// ========== 监听连接状态变化，更新设备列表中的显示 ==========
+// 当连接状态或连接设备ID变化时，强制刷新设备列表的计算属性
+watch([connectingStatus, connectingDeviceId], () => {
+  // 直接触发 computed 重新计算即可
+  console.log('连接状态变化，更新设备列表显示')
+}, { deep: false })
+// ========== 结束：监听连接状态变化 ==========
+
 onMounted(async() => {
   await lockToPortrait()
-
+  // ========== 页面激活时检查连接状态 ==========
+  // 如果显示已连接，但实际可能已断开，做个状态校验
+  setTimeout(() => {
+    if (connectingStatus.value === 2 && connectingDeviceId.value) {
+      bluetoothService.checkConnectionStatus(connectingDeviceId.value).catch(() => {
+        // 校验失败时，store 中的 handleDeviceDisconnected 会被触发
+        console.log('页面启动时检测到连接已断开')
+      })
+    }
+  }, 500)
+  // ========== 结束：页面激活时检查连接状态 ==========
 })
 onActivated(async () => {
- await lockToPortrait()
+  await lockToPortrait()
+
+  // ========== 页面激活时刷新设备列表 ==========
+  // 重新扫描以获取最新的设备状态
+  if (showConnectionDialog.value) {
+    bluetoothStore.autoScanOnEnter()
+  }
+  // ========== 结束：页面激活时刷新设备列表 ==========
 })
 onBeforeUnmount(() => {
 
@@ -181,12 +207,12 @@ const showConnectionDialog = ref(false)
 
 // 显示连接对话框
 const toggleConnectionDialog = () => {
-  // if (!showConnectionDialog.value) {
-  //   // 打开对话框时，触发一次扫描
-  //   bluetoothStore.autoScanOnEnter()
-  // }
-  bluetoothStore.autoScanOnEnter()
-  showConnectionDialog.value = !showConnectionDialog.value
+  showConnectionDialog.value = !showConnectionDialog.value;
+  // 只在打开对话框（新状态为 true）且设备未连接时扫描
+  // 如果蓝牙设备已经连接，再去搜索，会搜索不到蓝牙设备
+  if (showConnectionDialog.value && connectingStatus.value !== 2) {
+    bluetoothStore.autoScanOnEnter();
+  }
 }
 
 // 关闭连接对话框（点击遮罩层）
@@ -533,7 +559,7 @@ const closeConnectionDialog = () => {
   display: flex;
   min-width: 0; /* 关键：允许 flex 容器收缩其内容，否则 flex item 可能不会按预期缩小 */
 }
-.device-name { /* 新增类名对应的样式 */
+.device-name { /* 类名对应的样式 */
   flex: 1; /* 占据所有可用空间 */
   overflow: hidden; /* 隐藏超出部分 */
   text-overflow: ellipsis; /* 超出部分显示省略号 */

@@ -12,7 +12,7 @@ export function usePointCloudRenderer(container) {
   let globalMinY = Infinity
   let globalMaxY = -Infinity
 
-  // === 新增：懒分配和可扩容的缓冲 ===
+  // === 懒分配和可扩容的缓冲 ===
   const MAX_POINTS = 2_000_000 // 上限，防止无限增长
   const INITIAL_CAPACITY = 200_000 // 初始容量（避免在页面加载时一次性分配太大）
   let capacity = INITIAL_CAPACITY

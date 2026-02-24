@@ -35,13 +35,20 @@
         <div class="bottom-left-stat">
           <span>采集点位数：{{ dataBatchCounter }} / 50</span>
         </div>
+        <!-- 设备断开提示层 -->
+        <div v-if="deviceDisconnected" class="disconnect-overlay">
+          <div class="disconnect-message">
+            <span>设备已断开连接</span>
+            <button class="disconnect-back-btn" @click="goBack">返回</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, onBeforeUnmount  } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
@@ -72,8 +79,13 @@ let pointCount = ref(0)
 // let pointsPerSecond = ref(0)
 let frameRate = ref(0)
 const isCollecting = ref(false) // true = 正在采集（向渲染器加点）
-const hasStarted = ref(false)
+// const hasStarted = ref(false)
 const saving = ref(false) // 保存中状态
+let enableSave = false
+// --- 设备断开相关状态 ---
+const deviceDisconnected = ref(false)
+let disconnectUnregister = null
+// --- 结束：设备断开相关状态 ---
 
 // --- 会话相关数据 ---
 let currentSessionId = null; // 当前会话的唯一ID
@@ -93,14 +105,53 @@ let resumeListener = null
 
 // --- 记录进入后台前的采集状态 ---
 let wasCollectingBeforePause = false;
+onMounted(async () => {
+  await init()
 
-// --- 生成优化后的会话ID ---
-function generateOptimizedSessionId() {
-  const now = new Date();
-  const datePart = now.toISOString().slice(0, 19).replace(/\D/g, ''); // YYYYMMDDHHMMSSmmm
-  const timestampNum = BigInt(datePart);
-  return timestampNum.toString(36);
-}
+  // --- 注册断开监听 ---
+  registerDisconnectListener()
+
+  // --- 页面加载时检查连接状态 ---
+  if (bluetoothStore.connectingStatus !== 2) {
+    console.log('[PointCloudPage] 页面加载时检测到设备未连接')
+    deviceDisconnected.value = true
+  } else {
+    // 主动校验一次连接状态
+    bluetoothService.checkConnectionStatus(bluetoothStore.connectingDeviceId).catch(() => {
+      console.log('[PointCloudPage] 页面加载时检测到连接已断开')
+      deviceDisconnected.value = true
+    })
+  }
+  // --- 结束：页面加载时检查连接状态 ---
+
+  pauseListener = await App.addListener('pause', () => {
+    cleanupResourcesForPause() // 暂停清理函数
+  })
+  resumeListener = await App.addListener('resume', async () => {
+    await handleAppResume() // 恢复函数
+  })
+})
+
+onUnmounted(() => {
+  if (pauseListener) {
+    pauseListener.remove()
+    pauseListener = null
+  }
+  if (resumeListener) {
+    resumeListener.remove()
+    resumeListener = null
+  }
+
+  // --- 移除断开监听 ---
+  if (disconnectUnregister) {
+    disconnectUnregister()
+    disconnectUnregister = null
+  }
+  // --- 结束：移除断开监听 ---
+
+  // 组件卸载时也执行彻底清理
+  cleanupResourcesForExit()
+})
 
 async function init() {
   if (isRendererReady.value) return
@@ -137,14 +188,73 @@ async function init() {
       window.addEventListener('resize', renderer.onResize)
 
       if (!currentSessionId) {
-         currentSessionId = generateOptimizedSessionId();
-         console.log('[PointCloudPage] Generated Session ID:', currentSessionId);
-         sessionData = { rawLines: [], photos: [] };
-         dataBatchCounter.value = 0;
+         currentSessionId = generateOptimizedSessionId()
+         console.log('[PointCloudPage] Generated Session ID:', currentSessionId)
+         sessionData = { rawLines: [], photos: [] }
+         dataBatchCounter.value = 0
+         enableSave = false
       }
     }
   }, 100)
 }
+
+// --- 生成优化后的会话ID ---
+function generateOptimizedSessionId() {
+  const now = new Date();
+  const datePart = now.toISOString().slice(0, 19).replace(/\D/g, ''); // YYYYMMDDHHMMSSmmm
+  const timestampNum = BigInt(datePart);
+  return timestampNum.toString(36);
+}
+
+// --- 注册设备断开监听 ---
+function registerDisconnectListener() {
+  if (disconnectUnregister) {
+    disconnectUnregister()
+    disconnectUnregister = null
+  }
+
+  disconnectUnregister = bluetoothService.onDeviceDisconnected((deviceId, isManualDisconnect) => {
+    // 只处理当前连接的设备
+    if (deviceId !== bluetoothStore.connectingDeviceId) {
+      return
+    }
+
+    console.log('[PointCloudPage] 设备断开连接，手动断开:', isManualDisconnect)
+
+    // 如果是手动断开（主动调用handleDisconnect），直接返回上一页
+    if (isManualDisconnect) {
+      goBack()
+      return
+    }
+
+    // 意外断开：显示UI提示，停止采集
+    deviceDisconnected.value = true
+    isCollecting.value = false
+    // hasStarted.value = false
+
+    // 停止订阅和定时器
+    stopSessionParser()
+
+    // 显示提示
+    showToast('设备已断开连接', 3000)
+  })
+}
+// --- 结束：注册设备断开监听 ---
+
+// --- 监听蓝牙Store的连接状态变化 ---
+watch(() => bluetoothStore.connectingStatus, (newStatus, oldStatus) => {
+  if (oldStatus === 2 && newStatus !== 2) {
+    // 连接从已连接变为非已连接状态
+    if (!deviceDisconnected.value) {
+      console.log('[PointCloudPage] 检测到全局连接状态变为未连接')
+      deviceDisconnected.value = true
+      isCollecting.value = false
+      // hasStarted.value = false
+      stopSessionParser()
+    }
+  }
+})
+// --- 结束：监听蓝牙Store的连接状态变化 ---
 
 // ---清理资源函数 (进入后台时调用) ---
 async function cleanupResourcesForPause() {
@@ -164,25 +274,6 @@ async function cleanupResourcesForPause() {
 
   // 4. 停止屏幕常亮
   await disableScreenKeepAwake();
-}
-
-// --- 回到前台时调用 ---
-async function handleAppResume() {
-  // 1. 重新启用屏幕常亮
-  await enableScreenKeepAwake()
-
-  // 2. 如果之前正在采集，则尝试恢复订阅
-  if (wasCollectingBeforePause) {
-    // 确保渲染器和会话ID都存在
-    if (isRendererReady.value && currentSessionId && hasStarted.value) {
-      // 重新启动会话解析器（重新订阅、启动相机）
-      startSessionParser();
-    } else {
-      console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集');
-    }
-  } else {
-    console.log('[App] 上次未在采集状态，无需恢复');
-  }
 }
 
 // 路由切换时彻底清理资源
@@ -212,12 +303,53 @@ async function cleanupResourcesForExit() {
   } catch (e) {
     console.warn('[PointCloudPage] 清理会话失败', e)
   }
+
+  // --- 移除断开监听 ---
+  if (disconnectUnregister) {
+    disconnectUnregister()
+    disconnectUnregister = null
+  }
+  // --- 结束：移除断开监听 ---
+
   bluetoothStore.handleSendEnd()
   isCollecting.value = false
-  hasStarted.value = false
+  // hasStarted.value = false
   pointCount.value = 0
   dataBatchCounter.value = 0
+  deviceDisconnected.value = false
   await lockToPortrait()
+}
+
+// --- 回到前台时调用 ---
+async function handleAppResume() {
+  // 1. 重新启用屏幕常亮
+  await enableScreenKeepAwake()
+
+  // --- 恢复前检查设备是否仍然连接 ---
+  if (deviceDisconnected.value) {
+    console.log('[PointCloudPage] 设备已断开，不恢复采集')
+    return
+  }
+
+  if (bluetoothStore.connectingStatus !== 2) {
+    console.log('[PointCloudPage] 设备未连接，不恢复采集')
+    deviceDisconnected.value = true
+    return
+  }
+  // --- 结束：恢复前检查设备是否仍然连接 ---
+
+  // 2. 如果之前正在采集，则尝试恢复订阅
+  if (wasCollectingBeforePause) {
+    // 确保渲染器和会话ID都存在
+    if (isRendererReady.value && currentSessionId ) {
+      // 重新启动会话解析器（重新订阅、启动相机）
+      startSessionParser();
+    } else {
+      console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集');
+    }
+  } else {
+    console.log('[App] 上次未在采集状态，无需恢复');
+  }
 }
 
 onBeforeRouteLeave((to, from, next) => {
@@ -225,101 +357,32 @@ onBeforeRouteLeave((to, from, next) => {
   next()
 })
 
-onMounted(async () => {
-  await init()
-  pauseListener = await App.addListener('pause', () => {
-    cleanupResourcesForPause() // 暂停清理函数
-  })
-  resumeListener = await App.addListener('resume', async () => {
-    await handleAppResume() // 恢复函数
-  })
-})
-
-onUnmounted(() => {
-  if (pauseListener) {
-    pauseListener.remove()
-    pauseListener = null
-  }
-  if (resumeListener) {
-    resumeListener.remove()
-    resumeListener = null
-  }
-  // 组件卸载时也执行彻底清理
-  cleanupResourcesForExit()
-})
-
-// 开始数据流
-async function startDataStream() {
-  if (!isRendererReady.value) {
-    showToast('渲染器未准备好');
-    return;
-  }
-  if (!currentSessionId) {
-     showToast('会话ID未生成');
-     return;
-  }
-  isCollecting.value = true
-  hasStarted.value = true
-  bluetoothStore.handleSendStart()
-  console.log('startDataStream click', '发送了开始指令，现在开始采集')
-  startSessionParser()
-}
-
-// 停止数据流
-// function stopDataStream() {
-//   isCollecting.value = false
-// }
-
-// function clearPointCloudData() {
-//   if (renderer?.resetPointCloud) {
-//     renderer.resetPointCloud()//  只重置点云
-//   }
-//   isCollecting.value = false
-//   // 重置 UI 计数
-//   pointCount.value = 0
-//   pointsPerSecond.value = 0
-//   lastReportTime.value = 0
-//   lastReportPointCount.value = 0
-//   hasStarted.value =false
-// }
-
-// --- 修改后的保存函数 ---
-const saveMessages = async () => {
-  if (!currentSessionId) {
-     showToast('会话ID未生成，无法保存');
-     return;
-  }
-  if (sessionData.rawLines.length === 0 && sessionData.photos.length === 0) {
-    showToast('暂无数据可保存')
-    return
-  }
-  saving.value = true
-  try {
-    const result = await bluetoothService.saveBleDataToFileWithSessionStructure(
-      sessionData.rawLines,
-      currentSessionId,
-      sessionData.photos
-    )
-    console.log('保存成功:', JSON.stringify(result))
-    showToast(`会话 ${currentSessionId} 已保存\n点云: ${result.lineCount} 行\n照片: ${result.photoPaths.length} 张`);
-  } catch (error) {
-    console.error('保存失败:', error)
-    showToast('保存失败：' + (error.message || '未知错误'))
-  } finally {
-    saving.value = false
-  }
-}
-
 // 启动解析器并订阅蓝牙通知
 function startSessionParser() {
+  // --- 检查设备是否已断开 ---
+  if (deviceDisconnected.value) {
+    console.warn('[startSessionParser] 设备已断开，无法订阅')
+    return
+  }
+  // --- 结束：检查设备是否已断开 ---
+
   if (parser) return
   console.log('[startSessionParser] Starting parser and subscription...');
   parser = new parseBleData({
     getDataBatchCounter: () => `dataBatch_${dataBatchCounter.value.toString().padStart(3, '0')}`,
     onStartPreview: async () => {
+      // 拍照前再次检查连接状态
+      if (deviceDisconnected.value) {
+        console.warn('[startSessionParser] Device disconnected before starting camera preview. Aborting.');
+        throw new Error('Device disconnected before starting camera preview.');
+      }
       return cameraHelper.startPreview('cameraPreview')
     },
     onTakePhoto: async ({ fileBaseName, meta }) => {
+      if (deviceDisconnected.value) {
+        console.warn('[startSessionParser] Device disconnected before taking photo. Aborting photo capture.');
+        throw new Error('Device disconnected before taking photo.');
+      }
       try {
         const photoData = await cameraHelper.captureAndSave(fileBaseName)
         if (photoData && photoData.base64Data && photoData.fileName) {
@@ -338,7 +401,8 @@ function startSessionParser() {
       return cameraHelper.stopPreview()
     },
     onPhotoSessionEnded: () => {
-      dataBatchCounter.value++;
+      dataBatchCounter.value++
+      enableSave = true
     }
   })
 
@@ -377,6 +441,62 @@ function startSessionParser() {
       }
     }
   }, ACCUMULATION_INTERVAL)
+}
+
+// 开始数据流
+async function startDataStream() {
+  // --- 检查设备是否已断开 ---
+  if (deviceDisconnected.value) {
+    showToast('设备已断开连接，请返回重连');
+    return;
+  }
+  if (bluetoothStore.connectingStatus !== 2) {
+    showToast('设备未连接');
+    return;
+  }
+  // --- 结束：检查设备是否已断开 ---
+
+  if (!isRendererReady.value) {
+    showToast('渲染器未准备好');
+    return;
+  }
+  if (!currentSessionId) {
+     showToast('会话ID未生成');
+     return;
+  }
+  isCollecting.value = true
+  // hasStarted.value = true
+  bluetoothStore.handleSendStart()
+  console.log('startDataStream click', '发送了开始指令，现在开始采集')
+  startSessionParser()
+}
+
+// --- 修改后的保存函数 ---
+const saveMessages = async () => {
+  if (!currentSessionId) {
+     showToast('会话ID未生成，无法保存');
+     return;
+  }
+  // 没有照片数据或者是没有点云数据或者是没有完成一次采集任务时
+  if ((sessionData.rawLines.length === 0 && sessionData.photos.length === 0) || !enableSave) {
+    showToast('暂无数据可保存')
+    return
+  }
+  saving.value = true
+  try {
+    const result = await bluetoothService.saveBleDataToFileWithSessionStructure(
+      sessionData.rawLines,
+      currentSessionId,
+      sessionData.photos
+    )
+    console.log('保存成功:', JSON.stringify(result))
+    showToast(`会话 ${currentSessionId} 已保存\n点云: ${result.lineCount} 行\n照片: ${result.photoPaths.length} 张`);
+  } catch (error) {
+    console.error('保存失败:', error)
+    showToast('保存失败：' + (error.message || '未知错误'))
+  } finally {
+    saving.value = false
+  }
 }
 
 // 停止订阅，停止相机预览，清理累积定时器
@@ -652,6 +772,64 @@ async function stopSessionParser() {
   pointer-events: auto; /* 确保文字本身不阻挡交互 */
 }
 
+/* ========== 设备断开提示样式 ========== */
+.disconnect-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(10, 13, 18, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  pointer-events: auto;
+}
+
+.disconnect-message {
+  background: var(--bg-surface);
+  border-radius: 16px;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.disconnect-message span {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.disconnect-back-btn {
+  padding: 10px 24px;
+  background: var(--brand-gradient);
+  border: none;
+  border-radius: 999px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.disconnect-back-btn:hover {
+  background: linear-gradient(145deg, #4d9eff, #2a7aff);
+  transform: translateY(-1px);
+}
+
+.disconnect-back-btn:active {
+  transform: translateY(1px);
+}
+
+
 @media (max-width: 768px) {
   .overlay-controls {
     padding: 16px;
@@ -693,6 +871,20 @@ async function stopSessionParser() {
     font-size: 12px;
     left: 12px;
     bottom: 12px;
+  }
+
+  /* 适配小屏幕上的断开提示 */
+  .disconnect-message {
+    padding: 20px 24px;
+  }
+
+  .disconnect-message span {
+    font-size: 16px;
+  }
+
+  .disconnect-back-btn {
+    padding: 8px 20px;
+    font-size: 13px;
   }
 }
 </style>

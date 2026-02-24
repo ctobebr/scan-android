@@ -41,6 +41,8 @@ export class BluetoothService {
     this.connected = false
     this.devices = new Map()
     this.initialized = false
+    // 添加断开监听器回调列表
+    this.disconnectCallbacks = []
   }
 
   // 检查蓝牙是否已开启
@@ -141,7 +143,19 @@ export class BluetoothService {
 
   async connectDevice(deviceId) {
     try {
-      await BleClient.connect(deviceId) //  参数是字符串，不是对象
+      // 在连接前先移除该设备可能存在的旧监听
+      this.removeDisconnectListener(deviceId)
+
+      await BleClient.connect(deviceId, (deviceId) => {
+        // 这是断开连接的回调！当设备意外断开时触发-------这里利用插件提供的方法，一直不断的监听连接是否活跃，如果不活跃则触发所有注册的断开回调
+        console.log('设备意外断开连接:', deviceId)
+        // 更新内部状态
+        this.connected = false
+        this.connectedDevice = null
+        // 触发所有注册的断开回调
+        this.triggerDisconnectCallbacks(deviceId)
+      })
+
       this.connectedDevice = { deviceId }
       this.connected = true
       console.log('设备连接成功:', deviceId)
@@ -156,6 +170,8 @@ export class BluetoothService {
       await BleClient.disconnect(deviceId) //  参数是字符串
       this.connectedDevice = null
       this.connected = false
+      // 手动断开时也触发回调，但带上 isManualDisconnect 标记
+      this.triggerDisconnectCallbacks(deviceId, true)
       console.log('设备已断开连接')
     } catch (error) {
       console.error('断开连接失败:', error)
@@ -177,6 +193,10 @@ export class BluetoothService {
    * 发送字符串数据（原有方法，保持不变）
    */
   async writeData(deviceId, serviceUUID, characteristicUUID, value) {
+    if (!deviceId) {
+      console.log('writeData:deviceId为空')
+      return
+    }
     try {
       const encoder = new TextEncoder()
       const data = encoder.encode(value)
@@ -191,6 +211,10 @@ export class BluetoothService {
    * 发送二进制数据（Uint8Array）
    */
   async writeBinaryData(deviceId, serviceUUID, characteristicUUID, value) {
+    if (!deviceId) {
+      console.log('writeBinaryData:deviceId为空')
+      return
+    }
     if (!(value instanceof Uint8Array)) {
       throw new Error('writeBinaryData: value 必须是 Uint8Array 类型')
     }
@@ -208,6 +232,10 @@ export class BluetoothService {
     }
   }
   async readData(deviceId, serviceUUID, characteristicUUID) {
+    if (!deviceId) {
+      console.log('readData:deviceId为空')
+      return
+    }
     try {
       const value = await BleClient.read(deviceId, serviceUUID, characteristicUUID)
       const decoder = new TextDecoder()
@@ -221,6 +249,10 @@ export class BluetoothService {
   }
 
   async subscribeToNotifications(deviceId, serviceUUID, characteristicUUID, callback) {
+    if (!deviceId) {
+      console.log('subscribeToNotifications:deviceId为空')
+      return
+    }
     try {
       await BleClient.startNotifications(deviceId, serviceUUID, characteristicUUID, (value) => {
         //  统一处理 ArrayBuffer / DataView
@@ -247,6 +279,10 @@ export class BluetoothService {
   }
 
   async unsubscribeFromNotifications(deviceId, serviceUUID, characteristicUUID) {
+    if (!deviceId) {
+      console.log('unsubscribeFromNotifications:deviceId为空')
+      return
+    }
     try {
       await BleClient.stopNotifications(deviceId, serviceUUID, characteristicUUID)
       console.log('已取消订阅')
@@ -271,6 +307,76 @@ export class BluetoothService {
   clearDevices() {
     this.devices.clear()
   }
+
+  // ========== 连接状态监控方法 ==========
+
+  /**
+   * 注册设备意外断开回调
+   * @param {Function} callback - 回调函数，接收参数 (deviceId, isManualDisconnect)
+   * @returns {Function} 取消注册的函数
+   */
+  onDeviceDisconnected(callback) {
+    if (typeof callback === 'function') {
+      this.disconnectCallbacks.push(callback)
+    }
+    // 返回一个用于取消注册的函数
+    return () => {
+      this.disconnectCallbacks = this.disconnectCallbacks.filter((cb) => cb !== callback)
+    }
+  }
+
+  /**
+   * 触发所有断开回调
+   * @param {string} deviceId - 断开连接的设备ID
+   * @param {boolean} isManualDisconnect - 是否为手动断开
+   */
+  triggerDisconnectCallbacks(deviceId, isManualDisconnect = false) {
+    console.log(`触发断开回调，设备: ${deviceId}, 手动断开: ${isManualDisconnect}`)
+    this.disconnectCallbacks.forEach((callback) => {
+      try {
+        callback(deviceId, isManualDisconnect)
+      } catch (err) {
+        console.error('执行断开回调时出错:', err)
+      }
+    })
+  }
+
+  /**
+   * 移除指定设备的断开监听（连接新设备前调用）
+   * @param {string} deviceId
+   */
+  removeDisconnectListener(deviceId) {
+    // 这个方法主要是为了清理状态，实际回调注册在组件层面管理
+    console.log('准备连接新设备，清理旧状态:', deviceId)
+  }
+
+  /**
+   * 主动检查连接状态
+   * @param {string} deviceId
+   * @returns {Promise<boolean>}
+   */
+  async checkConnectionStatus(deviceId) {
+    if (!deviceId) return false
+    try {
+      // 尝试读取一个特征值来验证连接是否真的存活
+      // 注意：这里需要一个已知存在的特征值，这里假设 NUS_SERVICE_UUID 是存在的
+      // 如果没有合适的特征值，需要捕获错误
+      const services = await BleClient.getServices(deviceId)
+      return services && services.length > 0
+    } catch (error) {
+      console.warn('检查连接状态失败，设备可能已断开:', error)
+      // 连接状态异常，触发断开回调
+      if (this.connectedDevice?.deviceId === deviceId) {
+        this.connected = false
+        this.connectedDevice = null
+        this.triggerDisconnectCallbacks(deviceId, false)
+      }
+      return false
+    }
+  }
+
+  // ========== 结束：连接状态监控方法 ==========
+
   async saveBleDataToFile(dataLines) {
     if (!Array.isArray(dataLines) || dataLines.length === 0) {
       throw new Error('无数据可保存')
@@ -328,11 +434,33 @@ export class BluetoothService {
       const baseDirPath = 'pointcloud'
       const sessionDirPath = `${baseDirPath}/${sessionID}`
 
-      await Filesystem.mkdir({
-        path: sessionDirPath,
-        directory: Directory.Documents,
-        recursive: true,
-      })
+      // --- 修改点：检查目录是否存在 ---
+      try {
+        // 尝试读取目录内容，如果成功，说明目录存在
+        await Filesystem.readdir({
+          path: sessionDirPath,
+          directory: Directory.Documents,
+        })
+        console.log(`目录已存在: ${sessionDirPath}`)
+        // 目录存在，无需创建，直接继续
+      } catch (readdirError) {
+        // readdir 失败，检查错误信息是否是 "Directory does not exist"
+        if (readdirError.message.includes('Directory does not exist')) {
+          console.log(`目录不存在，即将创建: ${sessionDirPath}`)
+          // 目录不存在，尝试创建它及其父目录
+          await Filesystem.mkdir({
+            path: sessionDirPath,
+            directory: Directory.Documents,
+            recursive: true,
+          })
+          console.log(`目录创建成功: ${sessionDirPath}`)
+        } else {
+          // 如果不是 "Directory does not exist" 的错误，则抛出
+          console.error('检查目录时发生未知错误:', readdirError)
+          throw readdirError
+        }
+      }
+      // --- 结束修改 ---
 
       const content = dataLines.join('\n')
       const timestamp = new Date(Date.now() + 28800000) // 注意：这是东八区时间戳

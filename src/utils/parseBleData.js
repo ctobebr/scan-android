@@ -461,7 +461,7 @@ export class parseBleData {
   _handleEndTakePhoto() {
     console.log('收到结束拍照请求')
 
-    // --- 新增：检查是否有拍照正在进行 ---
+    // --- 检查是否有拍照正在进行 ---
     if (this.isProcessingPhoto) {
       console.log('拍照正在进行，将结束请求加入等待队列')
       return new Promise((resolve) => {
