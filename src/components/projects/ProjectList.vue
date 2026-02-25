@@ -4,7 +4,16 @@
     <div class="content-area">
       <div v-for="(item, index) in projectListItems" :key="index" class="list-item">
         <div class="thumbnail">
-          <img :src="item.thumbnail" :alt="`Project  ${index + 1} Thumbnail`" />
+          <img
+            :src="item.thumbnail"
+            :alt="`Project  ${index + 1} Thumbnail`"
+            @error="
+              (e) => {
+                console.warn('[ProjectList] thumbnail load error', item, e)
+                e.target.src = noImg
+              }
+            "
+          />
         </div>
         <div class="info">
           <!-- <div class="status-bar">
@@ -26,131 +35,52 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
-// 模拟项目列表数据
-const projectListItems = ref([
-  {
-    id: 1,
-    name: '项目1',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+1',
-    status: '未活跃',
-    date: '2026-01-30',
-    source: '云台'
+import noImg from '@/assets/img/noImg.png'
+
+const props = defineProps({
+  projects: { type: Array, default: () => null },
+})
+const projectListItems = ref([])
+
+// 响应 props.projects 的变化
+watch(
+  () => props.projects,
+  (newVal) => {
+    const arr = Array.isArray(newVal) ? newVal : (newVal && newVal.value) || []
+    if (arr && Array.isArray(arr)) {
+      const mapped = arr.map((p, idx) => ({
+        id: idx + 1,
+        name: p.projectName || p.name || p.folderName || `项目 ${idx + 1}`,
+        thumbnail: p.thumbUri || p.thumbnail || noImg,
+        status: '已保存',
+        date: p.displayName || p.sessionId || '',
+        source: p.projectName || '手机',
+      }))
+
+      // 按照 date 字段进行排序，最新的在前
+      const sortedMapped = mapped.sort((a, b) => {
+        // 尝试将 a.date 和 b.date 转换为 Date 对象进行比较
+        // 如果转换失败 (isNaN)，则将其视为最早的时间 (负无穷)
+        const dateA = new Date(a.date)
+        const dateB = new Date(b.date)
+
+        // 如果 a 的日期更晚（更大），则返回负数，a 排在 b 前面
+        if (dateA > dateB) return -1
+        // 如果 a 的日期更早（更小），则返回正数，b 排在 a 前面
+        if (dateA < dateB) return 1
+        // 如果相等，则保持原有顺序
+        return 0
+      })
+
+      projectListItems.value = sortedMapped
+    }
+    // 调试：输出接收到的项目数组，便于诊断缩略图路径问题
+    console.log('[ProjectList] props.projects changed:', JSON.stringify(arr))
   },
-  {
-    id: 2,
-    name: '项目2',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+2',
-    status: '活跃',
-    date: '2026-01-29',
-    source: '手机拍'
-  },
-  {
-    id: 3,
-    name: '项目3',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+3',
-    status: '未活跃',
-    date: '2026-01-28',
-    source: '云台'
-  },
-  {
-    id: 4,
-    name: '项目4',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+4',
-    status: '活跃',
-    date: '2026-01-27',
-    source: '云台'
-  },
-  {
-    id: 5,
-    name: '项目5',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+5',
-    status: '未活跃',
-    date: '2026-01-26',
-    source: '手机拍'
-  },
-  {
-    id: 6,
-    name: '项目6',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+6',
-    status: '活跃',
-    date: '2026-01-25',
-    source: '云台'
-  },
-  {
-    id: 7,
-    name: '项目7',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+7',
-    status: '未活跃',
-    date: '2026-01-24',
-    source: '手机拍'
-  },
-  {
-    id: 8,
-    name: '项目8',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+8',
-    status: '活跃',
-    date: '2026-01-23',
-    source: '云台'
-  },
-  {
-    id: 9,
-    name: '项目9',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+9',
-    status: '未活跃',
-    date: '2026-01-22',
-    source: '手机拍'
-  },
-  {
-    id: 10,
-    name: '项目10',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+10',
-    status: '活跃',
-    date: '2026-01-21',
-    source: '云台'
-  },
-  {
-    id: 11,
-    name: '项目11',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+11',
-    status: '未活跃',
-    date: '2026-01-20',
-    source: '手机拍'
-  },
-  {
-    id: 12,
-    name: '项目12',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+12',
-    status: '活跃',
-    date: '2026-01-19',
-    source: '云台'
-  },
-  {
-    id: 13,
-    name: '项目13',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+13',
-    status: '未活跃',
-    date: '2026-01-18',
-    source: '手机拍'
-  },
-  {
-    id: 14,
-    name: '项目14',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+14',
-    status: '活跃',
-    date: '2026-01-17',
-    source: '云台'
-  },
-  {
-    id: 15,
-    name: '项目15',
-    thumbnail: 'https://via.placeholder.com/300x200?text=Project+15',
-    status: '未活跃',
-    date: '2026-01-16',
-    source: '手机拍'
-  },
-])
+  { immediate: true },
+)
 
 // 切换项目状态
 // const toggleStatus = (index) => {
@@ -175,7 +105,7 @@ const projectListItems = ref([
   overflow-y: auto; /* 关键：当内容超出时允许垂直滚动 */
   /* 隐藏滚动条 */
   scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none;  /* IE and Edge */
+  -ms-overflow-style: none; /* IE and Edge */
 }
 
 .content-area::-webkit-scrollbar {

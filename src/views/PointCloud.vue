@@ -8,11 +8,7 @@
         <button class="back-btn" @click="goBack" aria-label="Back">
           <img src="@/assets/img/back.png" alt="返回" />
         </button>
-        <button
-          @click="saveMessages"
-          class="save-btn"
-          :disabled="saving"
-        >
+        <button @click="openSaveDialog" class="save-btn" :disabled="saving">
           {{ saving ? '保存中...' : '保存' }}
         </button>
         <button class="capture-btn" @click="startDataStream"></button>
@@ -42,13 +38,32 @@
             <button class="disconnect-back-btn" @click="goBack">返回</button>
           </div>
         </div>
+        <!-- 保存对话框 -->
+        <div v-if="showSaveDialog" class="save-dialog-overlay">
+          <div class="save-dialog-content">
+            <div class="save-dialog-card">
+              <h3>保存会话</h3>
+              <label>项目名称</label>
+              <input
+                ref="saveInput"
+                v-model="projectName"
+                placeholder="输入项目名称"
+                maxlength="10"
+              />
+              <div class="save-actions">
+                <button @click="confirmSave" :disabled="saving">完成</button>
+                <button @click="closeSaveDialog" :disabled="saving">取消</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
@@ -58,13 +73,16 @@ import { setImmersive } from '@/utils/immersive'
 import { bluetoothService } from '@/services/bluetoothService'
 import cameraHelper from '@/utils/cameraHelper'
 import { parseBleData } from '@/utils/parseBleData'
-import {
-  NUS_SERVICE_UUID,
-  NUS_NOTIFY_CHAR_UUID,
-} from '@/constants/protocolCommands'
+import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/protocolCommands'
 import { App } from '@capacitor/app'
-import { lockToLandscape, lockToPortrait, enableScreenKeepAwake, disableScreenKeepAwake } from '@/utils/screen'
-
+import {
+  lockToLandscape,
+  lockToPortrait,
+  unlockOrientation,
+  enableScreenKeepAwake,
+  disableScreenKeepAwake,
+} from '@/utils/screen'
+import { generateOptimizedSessionId } from '@/utils/sessionIdUtils'
 const bluetoothStore = useBluetoothStore()
 const router = useRouter()
 const goBack = () => {
@@ -82,17 +100,71 @@ const isCollecting = ref(false) // true = 正在采集（向渲染器加点）
 // const hasStarted = ref(false)
 const saving = ref(false) // 保存中状态
 let enableSave = false
+const showSaveDialog = ref(false)
+const projectName = ref('')
+const saveInput = ref(null)
+const lastSavedFolder = ref(null)
+const savedDuringDialog = ref(false)
+
+const openSaveDialog = async () => {
+  // if (!currentSessionId) {
+  //   showToast('会话ID未生成，无法保存')
+  //   return
+  // }
+  // if (sessionData.rawLines.length === 0 && sessionData.photos.length === 0) {
+  //   showToast('暂无数据可保存')
+  //   return
+  // }
+  // if (!enableSave) {
+  //   showToast('至少需要完成一个点位的数据采集')
+  //   return
+  // }
+  // await unlockOrientation()
+  showSaveDialog.value = true
+  nextTick(() => {
+    try {
+      if (saveInput && saveInput.value && saveInput.value.focus) {
+        saveInput.value.focus()
+      }
+    } catch (e) {
+      console.warn('focus failed', e)
+    }
+  })
+}
+const closeSaveDialog = async () => {
+  // await lockToLandscape()
+  showSaveDialog.value = false
+}
+
+const confirmSave = async () => {
+  const name = (projectName.value || '').trim()
+  // 验证长度与字符（允许中文、字母、数字、空格、下划线、短横）
+  if (name && name.length > 10) {
+    showToast('项目名称不能超过10个字符')
+    return
+  }
+  const validRe = /^[\u4e00-\u9fa5A-Za-z0-9 _-]*$/
+  if (name && !validRe.test(name)) {
+    showToast('项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线')
+    return
+  }
+
+  const folderName = name ? `${name}_${currentSessionId}` : currentSessionId
+  lastSavedFolder.value = folderName
+  savedDuringDialog.value = false
+  await performSave(folderName)
+}
 // --- 设备断开相关状态 ---
 const deviceDisconnected = ref(false)
 let disconnectUnregister = null
 // --- 结束：设备断开相关状态 ---
 
 // --- 会话相关数据 ---
-let currentSessionId = null; // 当前会话的唯一ID
+let currentSessionId = null // 当前会话的唯一ID
 let sessionData = {
   rawLines: [], // 用于保存点云文件的原始行
-  photos: []    // 存储拍照文件信息
-};
+  photos: [], // 存储拍照文件信息
+}
 let dataBatchCounter = ref(0) // 用于区分不同批次的数据
 
 let parser = null
@@ -104,7 +176,7 @@ let pauseListener = null
 let resumeListener = null
 
 // --- 记录进入后台前的采集状态 ---
-let wasCollectingBeforePause = false;
+let wasCollectingBeforePause = false
 onMounted(async () => {
   await init()
 
@@ -188,23 +260,20 @@ async function init() {
       window.addEventListener('resize', renderer.onResize)
 
       if (!currentSessionId) {
-         currentSessionId = generateOptimizedSessionId()
-         console.log('[PointCloudPage] Generated Session ID:', currentSessionId)
-         sessionData = { rawLines: [], photos: [] }
-         dataBatchCounter.value = 0
-         enableSave = false
+        currentSessionId = generateOptimizedSessionId()
+        // currentSessionId = dateToSessionId()
+        // const res =  parseSessionIdToFormattedTime(currentSessionId)
+        //  console.log('[PointCloudPage] Generated Session ID:', currentSessionId)
+        //  console.log('[PointCloudPage] Generated parseSessionIdToFormattedTime:', res)
+        sessionData = { rawLines: [], photos: [] }
+        dataBatchCounter.value = 0
+        enableSave = false
       }
     }
   }, 100)
 }
 
-// --- 生成优化后的会话ID ---
-function generateOptimizedSessionId() {
-  const now = new Date();
-  const datePart = now.toISOString().slice(0, 19).replace(/\D/g, ''); // YYYYMMDDHHMMSSmmm
-  const timestampNum = BigInt(datePart);
-  return timestampNum.toString(36);
-}
+// 生成优化后的会话ID 已从公共工具导出：`generateOptimizedSessionId`
 
 // --- 注册设备断开监听 ---
 function registerDisconnectListener() {
@@ -242,29 +311,31 @@ function registerDisconnectListener() {
 // --- 结束：注册设备断开监听 ---
 
 // --- 监听蓝牙Store的连接状态变化 ---
-watch(() => bluetoothStore.connectingStatus, (newStatus, oldStatus) => {
-  if (oldStatus === 2 && newStatus !== 2) {
-    // 连接从已连接变为非已连接状态
-    if (!deviceDisconnected.value) {
-      console.log('[PointCloudPage] 检测到全局连接状态变为未连接')
-      deviceDisconnected.value = true
-      isCollecting.value = false
-      // hasStarted.value = false
-      stopSessionParser()
+watch(
+  () => bluetoothStore.connectingStatus,
+  (newStatus, oldStatus) => {
+    if (oldStatus === 2 && newStatus !== 2) {
+      // 连接从已连接变为非已连接状态
+      if (!deviceDisconnected.value) {
+        console.log('[PointCloudPage] 检测到全局连接状态变为未连接')
+        deviceDisconnected.value = true
+        isCollecting.value = false
+        // hasStarted.value = false
+        stopSessionParser()
+      }
     }
-  }
-})
+  },
+)
 // --- 结束：监听蓝牙Store的连接状态变化 ---
 
 // ---清理资源函数 (进入后台时调用) ---
 async function cleanupResourcesForPause() {
-
   // 1. 记录当前采集状态，用于恢复
-  wasCollectingBeforePause = isCollecting.value;
+  wasCollectingBeforePause = isCollecting.value
 
   // 2. 如果正在采集，则停止会话解析器（取消订阅、停止相机、清除定时器）
   if (isCollecting.value) {
-    await stopSessionParser();
+    await stopSessionParser()
   } else {
     console.log('[PointCloudPage] 未在采集状态，无需停止会话解析器')
   }
@@ -273,7 +344,7 @@ async function cleanupResourcesForPause() {
   // bluetoothStore.handleSendEnd()
 
   // 4. 停止屏幕常亮
-  await disableScreenKeepAwake();
+  await disableScreenKeepAwake()
 }
 
 // 路由切换时彻底清理资源
@@ -341,14 +412,14 @@ async function handleAppResume() {
   // 2. 如果之前正在采集，则尝试恢复订阅
   if (wasCollectingBeforePause) {
     // 确保渲染器和会话ID都存在
-    if (isRendererReady.value && currentSessionId ) {
+    if (isRendererReady.value && currentSessionId) {
       // 重新启动会话解析器（重新订阅、启动相机）
-      startSessionParser();
+      startSessionParser()
     } else {
-      console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集');
+      console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
     }
   } else {
-    console.log('[App] 上次未在采集状态，无需恢复');
+    console.log('[App] 上次未在采集状态，无需恢复')
   }
 }
 
@@ -367,29 +438,33 @@ function startSessionParser() {
   // --- 结束：检查设备是否已断开 ---
 
   if (parser) return
-  console.log('[startSessionParser] Starting parser and subscription...');
+  console.log('[startSessionParser] Starting parser and subscription...')
   parser = new parseBleData({
     getDataBatchCounter: () => `dataBatch_${dataBatchCounter.value.toString().padStart(3, '0')}`,
     onStartPreview: async () => {
       // 拍照前再次检查连接状态
       if (deviceDisconnected.value) {
-        console.warn('[startSessionParser] Device disconnected before starting camera preview. Aborting.');
-        throw new Error('Device disconnected before starting camera preview.');
+        console.warn(
+          '[startSessionParser] Device disconnected before starting camera preview. Aborting.',
+        )
+        throw new Error('Device disconnected before starting camera preview.')
       }
       return cameraHelper.startPreview('cameraPreview')
     },
     onTakePhoto: async ({ fileBaseName, meta }) => {
       if (deviceDisconnected.value) {
-        console.warn('[startSessionParser] Device disconnected before taking photo. Aborting photo capture.');
-        throw new Error('Device disconnected before taking photo.');
+        console.warn(
+          '[startSessionParser] Device disconnected before taking photo. Aborting photo capture.',
+        )
+        throw new Error('Device disconnected before taking photo.')
       }
       try {
         const photoData = await cameraHelper.captureAndSave(fileBaseName)
         if (photoData && photoData.base64Data && photoData.fileName) {
           sessionData.photos.push({
             name: photoData.fileName,
-            base64: photoData.base64Data
-          });
+            base64: photoData.base64Data,
+          })
         }
         return photoData
       } catch (e) {
@@ -403,7 +478,7 @@ function startSessionParser() {
     onPhotoSessionEnded: () => {
       dataBatchCounter.value++
       enableSave = true
-    }
+    },
   })
 
   const deviceId = bluetoothStore.connectingDeviceId
@@ -447,22 +522,22 @@ function startSessionParser() {
 async function startDataStream() {
   // --- 检查设备是否已断开 ---
   if (deviceDisconnected.value) {
-    showToast('设备已断开连接，请返回重连');
-    return;
+    showToast('设备已断开连接，请返回重连')
+    return
   }
   if (bluetoothStore.connectingStatus !== 2) {
-    showToast('设备未连接');
-    return;
+    showToast('设备未连接')
+    return
   }
   // --- 结束：检查设备是否已断开 ---
 
   if (!isRendererReady.value) {
-    showToast('渲染器未准备好');
-    return;
+    showToast('渲染器未准备好')
+    return
   }
   if (!currentSessionId) {
-     showToast('会话ID未生成');
-     return;
+    showToast('会话ID未生成')
+    return
   }
   isCollecting.value = true
   // hasStarted.value = true
@@ -471,26 +546,40 @@ async function startDataStream() {
   startSessionParser()
 }
 
-// --- 修改后的保存函数 ---
-const saveMessages = async () => {
-  if (!currentSessionId) {
-     showToast('会话ID未生成，无法保存');
-     return;
-  }
-  // 没有照片数据或者是没有点云数据或者是没有完成一次采集任务时
-  if ((sessionData.rawLines.length === 0 && sessionData.photos.length === 0) || !enableSave) {
-    showToast('暂无数据可保存')
-    return
-  }
+// --- 打开保存对话或直接保存（保留兼容旧调用） ---
+// const saveMessages = async () => {
+//   openSaveDialog()
+// }
+
+// 执行保存逻辑，folderName 为 'projectName_sessionId' 或仅 sessionId
+async function performSave(folderName) {
   saving.value = true
   try {
     const result = await bluetoothService.saveBleDataToFileWithSessionStructure(
       sessionData.rawLines,
-      currentSessionId,
-      sessionData.photos
+      folderName,
+      sessionData.photos,
     )
     console.log('保存成功:', JSON.stringify(result))
-    showToast(`会话 ${currentSessionId} 已保存\n点云: ${result.lineCount} 行\n照片: ${result.photoPaths.length} 张`);
+    showToast(
+      `会话 ${folderName} 已保存\n点云: ${result.lineCount} 行\n照片: ${result.photoPaths.length} 张`,
+    )
+    // 标记为已保存，记录已保存的文件夹
+    savedDuringDialog.value = true
+    lastSavedFolder.value = folderName
+    closeSaveDialog()
+    // 通知外部刷新（主页面会监听此事件并调用 loadProjectFolders）
+    try {
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(
+          new CustomEvent('pointcloud-updated', { detail: { folder: folderName } }),
+        )
+      }
+    } catch (e) {
+      console.warn('dispatch pointcloud-updated failed', e)
+    }
+    // 完成后返回主页面
+    router.back()
   } catch (error) {
     console.error('保存失败:', error)
     showToast('保存失败：' + (error.message || '未知错误'))
@@ -501,15 +590,19 @@ const saveMessages = async () => {
 
 // 停止订阅，停止相机预览，清理累积定时器
 async function stopSessionParser() {
-  console.log('[stopSessionParser] Stopping parser and subscription...');
+  console.log('[stopSessionParser] Stopping parser and subscription...')
   if (accumulationTimer) {
-    clearInterval(accumulationTimer);
-    accumulationTimer = null;
+    clearInterval(accumulationTimer)
+    accumulationTimer = null
   }
   try {
     const deviceId = bluetoothStore.connectingDeviceId
     if (deviceId) {
-      await bluetoothService.unsubscribeFromNotifications(deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID)
+      await bluetoothService.unsubscribeFromNotifications(
+        deviceId,
+        NUS_SERVICE_UUID,
+        NUS_NOTIFY_CHAR_UUID,
+      )
     }
   } catch (e) {
     console.warn('unsubscribe failed', e)
@@ -518,7 +611,6 @@ async function stopSessionParser() {
   parser = null
 }
 </script>
-
 
 <style scoped>
 .point-cloud-page {
@@ -641,6 +733,51 @@ async function stopSessionParser() {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* 保存对话框覆盖层需要接收事件 */
+
+/* 整合后的保存对话框样式：全屏覆盖模态 */
+.save-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.save-dialog-content {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  background: transparent; /* 内容内使用半透明卡片样式 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.save-dialog-card {
+  width: 60vw;
+  max-width: 700px;
+  max-height: 90vh;
+  background: rgba(15, 23, 36, 0.98);
+  color: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  overflow: auto;
+}
+
+.save-dialog-content input {
+  width: 100%;
+  margin: 8px 0 12px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
 .save-btn:hover {
   background: linear-gradient(145deg, #4d9eff, #2a7aff);
   box-shadow: 0 6px 16px var(--brand-glow);
@@ -671,8 +808,9 @@ async function stopSessionParser() {
   height: 56px;
   border-radius: 50%;
   border: none;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.1), transparent 80%),
-              var(--brand-gradient);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.1), transparent 80%),
+    var(--brand-gradient);
   pointer-events: auto;
   z-index: 11;
   cursor: pointer;
@@ -829,6 +967,29 @@ async function stopSessionParser() {
   transform: translateY(1px);
 }
 
+.save-dialog-content h3 {
+  margin: 0 0 8px 0;
+}
+.save-dialog-content input {
+  width: 100%;
+  padding: 8px 10px;
+  margin: 8px 0 12px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #fff;
+}
+.save-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.save-actions button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+}
 
 @media (max-width: 768px) {
   .overlay-controls {

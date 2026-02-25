@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 // 示例：导入你的页面组件
 // import About from '../views/About.vue'
 // import BluetoothView from '@/views/BluetoothView.vue'
+import BluetoothTest from '@/components/BluetoothTest.vue'
 import PointCloud from '@/views/PointCloud.vue'
 import CaremaView from '@/views/CaremaView.vue'
 import FileSave from '@/views/FileSave.vue'
@@ -40,6 +41,11 @@ const routes = [
     path: '/fileSave',
     name: 'FileSave',
     component: FileSave,
+  },
+  {
+    path: '/bluetoothTest',
+    name: 'BluetoothTest',
+    component: BluetoothTest,
   },
 ]
 

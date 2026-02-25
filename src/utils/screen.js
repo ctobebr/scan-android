@@ -17,7 +17,14 @@ export async function lockToLandscape() {
     console.warn('Failed to lock to landscape:', error)
   }
 }
-
+// 解锁屏幕旋转，跟随系统设置
+export async function unlockOrientation() {
+  try {
+    await ScreenOrientation.lock({ orientation: 'any' })
+  } catch (error) {
+    console.warn('Failed to unlock orientation:', error)
+  }
+}
 
 // 进入页面时保持常亮
 export async function enableScreenKeepAwake() {

@@ -5,43 +5,35 @@
         <p>加载中...</p>
       </div>
 
-      <div v-else-if="files.length === 0" class="empty-state">
+      <div v-else-if="sessions.length === 0" class="empty-state">
         <p>暂无历史数据文件</p>
       </div>
 
       <div v-else class="list">
-        <div
-          v-for="file in files"
-          :key="file.name"
-          class="list-item"
-        >
+        <div v-for="session in sessions" :key="session.folderName" class="list-item">
           <div class="info">
-            <div class="title">{{ file.name }}</div>
+            <div class="title">{{ session.displayName }}</div>
             <div class="date">
-              <span>{{ formatDate(file.mtime) }}</span>
+              <span>{{ session.firstFile ? formatDate(session.firstFile.mtime) : '空' }}</span>
             </div>
             <div class="date">
-              <span>{{ formatFileSize(file.size) }}</span>
+              <span>{{
+                session.firstFile ? formatFileSize(session.firstFile.size || 0) : '空'
+              }}</span>
             </div>
           </div>
 
           <!-- 操作图标容器 -->
           <div class="action-icons">
-            <!-- <img
-              src="@/assets/img/review.png"
-              @click.stop="onReviewClick(file.name)"
-              class="icon-review"
-              alt="Review"
-            /> -->
             <img
               src="@/assets/img/share.png"
-              @click.stop="onShareClick(file.name)"
+              @click.stop="onShareClick(session.folderName, session.projectName, session.sessionId)"
               class="icon-share"
               alt="Share"
             />
             <img
               src="@/assets/img/delete.png"
-              @click.stop="onDeleteClick(file.name)"
+              @click.stop="onDeleteClick('pointcloud/' + session.folderName)"
               class="icon-delete"
               alt="Delete"
             />
@@ -53,85 +45,247 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { Filesystem, Directory } from '@capacitor/filesystem'
+import { App } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import { bluetoothService } from '@/services/bluetoothService'
 import { showToast } from '@/utils/toast'
+import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { Share } from '@capacitor/share'
-
+import { AppLauncher, LaunchWebUrlResult } from '@capacitor/app-launcher'
 const loadingFiles = ref(false)
-const files = ref([])
+const sessions = ref([])
 
 const loadFileList = async () => {
   loadingFiles.value = true
   try {
-    files.value = await bluetoothService.listBleDataFiles()
+    const folders = await bluetoothService.listPointCloudFolders()
+    console.log('folders:', JSON.stringify(folders))
+    const items = []
+    for (const f of folders) {
+      const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${f.name}`)
+      // 选择最新的文件作为 firstFile（按 mtime 倒序）
+      const sortedFiles = (filesInFolder || [])
+        .slice()
+        .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+      const firstFile = sortedFiles.length > 0 ? sortedFiles[0] : null
+      // 尝试从文件夹名解析项目名与 sessionId
+      let projectName = f.name
+      let sessionId = f.name
+      // 如果命名为 project_sessionId，则拆分
+      const idx = f.name.lastIndexOf('_')
+      if (idx > 0) {
+        projectName = f.name.slice(0, idx)
+        sessionId = f.name.slice(idx + 1)
+      }
+      const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId
+      // 标题显示优先级：项目名称 > 会话ID
+      const title = projectName && projectName !== sessionId ? projectName : sessionId
+      items.push({
+        folderName: f.name,
+        projectName,
+        sessionId,
+        displayName: title,
+        timeStr,
+        firstFile,
+      })
+    }
+    // 按时间倒序：有 firstFile 的按 firstFile.mtime 排序，否则放到末尾
+    items.sort((a, b) => (b.firstFile?.mtime || 0) - (a.firstFile?.mtime || 0))
+    sessions.value = items
   } catch (error) {
-    console.error('加载文件列表失败:', error)
-    showToast('加载文件列表失败: ' + error.message)
-    files.value = []
+    console.error('加载会话列表失败:', error)
+    showToast('加载会话列表失败: ' + (error.message || error))
+    sessions.value = []
   } finally {
     loadingFiles.value = false
   }
 }
-
-const onShareClick = async (filename) => {
+const onShareClick = async (folderName, projectName, sessionId) => {
   try {
-    const fileUri = await bluetoothService.getURL(filename)
-    await Share.share({
-      title: `打开数据文件:  ${filename}`,
-      url: fileUri,
-      dialogTitle: '选择应用打开文件',
-    })
+    // 检查会话文件夹是否为空
+    const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${folderName}`)
+    if (!filesInFolder || filesInFolder.length === 0) {
+      if (confirm('当前会话文件夹为空，是否删除该会话？')) {
+        await bluetoothService.deleteFolder(folderName)
+        await loadFileList()
+      }
+      return
+    }
+
+    const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId
+    const zipBaseName = `${timeStr}_${projectName || sessionId}`
+    console.log(
+      '[FileList] 请求打包分享 folder=' +
+        String(folderName) +
+        ' zipBaseName=' +
+        String(zipBaseName),
+    )
+    const res = await bluetoothService.zipSessionToFile(folderName, zipBaseName)
+    if (res && res.uri) {
+      await Share.share({
+        title: `${zipBaseName}.zip`,
+        url: res.uri,
+        dialogTitle: '选择应用分享压缩包',
+      })
+      // 分享后尝试在文件管理器中打开目标文件夹，便于手动复制到 U 盘
+      // try {
+      //   const rel = folderName
+      //   console.warn('调用 FileManagerOpener.openFolder 中3...')
+      //   if (Plugins && Plugins.FileManagerOpener && Plugins.FileManagerOpener.openFolder) {
+      //     await Plugins.FileManagerOpener.openFolder({ path: rel })
+      //     console.warn('调用 FileManagerOpener.openFolder 中2...')
+      //   } else if ((window ).Capacitor && (window).Capacitor.Plugins?.FileManagerOpener) {
+      //     console.warn('调用 FileManagerOpener.openFolder 中1...')
+      //     await (window).Capacitor.Plugins.FileManagerOpener.openFolder({ path: rel })
+      //   }
+      //   console.warn('调用 FileManagerOpener.openFolder 中...')
+      // } catch (e) {
+      //   console.warn('调用 FileManagerOpener.openFolder 失败', e)
+      // }
+      // showToast('压缩包已生成：' + String(res.path) + '，可使用文件管理器复制到 U 盘')
+    } else {
+      showToast('打包失败，未生成可分享文件')
+    }
   } catch (error) {
-    console.error(`分享文件 " ${filename}" 失败:`, error)
-    showToast(`分享文件 " ${filename}" 失败 (可能因文件过大):  ${error.message}`)
-    // 也可以考虑跳转到详情页作为备选
-    // router.push({...});
+    console.error('分享会话失败:', error)
+    const msg = (error && error.message) || String(error)
+    if (/cancel|canceled|用户取消|Share canceled/i.test(msg)) {
+      showToast('分享已取消')
+    } else if (/FILE_NOTCREATED/i.test(msg)) {
+      showToast('打包失败：未创建文件')
+    } else {
+      showToast('分享失败: ' + msg)
+    }
   }
 }
+// const onShareClick = async (folderName, projectName, sessionId) => {
+//   try {
+//     // 检查会话文件夹是否为空
+//     const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${folderName}`)
+//     if (!filesInFolder || filesInFolder.length === 0) {
+//       if (confirm('当前会话文件夹为空，是否删除该会话？')) {
+//         await bluetoothService.deleteFolder(folderName)
+//         await loadFileList()
+//       }
+//       return
+//     }
+
+//     const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId
+//     const zipBaseName = `${timeStr}_${projectName || sessionId}`
+//     console.log(
+//       '[FileList] 请求打包分享 folder=' +
+//         String(folderName) +
+//         ' zipBaseName=' +
+//         String(zipBaseName),
+//     )
+//     const res = await bluetoothService.zipSessionToFile(folderName, zipBaseName)
+//     if (res) {
+//       // 准备分享数据
+//       let fileUri = null;
+//       // 尝试获取文件 URI
+//       if (res.uri) {
+//         fileUri = res.uri;
+//       } else if (res.path) {
+//         // 如果插件返回了绝对路径，尝试通过 getURL 获取 URI
+//         try {
+//           fileUri = await bluetoothService.getURL(res.path);
+//         } catch (e) {
+//           console.warn('通过 res.path 获取 URI 失败:', e);
+//         }
+//       } else if (res.relativePath) {
+//          // 如果插件返回了相对路径，也尝试通过 getURL 获取 URI
+//         try {
+//           fileUri = await bluetoothService.getURL(res.relativePath);
+//         } catch (e) {
+//           console.warn('通过 res.relativePath 获取 URI 失败:', e);
+//         }
+//       }
+
+//       if (fileUri) {
+//         await Share.share({
+//           title: `分享数据文件: ${zipBaseName}.zip`,
+//           url: fileUri,
+//           dialogTitle: '选择应用分享文件',
+//         })
+//       } else {
+//         // 如果无法获取 URI，则回退到原来的逻辑，打开文件管理器
+//         console.warn('无法获取文件URI，回退到打开文件管理器');
+//         let targetDir = folderName
+//         if (res.relativePath && typeof res.relativePath === 'string') {
+//           const rp = res.relativePath.replace(/\\/g, '/')
+//           const parts = rp.split('/')
+//           if (parts.length > 1) parts.pop()
+//           targetDir = parts.join('/') || folderName
+//         }
+//         const plugin = Capacitor.Plugins && Capacitor.Plugins.FileManagerOpener
+//         if (plugin && plugin.openFolder) {
+//           await plugin.openFolder({ path: targetDir })
+//           showToast('已打开文件管理器，定位到：' + targetDir)
+//         } else if (window?.Capacitor?.Plugins?.FileManagerOpener) {
+//           await window.Capacitor.Plugins.FileManagerOpener.openFolder({ path: targetDir })
+//           showToast('已打开文件管理器，定位到：' + targetDir)
+//         } else {
+//           showToast(
+//             '未找到原生插件，压缩包已生成：' + String(res.path || res.relativePath || res.uri),
+//           )
+//         }
+//       }
+//     } else {
+//       showToast('打包失败，未生成文件')
+//     }
+//   } catch (error) {
+//     console.error('分享会话失败:', error)
+//     // 使用与模板相同的错误处理
+//     showToast(`分享文件 "${zipBaseName || sessionId}" 失败 (可能因文件过大): ${error.message}`)
+
+//     const msg = (error && error.message) || String(error)
+//     if (/cancel|canceled|用户取消|Share canceled/i.test(msg)) {
+//       showToast('分享已取消')
+//     } else if (/FILE_NOTCREATED/i.test(msg)) {
+//       showToast('打包失败：未创建文件')
+//     } else {
+//       showToast('分享失败: ' + msg)
+//     }
+//   }
+// }
 
 /**
  * 处理 Delete 按钮点击
  * @param {string} fileName - 被点击项的文件名
  */
-const onDeleteClick = (fileName) => {
-  console.log(`删除按钮被点击，文件名:  ${fileName}`)
-  showMoreOptions(fileName) // Reuse the existing confirmation logic
+const onDeleteClick = (fileNameOrFolder) => {
+  console.log(`删除按钮被点击，目标:  ${fileNameOrFolder}`)
+  showMoreOptions(fileNameOrFolder) // Reuse the existing confirmation logic
 }
 
 const showMoreOptions = (filename) => {
-  if (confirm(`确定要删除文件 " ${filename}" 吗？此操作不可撤销。`)) {
+  const rel = (filename || '').replace('pointcloud/', '')
+  if (confirm(`确定要删除会话 "${rel}" 吗？此操作不可撤销。`)) {
     deleteFile(filename)
   }
 }
 
 const deleteFile = async (filename) => {
-  let originalFiles = [...files.value]; // 缓存删除前的文件列表，用于恢复
-
+  // 支持删除单文件或整个文件夹（若传入为文件夹名）
   try {
-    // 1. 立即乐观更新 UI：从本地列表中移除该项，给用户即时反馈
-    files.value = files.value.filter(f => f.name !== filename);
-
-    // 2. 发起实际删除请求
-    // 注意：你需要确保 bluetoothService 中实现了 deleteBleDataFile 方法
-    await bluetoothService.deleteBleDataFile(filename);
-
-    // 3. 成功后显示提示
-    showToast(`文件 " ${filename}" 已成功删除`);
-
-  } catch (error) {
-    console.error(`删除文件 " ${filename}" 失败:`, error);
-
-    // 4. 删除失败时，回滚 UI 到删除前的状态
-    files.value = originalFiles;
-
-    // 5. 显示错误提示
-    showToast(`删除文件 " ${filename}" 失败:  ${error.message}`);
+    // 如果是文件夹（pointcloud/<folder>），使用统一接口删除整个文件夹
+    if (filename && filename.includes('pointcloud/')) {
+      const rel = filename.replace('pointcloud/', '')
+      console.log('[FileList] 请求删除文件夹: ' + rel)
+      await bluetoothService.deleteFolder(rel)
+    } else {
+      // 删除单个文件位于 Documents 根
+      console.log('[FileList] 请求删除单文件: ' + filename)
+      await bluetoothService.deleteBleDataFile(filename)
+    }
+    showToast('删除完成')
+  } catch (e) {
+    console.error('删除失败', e)
+    showToast('删除失败: ' + (e.message || e))
   } finally {
-    // 加载最新的文件列表，以确保 UI 与服务器状态同步
-    // 如果删除失败，这次加载会再次获取到刚才删除失败的文件
-    // 如果删除成功，这次加载会获取到最新的列表
-    await loadFileList();
+    await loadFileList()
   }
 }
 
@@ -150,6 +304,19 @@ const formatFileSize = (bytes) => {
 
 onMounted(() => {
   loadFileList()
+  try {
+    window.addEventListener('pointcloud-updated', loadFileList)
+  } catch (e) {
+    console.warn('addEventListener pointcloud-updated failed', e)
+  }
+})
+
+onBeforeUnmount(() => {
+  try {
+    window.removeEventListener('pointcloud-updated', loadFileList)
+  } catch (e) {
+    console.warn('removeEventListener failed', e)
+  }
 })
 </script>
 

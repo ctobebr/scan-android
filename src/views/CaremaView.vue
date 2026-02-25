@@ -41,7 +41,6 @@
 import { ref } from 'vue'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { Filesystem, Directory } from '@capacitor/filesystem'
-// import { showToast } from '@/utils/toast'
 
 const photo = ref(null)
 const isTaking = ref(false)

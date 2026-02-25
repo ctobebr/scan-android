@@ -60,6 +60,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
         // showToast(JSON.stringify(122))
         const found = await bluetoothService.scanDevices(5000)
         // showToast(JSON.stringify(found))
+        console.log('发现附近的设备:', JSON.stringify(found))
         this.devices = found
       } catch (err) {
         console.error('扫描异常:', err)

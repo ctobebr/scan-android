@@ -1,6 +1,7 @@
 // src/services/bluetoothService.js
 import { BluetoothLe, BleClient } from '@capacitor-community/bluetooth-le'
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
 // ========== 协议常量 ==========
 import {
   PROTOCOL_HEADER_HIGH,
@@ -636,6 +637,301 @@ export class BluetoothService {
       }
       // 抛出原始错误或包装后的错误
       throw new Error(`删除文件失败:  ${error.message}`)
+    }
+  }
+
+  /**
+   * 删除 pointcloud 下指定会话文件夹及其内容
+   * @param {string} folderOrRel - 可以是 'pointcloud/<folder>' 或 '<folder>' 或 仅文件夹名
+   */
+  async deleteFolder(folderOrRel) {
+    if (!folderOrRel) throw new Error('folderOrRel required')
+    let rel = folderOrRel
+    if (rel.startsWith('pointcloud/')) rel = rel.replace('pointcloud/', '')
+    const folderPath = `pointcloud/${rel}`
+    try {
+      const files = await this.listFilesInFolder(folderPath)
+      console.log('[bluetoothService] deleteFolder listing:', JSON.stringify(files))
+      for (const f of files) {
+        try {
+          await Filesystem.deleteFile({
+            path: `${folderPath}/${f.name}`,
+            directory: Directory.Documents,
+          })
+          console.log(`[bluetoothService] 删除文件: ${folderPath}/${f.name}`)
+        } catch (e) {
+          console.warn(`[bluetoothService] 删除文件失败: ${folderPath}/${f.name}`, e)
+        }
+      }
+
+      // 尝试删除目录（如果平台支持 rmdir）
+      try {
+        if (Filesystem.rmdir) {
+          await Filesystem.rmdir({ path: folderPath, directory: Directory.Documents })
+          console.log('[bluetoothService] rmdir 成功:', folderPath)
+        } else {
+          // 某些平台没有 rmdir，尝试删除文件夹路径作为文件（可能失败但无害）
+          await Filesystem.deleteFile({ path: folderPath, directory: Directory.Documents }).catch(
+            () => {},
+          )
+        }
+      } catch (e) {
+        console.warn('[bluetoothService] 删除目录失败（可能平台不支持），忽略:', e)
+      }
+
+      // 广播更新事件，通知界面刷新项目/数据列表
+      try {
+        if (typeof window !== 'undefined' && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent('pointcloud-updated', { detail: { folder: rel } }))
+          console.log('[bluetoothService] dispatched pointcloud-updated for', rel)
+        }
+      } catch (e) {
+        console.warn('[bluetoothService] dispatch pointcloud-updated failed', e)
+      }
+
+      return true
+    } catch (error) {
+      console.error('[bluetoothService] deleteFolder 失败:', error)
+      throw new Error('删除文件夹失败: ' + (error.message || error))
+    }
+  }
+  /**
+   *  列出Documents目录下的pointcloud文件夹下的所有文件夹
+   * @returns
+   */
+  async listPointCloudFolders() {
+    const folderPath = 'pointcloud' // 指定要列出子文件夹的父文件夹路径
+    try {
+      const result = await Filesystem.readdir({
+        path: folderPath, // 指向 'pointcloud' 文件夹
+        directory: Directory.Documents,
+      })
+
+      // 过滤出类型为目录的条目
+      const folders = result.files
+        .filter((item) => item.type === 'directory') // 只保留目录
+        .map((folder) => ({
+          name: folder.name, // 文件夹名称
+          uri: folder.uri, // 文件夹的 URI (可选，取决于 Capacitor 版本和平台)。
+        }))
+
+      // console.log('读取文件夹列表成功:', JSON.stringify(folders))
+      return folders
+    } catch (error) {
+      console.error('读取文件夹列表失败:', error)
+      // 检查错误是否是因为 pointcloud 文件夹不存在
+      if (error.message.includes('ENOENT')) {
+        console.warn(`文件夹 Documents/${folderPath} 不存在或路径错误.`)
+        return [] // 如果文件夹不存在，返回一个空数组而不是抛出错误
+      }
+      throw new Error('读取文件夹列表失败: ' + error.message)
+    }
+  }
+
+  /**
+   * 列出指定目录下的文件（不递归）
+   * @param {string} folderPath - 相对于 Documents 的路径，例如 'pointcloud/sessionId'
+   * @returns {Promise<Array<{name:string,uri?:string,type?:string}>>}
+   */
+  async listFilesInFolder(folderPath) {
+    try {
+      const result = await Filesystem.readdir({
+        path: folderPath,
+        directory: Directory.Documents,
+      })
+      // result.files 可能包含 name、uri、type
+      return result.files || []
+    } catch (error) {
+      console.error('读取文件夹内容失败:', folderPath, error)
+      return []
+    }
+  }
+
+  /**
+   * 获取 session 下的第一张图片的 URI（如果有）
+   * @param {string} sessionId
+   * @returns {Promise<string|null>} 返回可用的 URI 或 null
+   */
+  async getFirstPhotoUri(sessionId) {
+    if (!sessionId) return null
+    const folderPath = `pointcloud/${sessionId}`
+    try {
+      const files = await this.listFilesInFolder(folderPath)
+      if (!files || files.length === 0) return null
+      // 挑选第一个图片文件（严格筛选图片扩展名，若无图片则返回 null）
+      const imageRe = /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i
+      const img = files.find((f) => imageRe.test(f.name))
+      if (!img) {
+        console.log('[bluetoothService] getFirstPhotoUri: no image file found in', folderPath)
+        return null
+      }
+      try {
+        const uriResult = await Filesystem.getUri({
+          directory: Directory.Documents,
+          path: `${folderPath}/${img.name}`,
+        })
+        console.log('[bluetoothService] getFirstPhotoUri getUri ->', uriResult)
+        return uriResult?.uri || null
+      } catch (e) {
+        console.warn('[bluetoothService] getFirstPhotoUri getUri 失败，尝试读取 base64 回退:', e)
+        try {
+          const read = await Filesystem.readFile({
+            directory: Directory.Documents,
+            path: `${folderPath}/${img.name}`,
+          })
+          if (read && read.data) {
+            // 根据扩展名猜 MIME
+            const lower = img.name.toLowerCase()
+            const mime = lower.endsWith('.png')
+              ? 'image/png'
+              : lower.endsWith('.webp')
+                ? 'image/webp'
+                : 'image/jpeg'
+            const dataUri = `data:${mime};base64,${read.data}`
+            console.log('[bluetoothService] getFirstPhotoUri 返回 dataURI 大小:', read.data.length)
+            return dataUri
+          }
+        } catch (e2) {
+          console.warn('[bluetoothService] getFirstPhotoUri 读取文件回退也失败:', e2)
+        }
+        return null
+      }
+    } catch (e) {
+      console.warn('获取第一张照片失败:', e)
+      return null
+    }
+  }
+
+  /**
+   * 将 session 文件夹内的文件打包为 zip，并写入 Documents，返回 zip 的 uri
+   * @param {string} sessionFolderName - pointcloud 下的文件夹名
+   * @param {string} zipFileName - 输出 zip 名（不含扩展名）
+   * @returns {Promise<{uri:string, path:string}>}
+   */
+  async zipSessionToFile(sessionFolderName, zipFileName) {
+    if (!sessionFolderName) throw new Error('sessionFolderName required')
+    const folderPath = `pointcloud/${sessionFolderName}`
+
+    // 尝试确保 JSZip 可用：优先使用 window.JSZip（CDN 注入），其次尝试从模块导入
+    let JSZipLib = null
+    if (typeof window !== 'undefined' && window.JSZip) {
+      JSZipLib = window.JSZip
+    } else {
+      // 尝试通过模块导入（需要在 package.json 中安装 jszip）
+      try {
+        // 动态 import，构建环境若支持会从 node_modules 加载
+        const mod = await import('jszip')
+        JSZipLib = mod.default || mod
+      } catch (impErr) {
+        // 若模块导入失败，再尝试通过 CDN 注入脚本（浏览器运行时）
+        if (typeof window !== 'undefined') {
+          try {
+            await new Promise((resolve, reject) => {
+              const script = document.createElement('script')
+              script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.0/dist/jszip.min.js'
+              script.onload = resolve
+              script.onerror = reject
+              document.head.appendChild(script)
+            })
+            JSZipLib = window.JSZip
+          } catch (cdnErr) {
+            console.warn('加载 JSZip 失败（模块导入和 CDN 注入均失败）', impErr, cdnErr)
+          }
+        }
+      }
+    }
+
+    if (!JSZipLib) {
+      throw new Error('无法加载压缩库 JSZip（请确保网络可用或在项目中安装 jszip 依赖）')
+    }
+
+    // ---在创建 zip 对象和处理文件之前检查 ---
+    // 过滤文件名非法字符
+    const sanitize = (s) => (s || '').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_')
+    const safeBase = sanitize(zipFileName || sessionFolderName)
+    const zipName = `${safeBase}.zip`
+    // 写入到 pointcloud/<sessionFolderName>/ 下，避免与 Documents 根冲突
+    const targetDir = `pointcloud/${sessionFolderName}`
+    const zipPath = `${targetDir}/${zipName}`
+
+    console.log('[bluetoothService] zipSessionToFile 检查 zip 是否已存在 -> path=' + zipPath)
+
+    // 如果 zip 已存在则直接返回现有文件，避免重复生成
+    try {
+      const stat = await Filesystem.stat({ path: zipPath, directory: Directory.Documents })
+      if (stat) {
+        const existingUri = (
+          await Filesystem.getUri({ path: zipPath, directory: Directory.Documents })
+        ).uri
+        console.log('[bluetoothService] zip 已存在，返回已有文件 -> ' + String(existingUri))
+        return { uri: existingUri, path: zipPath, relativePath: zipPath }
+      }
+    } catch (eStat) {
+      // stat 失败表示文件不存在或平台不支持 stat，继续生成
+      console.log('[bluetoothService] zip 不存在或 stat 不可用，准备生成: ' + String(eStat))
+    }
+
+    const zip = new JSZipLib()
+
+    try {
+      const files = await this.listFilesInFolder(folderPath)
+      if (!files || files.length === 0) throw new Error('会话下无文件')
+
+      // 读取每个文件并加入 zip
+      for (const f of files) {
+        try {
+          // 先尝试以 base64 读取（适合图片）
+          const read = await Filesystem.readFile({
+            path: `${folderPath}/${f.name}`,
+            directory: Directory.Documents,
+          })
+          const data = read.data
+          // 假设 data 为 base64
+          zip.file(f.name, data, { base64: true })
+        } catch (e) {
+          console.warn('读取文件失败，尝试获取 URI 并 fetch:', f.name, e)
+          try {
+            const uriRes = await Filesystem.getUri({
+              path: `${folderPath}/${f.name}`,
+              directory: Directory.Documents,
+            })
+            const resp = await fetch(uriRes.uri)
+            const blob = await resp.blob()
+            const arrayBuffer = await blob.arrayBuffer()
+            zip.file(f.name, arrayBuffer)
+          } catch (e2) {
+            console.warn('从 URI 获取并添加到 zip 失败:', f.name, e2)
+          }
+        }
+      }
+      // 将二进制数据通过base64编码转文本字符串
+      const content = await zip.generateAsync({ type: 'base64' })
+
+      console.log(
+        '[bluetoothService] zipSessionToFile 生成 zip -> path=' +
+          zipPath +
+          ' sizeBase64=' +
+          String(content.length),
+      )
+
+      // 确保目录存在  写入前创建pointcloud/76jev5vt0/文件夹
+      try {
+        await Filesystem.mkdir({ path: targetDir, directory: Directory.Documents, recursive: true })
+        console.log('[bluetoothService] mkdir 成功 or 已存在: ' + targetDir)
+      } catch (mkErr) {
+        console.warn('[bluetoothService] mkdir 可能失败或已存在: ' + String(mkErr))
+      }
+
+      // 将生成的contentbase64形式的字符串转二进制，并写入磁盘
+      await Filesystem.writeFile({ path: zipPath, data: content, directory: Directory.Documents })
+      const uriRes = await Filesystem.getUri({ path: zipPath, directory: Directory.Documents })
+      console.log(
+        '[bluetoothService] zipSessionToFile 写入完成 uri -> ' + String(uriRes && uriRes.uri),
+      )
+      return { uri: uriRes.uri, path: zipPath, relativePath: zipPath }
+    } catch (error) {
+      console.error('打包会话失败', error)
+      throw error
     }
   }
   /**

@@ -36,9 +36,12 @@
             android:name=".MainActivity"
             android:label="@string/app_name"
             android:theme="@style/AppTheme.NoActionBarLaunch"
-            android:launchMode="singleTask"
+            android:launchMode="standard"
             android:exported="true">
-
+<!-- 
+standard (默认)：每次启动 Activity 都会创建一个新的实例放入任务栈。
+singleTop：如果 Activity 实例已经位于任务栈的顶部，则不会创建新实例，而是重用它（调用 onNewIntent）。这对于 MainActivity 来说通常是一个不错的选择，可以避免重复的实例。当外部应用（如微信分享后）尝试再次启动你的 App 时，它会调用 onNewIntent 而不是创建新实例。
+singleTask：在整个系统中，这个 Activity 只会有一个实例。如果已经存在，则会清除其上的所有 Activity，并将它带到前台。谨慎使用，因为它会影响 App 的导航行为，可能导致意外的 Activity 栈状态。 -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -5,54 +5,52 @@
       <!-- 顶部导航栏 -->
       <!-- 标签切换区 -->
       <!-- <div class="sticky-tabs"> -->
-        <div class="tabs">
-          <button
-            class="tab-button"
-            :class="{ active: activeTab === 'projects' }"
-            @click="switchTo('projects')"
-          >
-            项目
-          </button>
-          <button
-            class="tab-button"
-            :class="{ active: activeTab === 'FileList' }"
-            @click="switchTo('FileList')"
-          >
-            数据
-          </button>
-        </div>
+      <div class="tabs">
+        <button
+          class="tab-button"
+          :class="{ active: activeTab === 'projects' }"
+          @click="switchTo('projects')"
+        >
+          项目
+        </button>
+        <button
+          class="tab-button"
+          :class="{ active: activeTab === 'FileList' }"
+          @click="switchTo('FileList')"
+        >
+          数据
+        </button>
+      </div>
       <!-- </div> -->
 
       <!-- 内容区域 - 使用动态组件和 Transition -->
       <div class="content-area">
         <transition name="slide-left" mode="out-in">
-          <component :is="currentComponent" :key="activeTab" />
+          <component :is="currentComponent" :projects="projectFolders" :key="activeTab" />
         </transition>
       </div>
     </div>
     <div class="floating-bottom-buttons">
       <button class="connect-button" @click="toggleConnectionDialog">
-        <img
-          :src="getConnectIconSrc()"
-          alt="Connection Status"
-          class="connect-icon"
-        />
+        <img :src="getConnectIconSrc()" alt="Connection Status" class="connect-icon" />
       </button>
       <button class="btn-start" @click="handleStartRecord">开始采集</button>
     </div>
 
     <!-- 连接设备选择对话框 -->
     <teleport to="body">
-      <div v-if="showConnectionDialog" class="connection-dialog-overlay" @click="closeConnectionDialog">
+      <div
+        v-if="showConnectionDialog"
+        class="connection-dialog-overlay"
+        @click="closeConnectionDialog"
+      >
         <div class="connection-dialog-content" @click.stop>
           <div class="dialog-header">
             <div class="dialog-title">选择设备</div>
           </div>
           <div class="dialog-body">
             <!-- 条件渲染：扫描中 -->
-            <div v-if="scanning" class="scan-status-item">
-              正在扫描中...
-            </div>
+            <div v-if="scanning" class="scan-status-item">正在扫描中...</div>
             <!-- 条件渲染：未发现设备（且非扫描中） -->
             <div v-else-if="filteredDevices.length === 0" class="no-devices-item">
               未发现附近设备
@@ -62,7 +60,8 @@
               <div v-for="device in filteredDevices" :key="device.deviceId" class="device-item">
                 <div class="device-info">
                   <strong class="device-name">{{ device.name }}</strong>
-                  <!-- <small>{{ device.deviceId }}</small> --> <!-- 可选：显示ID -->
+                  <!-- <small>{{ device.deviceId }}</small> -->
+                  <!-- 可选：显示ID -->
                 </div>
                 <div class="action">
                   <!-- 情况1: 正在连接当前设备 -->
@@ -93,42 +92,79 @@
 
 <script setup>
 import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount, watch } from 'vue'
+import { Capacitor } from '@capacitor/core'
 import ProjectList from './projects/ProjectList.vue' // 导入组件
 import FileList from './files/FileList.vue' // 导入组件
 import { bluetoothService } from '@/services/bluetoothService'
+import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { showToast } from '@/utils/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { lockToPortrait } from '@/utils/screen'
 defineOptions({
-  name: 'MainContentTabs'
+  name: 'MainContentTabs',
 })
 const router = useRouter()
 const bluetoothStore = useBluetoothStore()
-const {
-  devices,
-  scanning,
-  connectingStatus,
-  connectingDeviceId
-} = storeToRefs(bluetoothStore)
+const { devices, scanning, connectingStatus, connectingDeviceId } = storeToRefs(bluetoothStore)
 
 // 计算属性：过滤掉 name 为 "N/A" 的设备
 const filteredDevices = computed(() => {
-  return devices.value.filter(device => device.name !== "N/A")
+  return devices.value.filter((device) => device.name !== 'N/A')
 })
+let pointcloudUpdatedHandler = null
 
+// 统一的注册函数
+const registerEventListener = () => {
+  try {
+    if (pointcloudUpdatedHandler) {
+      window.removeEventListener('pointcloud-updated', pointcloudUpdatedHandler)
+    }
+
+    pointcloudUpdatedHandler = (e) => {
+      console.log('[MainContentTabs] pointcloud-updated received, reloading folders', e && e.detail)
+      loadProjectFolders()
+    }
+    window.addEventListener('pointcloud-updated', pointcloudUpdatedHandler)
+    console.log('[MainContentTabs] 事件监听器已注册')
+  } catch (e) {
+    console.warn('addEventListener pointcloud-updated failed', e)
+  }
+}
+
+// 统一的清理函数
+const unregisterEventListener = () => {
+  try {
+    if (pointcloudUpdatedHandler) {
+      window.removeEventListener('pointcloud-updated', pointcloudUpdatedHandler)
+      pointcloudUpdatedHandler = null
+      console.log('[MainContentTabs] 事件监听器已清理')
+    }
+  } catch (e) {
+    console.warn('removeEventListener failed', e)
+  }
+}
 // ========== 监听连接状态变化，更新设备列表中的显示 ==========
 // 当连接状态或连接设备ID变化时，强制刷新设备列表的计算属性
-watch([connectingStatus, connectingDeviceId], () => {
-  // 直接触发 computed 重新计算即可
-  console.log('连接状态变化，更新设备列表显示')
-}, { deep: false })
+watch(
+  [connectingStatus, connectingDeviceId],
+  () => {
+    // 直接触发 computed 重新计算即可
+    console.log('连接状态变化，更新设备列表显示')
+  },
+  { deep: false },
+)
 // ========== 结束：监听连接状态变化 ==========
 
-onMounted(async() => {
+onMounted(async () => {
   await lockToPortrait()
-  // ========== 页面激活时检查连接状态 ==========
+  console.log('onmounted')
+  bluetoothStore.autoScanOnEnter()
+  // 加载本地项目文件夹列表
+  loadProjectFolders()
+  // 监听外部对 pointcloud 的更新事件，触发刷新
+  registerEventListener()
   // 如果显示已连接，但实际可能已断开，做个状态校验
   setTimeout(() => {
     if (connectingStatus.value === 2 && connectingDeviceId.value) {
@@ -142,16 +178,17 @@ onMounted(async() => {
 })
 onActivated(async () => {
   await lockToPortrait()
-
-  // ========== 页面激活时刷新设备列表 ==========
+  // 每次激活都重新注册监听（确保监听器存在）
+  registerEventListener()
   // 重新扫描以获取最新的设备状态
   if (showConnectionDialog.value) {
     bluetoothStore.autoScanOnEnter()
   }
-  // ========== 结束：页面激活时刷新设备列表 ==========
+  // 页面激活时刷新项目列表（双重保障）
+  await loadProjectFolders()
 })
 onBeforeUnmount(() => {
-
+  unregisterEventListener()
 })
 const handleStartRecord = () => {
   if (connectingStatus.value != 2) {
@@ -168,7 +205,7 @@ const handleConnect = (device) => {
 }
 const handleDisconnect = (device) => {
   bluetoothStore.handleDisconnect(device)
-  showToast("已断开连接")
+  showToast('已断开连接')
 }
 // 定义 Tab 数据，关联到具体的组件
 const tabs = [
@@ -194,24 +231,24 @@ const switchTo = (tabId) => {
 const getConnectIconSrc = () => {
   switch (connectingStatus.value) {
     case 2:
-      return new URL('@/assets/img/connect_suc.png', import.meta.url).href; // 连接成功
+      return new URL('@/assets/img/connect_suc.png', import.meta.url).href // 连接成功
     // case 'failed':
     //   return new URL('@/assets/img/connect_fail.png', import.meta.url).href; // 连接失败
     default:
-      return new URL('@/assets/img/connect.png', import.meta.url).href; // 未连接
+      return new URL('@/assets/img/connect.png', import.meta.url).href // 未连接
   }
-};
+}
 
 // 控制连接对话框的显示/隐藏
 const showConnectionDialog = ref(false)
 
 // 显示连接对话框
 const toggleConnectionDialog = () => {
-  showConnectionDialog.value = !showConnectionDialog.value;
+  showConnectionDialog.value = !showConnectionDialog.value
   // 只在打开对话框（新状态为 true）且设备未连接时扫描
   // 如果蓝牙设备已经连接，再去搜索，会搜索不到蓝牙设备
   if (showConnectionDialog.value && connectingStatus.value !== 2) {
-    bluetoothStore.autoScanOnEnter();
+    bluetoothStore.autoScanOnEnter()
   }
 }
 
@@ -220,8 +257,62 @@ const closeConnectionDialog = () => {
   showConnectionDialog.value = false
 }
 
+// ========== 项目缩略数据 ==========
+const projectFolders = ref([])
 
-
+async function loadProjectFolders() {
+  try {
+    const folders = await bluetoothService.listPointCloudFolders()
+    // 为每个文件夹尝试获取第一张缩略图 URI
+    const withThumbs = await Promise.all(
+      folders.map(async (f) => {
+        const rawThumbUri = await bluetoothService.getFirstPhotoUri(f.name).catch(() => null)
+        let thumb = null
+        if (rawThumbUri) {
+          try {
+            thumb = Capacitor.convertFileSrc(rawThumbUri)
+          } catch (e) {
+            console.warn('[MainContentTabs] convertFileSrc failed for', rawThumbUri, e)
+            thumb = null
+          }
+        }
+        // 解析项目名与 sessionId
+        let projectName = f.name
+        let sessionId = f.name
+        const idx = f.name.lastIndexOf('_')
+        if (idx > 0) {
+          projectName = f.name.slice(0, idx)
+          sessionId = f.name.slice(idx + 1)
+        }
+        const displayName = parseSessionIdToFormattedTime(sessionId) || sessionId
+        // 获取文件夹内最新修改时间，用于排序
+        let lastModified = 0
+        try {
+          const files = await bluetoothService.listFilesInFolder(`pointcloud/${f.name}`)
+          for (const ff of files || []) {
+            if (ff && ff.mtime && ff.mtime > lastModified) lastModified = ff.mtime
+          }
+        } catch (e) {
+          // ignore
+        }
+        return {
+          name: f.name,
+          uri: f.uri,
+          thumbUri: thumb,
+          projectName,
+          sessionId,
+          displayName,
+          lastModified,
+        }
+      }),
+    )
+    // 按最后修改时间倒序排列，最新的在前
+    withThumbs.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
+    projectFolders.value = withThumbs
+  } catch (e) {
+    console.warn('加载项目列表失败', e)
+  }
+}
 // const handleRefresh = () => {
 //   console.log('handleRefresh device')
 //   bluetoothStore.autoScanOnEnter()
@@ -559,7 +650,8 @@ const closeConnectionDialog = () => {
   display: flex;
   min-width: 0; /* 关键：允许 flex 容器收缩其内容，否则 flex item 可能不会按预期缩小 */
 }
-.device-name { /* 类名对应的样式 */
+.device-name {
+  /* 类名对应的样式 */
   flex: 1; /* 占据所有可用空间 */
   overflow: hidden; /* 隐藏超出部分 */
   text-overflow: ellipsis; /* 超出部分显示省略号 */
@@ -610,6 +702,55 @@ const closeConnectionDialog = () => {
 
 .device-item:last-child {
   border-bottom: none;
+}
+
+.projects-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+}
+.project-card {
+  width: 120px;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.project-card .thumb {
+  height: 80px;
+  background: #f3f3f3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.project-card .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.project-meta {
+  padding: 8px;
+}
+.project-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.project-actions button {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: none;
+  background: #1890ff;
+  color: #fff;
+  cursor: pointer;
 }
 
 /* 移除旧的 add-device 样式 */
