@@ -13,10 +13,10 @@
         </button>
         <button class="capture-btn" @click="startDataStream"></button>
         <div class="data-stats top-center-stat">
-          <div class="stat-item">
+          <!-- <div class="stat-item">
             <span>点云数量</span>
             <span id="point-count">{{ pointCount }}</span>
-          </div>
+          </div> -->
           <!-- <div class="stat-item">
             <span>点云速率</span>
             <span id="data-rate">
@@ -42,7 +42,7 @@
         <div v-if="showSaveDialog" class="save-dialog-overlay">
           <div class="save-dialog-content">
             <div class="save-dialog-card">
-              <h3>保存会话</h3>
+              <h3>保存</h3>
               <label>项目名称</label>
               <input
                 ref="saveInput"
@@ -430,6 +430,7 @@ onBeforeRouteLeave((to, from, next) => {
 
 // 启动解析器并订阅蓝牙通知
 function startSessionParser() {
+  let reNameFlag = 0
   // --- 检查设备是否已断开 ---
   if (deviceDisconnected.value) {
     console.warn('[startSessionParser] 设备已断开，无法订阅')
@@ -459,7 +460,9 @@ function startSessionParser() {
         throw new Error('Device disconnected before taking photo.')
       }
       try {
-        const photoData = await cameraHelper.captureAndSave(fileBaseName)
+        // const photoData = await cameraHelper.captureAndSave(fileBaseName)
+        const photoData = await cameraHelper.captureAndSave(fileBaseName + '====' + reNameFlag++)
+        console.log('renameflag', reNameFlag)
         if (photoData && photoData.base64Data && photoData.fileName) {
           sessionData.photos.push({
             name: photoData.fileName,
@@ -562,7 +565,8 @@ async function performSave(folderName) {
     )
     console.log('保存成功:', JSON.stringify(result))
     showToast(
-      `会话 ${folderName} 已保存\n点云: ${result.lineCount} 行\n照片: ${result.photoPaths.length} 张`,
+      // `会话 ${folderName} 已保存\n点云: ${result.lineCount} 行\n照片: ${result.photoPaths.length} 张`,
+      '保存成功'
     )
     // 标记为已保存，记录已保存的文件夹
     savedDuringDialog.value = true

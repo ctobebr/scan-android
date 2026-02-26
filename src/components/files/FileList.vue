@@ -14,13 +14,13 @@
           <div class="info">
             <div class="title">{{ session.displayName }}</div>
             <div class="date">
-              <span>{{ session.firstFile ? formatDate(session.firstFile.mtime) : '空' }}</span>
+              <span>{{ session.firstFile ? session.timeStr : '空' }}</span>
             </div>
-            <div class="date">
+            <!-- <div class="date">
               <span>{{
                 session.firstFile ? formatFileSize(session.firstFile.size || 0) : '空'
               }}</span>
-            </div>
+            </div> -->
           </div>
 
           <!-- 操作图标容器 -->
@@ -91,12 +91,17 @@ const loadFileList = async () => {
         firstFile,
       })
     }
-    // 按时间倒序：有 firstFile 的按 firstFile.mtime 排序，否则放到末尾
-    items.sort((a, b) => (b.firstFile?.mtime || 0) - (a.firstFile?.mtime || 0))
+    items.sort((a, b) => {
+      // 如果 timeStr 不存在，将其视为最早的时间
+      const timeA = a.timeStr || '';
+      const timeB = b.timeStr || '';
+      return timeB.localeCompare(timeA);
+    });
     sessions.value = items
+    console.log('sessions=====',JSON.stringify(sessions))
   } catch (error) {
-    console.error('加载会话列表失败:', error)
-    showToast('加载会话列表失败: ' + (error.message || error))
+    console.error('加载项目列表失败:', error)
+    showToast('加载项目列表失败: ' + (error.message || error))
     sessions.value = []
   } finally {
     loadingFiles.value = false
@@ -104,10 +109,10 @@ const loadFileList = async () => {
 }
 const onShareClick = async (folderName, projectName, sessionId) => {
   try {
-    // 检查会话文件夹是否为空
+    // 检查项目文件夹是否为空
     const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${folderName}`)
     if (!filesInFolder || filesInFolder.length === 0) {
-      if (confirm('当前会话文件夹为空，是否删除该会话？')) {
+      if (confirm('当前项目文件夹为空，是否删除该项目？')) {
         await bluetoothService.deleteFolder(folderName)
         await loadFileList()
       }
@@ -130,26 +135,25 @@ const onShareClick = async (folderName, projectName, sessionId) => {
         dialogTitle: '选择应用分享压缩包',
       })
       // 分享后尝试在文件管理器中打开目标文件夹，便于手动复制到 U 盘
-      // try {
-      //   const rel = folderName
-      //   console.warn('调用 FileManagerOpener.openFolder 中3...')
-      //   if (Plugins && Plugins.FileManagerOpener && Plugins.FileManagerOpener.openFolder) {
-      //     await Plugins.FileManagerOpener.openFolder({ path: rel })
-      //     console.warn('调用 FileManagerOpener.openFolder 中2...')
-      //   } else if ((window ).Capacitor && (window).Capacitor.Plugins?.FileManagerOpener) {
-      //     console.warn('调用 FileManagerOpener.openFolder 中1...')
-      //     await (window).Capacitor.Plugins.FileManagerOpener.openFolder({ path: rel })
-      //   }
-      //   console.warn('调用 FileManagerOpener.openFolder 中...')
-      // } catch (e) {
-      //   console.warn('调用 FileManagerOpener.openFolder 失败', e)
-      // }
-      // showToast('压缩包已生成：' + String(res.path) + '，可使用文件管理器复制到 U 盘')
+      // 调用 FileManagerOpener.openFolder 中3...
+      // 调用 FileManagerOpener.openFolder 失败 ReferenceError: Plugins is not defined
+      try {
+        const rel = folderName
+        console.warn('调用 FileManagerOpener.openFolder 中3...')
+        if (Plugins && Plugins.FileManagerOpener && Plugins.FileManagerOpener.openFolder) {
+          await Plugins.FileManagerOpener.openFolder({ path: rel })
+        } else if ((window ).Capacitor && (window).Capacitor.Plugins?.FileManagerOpener) {
+          await (window).Capacitor.Plugins.FileManagerOpener.openFolder({ path: rel })
+        }
+      } catch (e) {
+        console.warn('调用 FileManagerOpener.openFolder 失败', e)
+      }
+      showToast('压缩包已生成：' + String(res.path) + '，可使用文件管理器复制到 U 盘')
     } else {
       showToast('打包失败，未生成可分享文件')
     }
   } catch (error) {
-    console.error('分享会话失败:', error)
+    console.error('分享项目失败:', error)
     const msg = (error && error.message) || String(error)
     if (/cancel|canceled|用户取消|Share canceled/i.test(msg)) {
       showToast('分享已取消')
@@ -162,10 +166,10 @@ const onShareClick = async (folderName, projectName, sessionId) => {
 }
 // const onShareClick = async (folderName, projectName, sessionId) => {
 //   try {
-//     // 检查会话文件夹是否为空
+//     // 检查项目文件夹是否为空
 //     const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${folderName}`)
 //     if (!filesInFolder || filesInFolder.length === 0) {
-//       if (confirm('当前会话文件夹为空，是否删除该会话？')) {
+//       if (confirm('当前项目文件夹为空，是否删除该项目？')) {
 //         await bluetoothService.deleteFolder(folderName)
 //         await loadFileList()
 //       }
@@ -236,7 +240,7 @@ const onShareClick = async (folderName, projectName, sessionId) => {
 //       showToast('打包失败，未生成文件')
 //     }
 //   } catch (error) {
-//     console.error('分享会话失败:', error)
+//     console.error('分享项目失败:', error)
 //     // 使用与模板相同的错误处理
 //     showToast(`分享文件 "${zipBaseName || sessionId}" 失败 (可能因文件过大): ${error.message}`)
 
@@ -262,7 +266,8 @@ const onDeleteClick = (fileNameOrFolder) => {
 
 const showMoreOptions = (filename) => {
   const rel = (filename || '').replace('pointcloud/', '')
-  if (confirm(`确定要删除会话 "${rel}" 吗？此操作不可撤销。`)) {
+  const res = rel.split('_')[0]
+  if (confirm(`确定要删除 "${res}" 项目吗？此操作不可撤销。`)) {
     deleteFile(filename)
   }
 }

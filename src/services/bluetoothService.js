@@ -875,7 +875,7 @@ export class BluetoothService {
 
     try {
       const files = await this.listFilesInFolder(folderPath)
-      if (!files || files.length === 0) throw new Error('会话下无文件')
+      if (!files || files.length === 0) throw new Error('项目下无文件')
 
       // 读取每个文件并加入 zip
       for (const f of files) {
@@ -930,7 +930,7 @@ export class BluetoothService {
       )
       return { uri: uriRes.uri, path: zipPath, relativePath: zipPath }
     } catch (error) {
-      console.error('打包会话失败', error)
+      console.error('打包项目失败', error)
       throw error
     }
   }

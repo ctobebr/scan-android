@@ -1,6 +1,6 @@
 // src/utils/sessionIdUtils.js
 
-// 说明：本文件支持将由 generateOptimizedSessionId 生成的 base36 会话 ID 解析回时间，
+// 由 generateOptimizedSessionId 生成的 base36 会话 ID 解析回时间，
 // 同时支持将 Date 转为相同格式的 sessionId。兼容 14 位（无毫秒）和 17 位（含毫秒）时间戳。
 
 function pad(num, size) {
