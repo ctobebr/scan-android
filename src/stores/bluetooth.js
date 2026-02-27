@@ -17,6 +17,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
     messages: [],
     // 存储断开监听的取消函数
     disconnectUnregister: null,
+    isCleanupInProgress: false, // 标记断开订阅是否正在进行
   }),
   actions: {
     // 请求蓝牙相关权限
@@ -230,6 +231,66 @@ export const useBluetoothStore = defineStore('bluetooth', {
       } catch (err) {
         console.log('发送结束指令失败：', err)
       }
+    },
+
+    handleSendCalibParam(x, y, z) {
+      try {
+        // deviceId, serviceUUID, characteristicUUID
+        bluetoothService.sendSetCalibParam(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          x,
+          y,
+          z,
+        )
+      } catch (err) {
+        console.log('发送设置标定参数指令失败：', err)
+      }
+    },
+    handleSendRotateSpeed(pitchSpeed, yawSpeed) {
+      try {
+        // deviceId, serviceUUID, characteristicUUID
+        bluetoothService.sendSetRotateSpeed(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          pitchSpeed,
+          yawSpeed,
+        )
+      } catch (err) {
+        console.log('发送设置转动速度指令失败：', err)
+      }
+    },
+    handleSendScanTime(seconds) {
+      try {
+        // deviceId, serviceUUID, characteristicUUID
+        bluetoothService.sendSetScanTime(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          seconds,
+        )
+      } catch (err) {
+        console.log('发送设置扫描时间指令失败：', err)
+      }
+    },
+    handleSendPitchLimit(lowerLimitRad, upperLimitRad) {
+      try {
+        // deviceId, serviceUUID, characteristicUUID
+        bluetoothService.sendSetPitchLimit(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          lowerLimitRad,
+          upperLimitRad,
+        )
+      } catch (err) {
+        console.log('发送设置俯仰角上下限指令失败：', err)
+      }
+    },
+    setCleanupStatus(status) {
+      this.isCleanupInProgress = status
     },
     // clearMessages() {
     //   this.displayedMessages = []

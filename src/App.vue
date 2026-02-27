@@ -1,42 +1,12 @@
 <template>
   <div id="app">
     <!-- 全局页面包装器：为所有页面保留左右间距并在大屏上居中 -->
-    <!-- <div class="page-wrapper">
+    <div class="page-wrapper">
     <router-view v-slot="{ Component }">
-      <keep-alive>
-        <component :is="Component" />
+      <keep-alive :include="['MainContentTabs']">
+        <component :is="Component"/>
       </keep-alive>
     </router-view>
-  </div> -->
-
-    <!-- 底部导航栏 -->
-    <!-- <div class="tab-bar">
-    <router-link to="/bluetooth" class="tab-item" active-class="active">
-      蓝牙
-    </router-link>
-    <router-link to="/pointCloud" class="tab-item" active-class="active">
-      点云
-    </router-link>
-    <router-link to="/caremaView" class="tab-item" active-class="active">
-      拍照
-    </router-link>
-    <router-link to="/fileSave" class="tab-item" active-class="active">
-      文件
-    </router-link>
-  </div> -->
-    <!-- <Test></Test> -->
-    <div class="page-wrapper">
-    <!-- <router-view v-slot="{ Component }">
-      <keep-alive>
-        <component :is="Component" />
-      </keep-alive>
-    </router-view> -->
-    <router-view v-slot="{ Component }">
-    <keep-alive :include="['MainContentTabs']">
-      <component :is="Component"/>
-    </keep-alive>
-  </router-view>
-      <!-- <router-view /> -->
     </div>
   </div>
 </template>

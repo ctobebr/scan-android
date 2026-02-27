@@ -7,7 +7,7 @@ import BluetoothTest from '@/components/BluetoothTest.vue'
 import PointCloud from '@/views/PointCloud.vue'
 import CaremaView from '@/views/CaremaView.vue'
 import FileSave from '@/views/FileSave.vue'
-import MainContentTabs from '@/components/MainContentTabs.vue'
+import MainContentTabs from '@/views/MainContentTabs.vue'
 const routes = [
   // {
   //   path: '/',

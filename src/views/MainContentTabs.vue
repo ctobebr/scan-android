@@ -8,8 +8,8 @@
       <div class="tabs">
         <button
           class="tab-button"
-          :class="{ active: activeTab === 'projects' }"
-          @click="switchTo('projects')"
+          :class="{ active: activeTab === 'Projects' }"
+          @click="switchTo('Projects')"
         >
           项目
         </button>
@@ -19,6 +19,13 @@
           @click="switchTo('FileList')"
         >
           数据
+        </button>
+        <button
+          class="tab-button"
+          :class="{ active: activeTab === 'SettingList' }"
+          @click="switchTo('SettingList')"
+        >
+          设置
         </button>
       </div>
       <!-- </div> -->
@@ -93,8 +100,9 @@
 <script setup>
 import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount, watch } from 'vue'
 import { Capacitor } from '@capacitor/core'
-import ProjectList from './projects/ProjectList.vue' // 导入组件
-import FileList from './files/FileList.vue' // 导入组件
+import FileList from './FileList.vue'
+import ProjectList from './ProjectList.vue'
+import SettingList from './SettingList.vue'
 import { bluetoothService } from '@/services/bluetoothService'
 import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { showToast } from '@/utils/toast'
@@ -209,8 +217,9 @@ const handleDisconnect = (device) => {
 }
 // 定义 Tab 数据，关联到具体的组件
 const tabs = [
-  { id: 'projects', label: '项目', component: ProjectList }, // 关联 ProjectList 组件
+  { id: 'Projects', label: '项目', component: ProjectList }, // 关联 ProjectList 组件
   { id: 'FileList', label: '文件', component: FileList }, // 关联 FileList 组件
+  { id: 'SettingList', label: '设置', component: SettingList }, // 关联 SettingList 组件
 ]
 
 // 管理当前激活的 Tab
@@ -297,7 +306,7 @@ async function loadProjectFolders() {
         }
         return {
           name: f.name,
-          uri: f.uri,
+          // uri: f.uri,
           thumbUri: thumb,
           projectName,
           sessionId,

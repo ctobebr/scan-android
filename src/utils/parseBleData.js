@@ -28,7 +28,7 @@ export class parseBleData {
       dataIndex: 0,
       packetData: null,
       checksum: 0, // 校验和需要包含 Cmd, Len, Data
-      accumulatedPoints: [], // 用于累积解析出的点
+      accumulatedPoints: [], // 用于累积解析出的点  目前单帧单点并没有累积，但是如果后续有单帧多点目前的程序是支持累积的
       photoSession: {
         active: false,
         previewStarted: false,
@@ -72,13 +72,17 @@ export class parseBleData {
     const commandHandlers = {
       // [CONTROL_COMMANDS.CMD_START]: this._handleStart,
       [CONTROL_COMMANDS.CMD_STOP]: this._handleStop,
+
+      [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START]: this._handleStartTakePhoto,
+      [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE]: this._handleEndTakePhoto,
+
+      [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA]: this._handleTakePhoto,
       [DEVICE_DATA_COMMANDS.CMD_OUTPUT_XYZ]: this._handlePointData,
       [DEVICE_DATA_COMMANDS.CMD_OUTPUT_POLAR]: this._handleRawPointData,
-
-      [CONTROL_COMMANDS.CMD_CTRL_CAMERA_START]: this._handleStartTakePhoto,
-      [CONTROL_COMMANDS.CMD_CTRL_CAMERA]: this._handleTakePhoto,
-      [CONTROL_COMMANDS.CMD_CTRL_CAMERA_COMPLETE]: this._handleEndTakePhoto,
-
+      [DEVICE_DATA_COMMANDS.CMD_READ_CALIB_PARAM]: this._handleReadCalibParam,
+      [DEVICE_DATA_COMMANDS.CMD_READ_ROTATE_SPEED]: this._handleReadRotateSpeed,
+      [DEVICE_DATA_COMMANDS.CMD_READ_SCAN_TIME]: this._handleReadScanTime,
+      [DEVICE_DATA_COMMANDS.CMD_READ_PITCH_LIMIT]: this._handleReadPitchLimit,
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
       // [CONTROL_COMMANDS.CMD_GET_POS]: this._handleGetPos,
       // [CONTROL_COMMANDS.CMD_SET_HOME]: this._handleSetHome,
@@ -245,7 +249,6 @@ export class parseBleData {
    */
   parse(data) {
     const errors = []
-
     for (let i = 0; i < data.length; i++) {
       const byte = data[i]
 
@@ -398,7 +401,6 @@ export class parseBleData {
           // 设置处理标志
           this.isProcessingPhoto = true
 
-          // ... 你原来的 _handleTakePhoto 逻辑 ...
           const meta = this.parseBinaryTakePhotoData(data)
           if (!meta) {
             console.warn('_handleTakePhoto: 无效的拍照数据')
@@ -623,6 +625,93 @@ export class parseBleData {
           )
         }
       }
+    }
+  }
+  /**
+   * 处理读取标定参数的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据（实际是Uint8Array）
+   */
+  _handleReadCalibParam(data) {
+    if (data.byteLength !== 12) {
+      console.warn('标定参数数据长度错误，期望 12 字节，实际:', data.byteLength)
+      return
+    }
+    // 统一使用 data.buffer, data.byteOffset
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const x = view.getFloat32(0, true)
+    const y = view.getFloat32(4, true)
+    const z = view.getFloat32(8, true)
+
+    console.log('✅ 收到下位机标定参数响应: X轴_mm=' + x + ', Y轴_mm=' + y + ', Z轴_mm=' + z)
+    if (this.options.onCalibParamResponse) {
+      this.options.onCalibParamResponse({ x, y, z })
+    }
+  }
+
+  /**
+   * 处理读取转动速度的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadRotateSpeed(data) {
+    if (data.byteLength !== 8) {
+      console.warn('转动速度数据长度错误，期望 8 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const pitchSpeed = view.getFloat32(0, true)
+    const yawSpeed = view.getFloat32(4, true)
+
+    console.log(
+      '✅ 收到下位机转动速度响应: 俯仰轴速度_rad_ms=' +
+        pitchSpeed +
+        ', 偏航轴速度_rad_ms=' +
+        yawSpeed,
+    )
+    if (this.options.onRotateSpeedResponse) {
+      this.options.onRotateSpeedResponse({ pitchSpeed, yawSpeed })
+    }
+  }
+
+  /**
+   * 处理读取扫描时间的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadScanTime(data) {
+    console.log('_handleReadScanTime===', data.byteLength)
+    if (data.byteLength !== 2) {
+      console.warn('扫描时间数据长度错误，期望 2 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const seconds = view.getUint16(0, true)
+
+    console.log('✅ 收到下位机扫描时间响应: 扫描时间_秒=' + seconds)
+    if (this.options.onScanTimeResponse) {
+      this.options.onScanTimeResponse({ seconds })
+    }
+  }
+
+  /**
+   * 处理读取俯仰角上下限的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadPitchLimit(data) {
+    if (data.byteLength !== 8) {
+      console.warn('俯仰角限制数据长度错误，期望 8 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const upperLimitRad = view.getFloat32(0, true)
+    const lowerLimitRad = view.getFloat32(4, true)
+
+    console.log(
+      '✅ 收到下位机俯仰角限制响应: 俯仰角上限_rad=' +
+        upperLimitRad +
+        ', 俯仰角下限_rad=' +
+        lowerLimitRad,
+    )
+    if (this.options.onPitchLimitResponse) {
+      this.options.onPitchLimitResponse({ upperLimitRad, lowerLimitRad })
     }
   }
   // 将原始数据输入该函数 + dx dy dz 做一下校正保存

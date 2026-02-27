@@ -77,7 +77,6 @@ watch(
       projectListItems.value = sortedMapped
     }
     // 调试：输出接收到的项目数组，便于诊断缩略图路径问题
-    console.log('[ProjectList] props.projects changed:', JSON.stringify(arr))
   },
   { immediate: true },
 )

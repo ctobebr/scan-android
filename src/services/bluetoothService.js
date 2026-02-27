@@ -712,7 +712,7 @@ export class BluetoothService {
         .filter((item) => item.type === 'directory') // 只保留目录
         .map((folder) => ({
           name: folder.name, // 文件夹名称
-          uri: folder.uri, // 文件夹的 URI (可选，取决于 Capacitor 版本和平台)。
+          // uri: folder.uri, // 文件夹的 URI (可选，取决于 Capacitor 版本和平台)。
         }))
 
       // console.log('读取文件夹列表成功:', JSON.stringify(folders))
@@ -1018,65 +1018,92 @@ export class BluetoothService {
   //     buffer,
   //   )
   // }
-
+  /**
+   * 发送“设置标定参数”指令
+   * @param {number} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} x - X轴标定参数 (float, 单位: mm)
+   * @param {number} y - Y轴标定参数 (float, 单位: mm)
+   * @param {number} z - Z轴标定参数 (float, 单位: mm)
+   */
+  async sendSetCalibParam(deviceId, serviceUUID, characteristicUUID, x, y, z) {
+    const buffer = new ArrayBuffer(12) // 3 * float = 12 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, x, true) // X, 小端序
+    view.setFloat32(4, y, true) // Y, 小端序 (偏移 4 字节)
+    view.setFloat32(8, z, true) // Z, 小端序 (偏移 8 字节)
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_CALIB_PARAM, // 注意：这里命令码可能也需要同步修改，如果协议改变了
+      buffer,
+    )
+  }
   /**
    * 发送“设置转动速度”指令
-   * @param {number} speed - 速度值 (假设为 uint16_t)
+   * @param {number} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} pitchSpeed - 俯仰轴速度 (float, 单位: rad/ms)
+   * @param {number} yawSpeed - 偏航轴速度 (float, 单位: rad/ms)
    */
-  // async sendSetRotateSpeed(deviceId, serviceUUID, characteristicUUID, speed) {
-  //   // 假设下位机期望一个 uint16_t 类型的速度值
-  //   const buffer = new ArrayBuffer(2) // 1 uint16_t * 2 bytes
-  //   const view = new DataView(buffer)
-  //   view.setUint16(0, speed, true) // 小端序
-  //   await this.sendCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED,
-  //     buffer,
-  //   )
-  // }
+  async sendSetRotateSpeed(deviceId, serviceUUID, characteristicUUID, pitchSpeed, yawSpeed) {
+    const buffer = new ArrayBuffer(8) // 2 * float = 8 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, pitchSpeed, true) // pitch speed, 小端序
+    view.setFloat32(4, yawSpeed, true) // yaw speed, 小端序 (偏移 4 字节)
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED,
+      buffer,
+    )
+  }
 
   /**
-   * 发送“设置扫描圈数”指令
-   * @param {number} cycles - 扫描圈数 (需要确认下位机期望的数据类型和单位，例如 uint16_t)
+   * 发送“设置扫描时间”指令
+   * @param {number} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} seconds - 扫描时间 (uint16_t, 单位: 秒)
    */
-  // async sendSetScanCycles(deviceId, serviceUUID, characteristicUUID, cycles) {
-  //   // 假设下位机期望一个 uint16_t 类型的圈数值
-  //   const buffer = new ArrayBuffer(2) // 1 uint16_t * 2 bytes
-  //   const view = new DataView(buffer)
-  //   view.setUint16(0, cycles, true) // 小端序
-  //   await this.sendCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_SET_SCAN_CYCLES,
-  //     buffer,
-  //   )
-  // }
+  async sendSetScanTime(deviceId, serviceUUID, characteristicUUID, seconds) {
+    const buffer = new ArrayBuffer(2) // 1 * uint16_t = 2 bytes
+    const view = new DataView(buffer)
+    view.setUint16(0, seconds, true) // 小端序
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_SCAN_TIME,
+      buffer,
+    )
+  }
 
   /**
    * 发送“设置俯仰角上下限”指令
-   * @param {number} minPitchRad - 最小俯仰角 (弧度)
-   * @param {number} maxPitchRad - 最大俯仰角 (弧度)
+   * @param {number} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} lowerLimitRad - 俯仰角下限 (单位: 弧度 rad)
+   * @param {number} upperLimitRad - 俯仰角上限 (单位: 弧度 rad)
    */
-  // async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, minPitchRad, maxPitchRad) {
-  //   // 根据下位机代码中的 radiansToU16 函数，角度值需转换为 int16_t (弧度 * 1000)
-  //   const int16MinPitch = Math.round(minPitchRad * 1000)
-  //   const int16MaxPitch = Math.round(maxPitchRad * 1000)
-
-  //   const buffer = new ArrayBuffer(4) // 2 int16_t * 2 bytes
-  //   const view = new DataView(buffer)
-  //   view.setInt16(0, int16MinPitch, true) // 小端序，第一个 int16_t
-  //   view.setInt16(2, int16MaxPitch, true) // 小端序，第二个 int16_t
-  //   await this.sendCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_SET_PITCH_LIMIT,
-  //     buffer,
-  //   )
-  // }
+  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, lowerLimitRad, upperLimitRad) {
+    const buffer = new ArrayBuffer(8) // 2 * float = 8 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, upperLimitRad, true) // 上限 limit, 小端序，第一个 float
+    view.setFloat32(4, lowerLimitRad, true) // 下限 limit, 小端序，第二个 float (偏移 4 字节)
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_PITCH_LIMIT,
+      buffer,
+    )
+  }
 
   /**
    * 发送“控制上位机拍照”指令
@@ -1093,7 +1120,7 @@ export class BluetoothService {
   //     deviceId,
   //     serviceUUID,
   //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_CTRL_CAMERA,
+  //     DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA,
   //     buffer,
   //   )
   // }
@@ -1108,7 +1135,7 @@ export class BluetoothService {
   //     ![
   //       CONTROL_COMMANDS.CMD_READ_CALIB_PARAM,
   //       CONTROL_COMMANDS.CMD_READ_ROTATE_SPEED,
-  //       CONTROL_COMMANDS.CMD_READ_SCAN_CYCLES,
+  //       CONTROL_COMMANDS.CMD_READ_SCAN_TIME,
   //       CONTROL_COMMANDS.CMD_READ_PITCH_LIMIT,
   //     ].includes(readCommand)
   //   ) {
@@ -1130,14 +1157,14 @@ export class BluetoothService {
   // }
 
   /**
-   * 发送读取扫描圈数指令
+   * 发送读取扫描时间指令
    */
   // async sendReadScanCycles(deviceId, serviceUUID, characteristicUUID) {
   //   await this.sendReadCommand(
   //     deviceId,
   //     serviceUUID,
   //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_READ_SCAN_CYCLES,
+  //     CONTROL_COMMANDS.CMD_READ_SCAN_TIME,
   //   )
   // }
 

@@ -59,6 +59,7 @@ const cameraHelper = {
 
     // 优先使用 CameraPreview.capture
     try {
+      console.log('====CameraPreview.capture')
       if (CameraPreview && typeof CameraPreview.capture === 'function') {
         const res = await CameraPreview.capture({ quality: 90 })
         let base64 = res?.value || res?.data || ''
@@ -76,17 +77,18 @@ const cameraHelper = {
     }
 
     // 回退方案
-    try {
-      const dataUrl = await bluetoothService.takePhotoConfirmed()
-      if (!dataUrl) throw new Error('takePhotoConfirmed 未返回数据')
-      let base64 = dataUrl
-      if (base64.indexOf(',') !== -1) base64 = base64.split(',')[1]
-      // 不再写入 CameraPhotos 目录，直接返回 base64
-      return { fileName, base64Data: base64 }
-    } catch (err) {
-      console.error('captureAndSave 回退方案也失败:', err)
-      throw err
-    }
+    // try {
+    //   console.log('====回退方案')
+    //   const dataUrl = await bluetoothService.takePhotoConfirmed()
+    //   if (!dataUrl) throw new Error('takePhotoConfirmed 未返回数据')
+    //   let base64 = dataUrl
+    //   if (base64.indexOf(',') !== -1) base64 = base64.split(',')[1]
+    //   // 不再写入 CameraPhotos 目录，直接返回 base64
+    //   return { fileName, base64Data: base64 }
+    // } catch (err) {
+    //   console.error('captureAndSave 回退方案也失败:', err)
+    //   throw err
+    // }
   },
 
   isRunning() {

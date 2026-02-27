@@ -12,22 +12,22 @@
           {{ saving ? '保存中...' : '保存' }}
         </button>
         <button class="capture-btn" @click="startDataStream"></button>
-        <div class="data-stats top-center-stat">
-          <!-- <div class="stat-item">
+        <!-- <div class="data-stats top-center-stat">
+          <div class="stat-item">
             <span>点云数量</span>
             <span id="point-count">{{ pointCount }}</span>
-          </div> -->
-          <!-- <div class="stat-item">
+          </div>
+          <div class="stat-item">
             <span>点云速率</span>
             <span id="data-rate">
               {{ !hasStarted ? '0 点/秒' : isCollecting ? ` ${pointsPerSecond} 点/秒` : '已暂停' }}
             </span>
-          </div> -->
-          <!-- <div class="stat-item">
+          </div>
+          <div class="stat-item">
             <span>帧率</span>
             <span id="storage-status">{{ frameRate }}</span>
-          </div> -->
-        </div>
+          </div>
+        </div> -->
         <div class="bottom-left-stat">
           <span>采集点位数：{{ dataBatchCounter }} / 50</span>
         </div>
@@ -64,7 +64,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
 import { showToast } from '@/utils/toast'
@@ -85,8 +85,20 @@ import {
 import { generateOptimizedSessionId } from '@/utils/sessionIdUtils'
 const bluetoothStore = useBluetoothStore()
 const router = useRouter()
-const goBack = () => {
-  router.back()
+const goBack = async () => {
+  if (isNavigating.value) return; // 防止重复点击
+  isNavigating.value = true
+
+  console.log('[Pointcloud] 用户点击返回，开始执行清理...')
+  try {
+    await cleanupResourcesForExit() // 确保清理完成
+    console.log('[Pointcloud] 清理完成，执行返回')
+  } catch (err) {
+    console.error('[Pointcloud] 清理时发生错误', err)
+  } finally {
+    // 无论清理是否成功，都返回
+    router.back()
+  }
 }
 const container = ref(null)
 let renderer = null
@@ -177,6 +189,8 @@ let resumeListener = null
 
 // --- 记录进入后台前的采集状态 ---
 let wasCollectingBeforePause = false
+const isNavigating = ref(false)
+
 onMounted(async () => {
   await init()
 
@@ -204,7 +218,7 @@ onMounted(async () => {
   })
 })
 
-onUnmounted(() => {
+onUnmounted(async () => {
   if (pauseListener) {
     pauseListener.remove()
     pauseListener = null
@@ -214,15 +228,8 @@ onUnmounted(() => {
     resumeListener = null
   }
 
-  // --- 移除断开监听 ---
-  if (disconnectUnregister) {
-    disconnectUnregister()
-    disconnectUnregister = null
-  }
-  // --- 结束：移除断开监听 ---
-
   // 组件卸载时也执行彻底清理
-  cleanupResourcesForExit()
+  await cleanupResourcesForExit()
 })
 
 async function init() {
@@ -273,8 +280,6 @@ async function init() {
   }, 100)
 }
 
-// 生成优化后的会话ID 已从公共工具导出：`generateOptimizedSessionId`
-
 // --- 注册设备断开监听 ---
 function registerDisconnectListener() {
   if (disconnectUnregister) {
@@ -282,7 +287,7 @@ function registerDisconnectListener() {
     disconnectUnregister = null
   }
 
-  disconnectUnregister = bluetoothService.onDeviceDisconnected((deviceId, isManualDisconnect) => {
+  disconnectUnregister = bluetoothService.onDeviceDisconnected(async (deviceId, isManualDisconnect) => {
     // 只处理当前连接的设备
     if (deviceId !== bluetoothStore.connectingDeviceId) {
       return
@@ -301,9 +306,15 @@ function registerDisconnectListener() {
     isCollecting.value = false
     // hasStarted.value = false
 
-    // 停止订阅和定时器
-    stopSessionParser()
-
+    // 停止订阅和清空累加器
+    try {
+      bluetoothStore.setCleanupStatus(true)  // 清理中
+      await stopSessionParser() // 这里会取消订阅
+    } catch (e) {
+      console.warn('[PointCloudPage] 清理会话失败', e)
+    } finally {
+      bluetoothStore.setCleanupStatus(false); // 清理结束
+    }
     // 显示提示
     showToast('设备已断开连接', 3000)
   })
@@ -313,7 +324,7 @@ function registerDisconnectListener() {
 // --- 监听蓝牙Store的连接状态变化 ---
 watch(
   () => bluetoothStore.connectingStatus,
-  (newStatus, oldStatus) => {
+  async (newStatus, oldStatus) => {
     if (oldStatus === 2 && newStatus !== 2) {
       // 连接从已连接变为非已连接状态
       if (!deviceDisconnected.value) {
@@ -321,7 +332,14 @@ watch(
         deviceDisconnected.value = true
         isCollecting.value = false
         // hasStarted.value = false
-        stopSessionParser()
+        try {
+          bluetoothStore.setCleanupStatus(true)  // 清理中
+          await stopSessionParser() // 这里会取消订阅
+        } catch (e) {
+          console.warn('[PointCloudPage] 清理会话失败', e)
+        } finally {
+          bluetoothStore.setCleanupStatus(false); // 清理结束
+        }
       }
     }
   },
@@ -335,7 +353,14 @@ async function cleanupResourcesForPause() {
 
   // 2. 如果正在采集，则停止会话解析器（取消订阅、停止相机、清除定时器）
   if (isCollecting.value) {
-    await stopSessionParser()
+    try {
+      bluetoothStore.setCleanupStatus(true)  // 清理中
+      await stopSessionParser() // 这里会取消订阅
+    } catch (e) {
+      console.warn('[PointCloudPage] 清理会话失败', e)
+    } finally {
+      bluetoothStore.setCleanupStatus(false); // 清理结束
+    }
   } else {
     console.log('[PointCloudPage] 未在采集状态，无需停止会话解析器')
   }
@@ -370,9 +395,12 @@ async function cleanupResourcesForExit() {
   await disableScreenKeepAwake()
   await cameraHelper.stopPreview()
   try {
+    bluetoothStore.setCleanupStatus(true)  // 清理中
     await stopSessionParser() // 这里会取消订阅
   } catch (e) {
     console.warn('[PointCloudPage] 清理会话失败', e)
+  } finally {
+    bluetoothStore.setCleanupStatus(false); // 清理结束
   }
 
   // --- 移除断开监听 ---
@@ -423,10 +451,6 @@ async function handleAppResume() {
   }
 }
 
-onBeforeRouteLeave((to, from, next) => {
-  cleanupResourcesForExit()
-  next()
-})
 
 // 启动解析器并订阅蓝牙通知
 function startSessionParser() {
@@ -462,7 +486,6 @@ function startSessionParser() {
       try {
         // const photoData = await cameraHelper.captureAndSave(fileBaseName)
         const photoData = await cameraHelper.captureAndSave(fileBaseName + '====' + reNameFlag++)
-        console.log('renameflag', reNameFlag)
         if (photoData && photoData.base64Data && photoData.fileName) {
           sessionData.photos.push({
             name: photoData.fileName,
@@ -493,6 +516,7 @@ function startSessionParser() {
   bluetoothService
     .subscribeToNotifications(deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, (uint8) => {
       try {
+        console.log('订阅通知，收到数据')
         const { points, errors } = parser.parse(uint8)
         if (errors && errors.length > 0) {
           console.warn('parse errors', errors)
@@ -640,6 +664,12 @@ async function stopSessionParser() {
   color: var(--text-primary);
   position: relative;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  /* 全局禁用选中（可继承的元素） */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none; /* 禁用长按菜单 */
 }
 
 .three-container {
@@ -667,6 +697,7 @@ async function stopSessionParser() {
   z-index: 10;
 }
 
+/* 所有按钮默认禁用选中，但允许点击 */
 .back-btn {
   position: absolute;
   left: 16px;
@@ -686,6 +717,13 @@ async function stopSessionParser() {
   transition: all 0.2s ease;
   cursor: pointer;
   padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  /* 确保图片也不会触发选中 */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .back-btn:hover {
@@ -705,8 +743,12 @@ async function stopSessionParser() {
   display: block;
   filter: brightness(0.95);
   opacity: 0.9;
+  /* 图片本身也禁止拖动/保存 */
+  -webkit-user-drag: none;
+  pointer-events: none;
 }
 
+/* 保存按钮 - 禁用选中 */
 .save-btn {
   position: absolute;
   top: 16px;
@@ -735,11 +777,14 @@ async function stopSessionParser() {
   border: 1px solid rgba(255, 255, 255, 0.15);
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* 保存对话框覆盖层需要接收事件 */
-
-/* 整合后的保存对话框样式：全屏覆盖模态 */
 .save-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -748,6 +793,12 @@ async function stopSessionParser() {
   justify-content: center;
   z-index: 2000;
   background: rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .save-dialog-content {
@@ -755,7 +806,7 @@ async function stopSessionParser() {
   height: 100vh;
   max-width: 100vw;
   max-height: 100vh;
-  background: transparent; /* 内容内使用半透明卡片样式 */
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -772,14 +823,38 @@ async function stopSessionParser() {
   border-radius: 12px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
   overflow: auto;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
+/* 对话框内的文字也禁止选中，但输入框除外 */
+.save-dialog-card h3,
+.save-dialog-card label,
+.save-dialog-card .save-actions button {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 输入框允许选中和编辑，覆盖父级限制 */
 .save-dialog-content input {
   width: 100%;
   margin: 8px 0 12px 0;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #fff;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default; /* 允许长按菜单（复制/粘贴） */
 }
 
 .save-btn:hover {
@@ -822,6 +897,11 @@ async function stopSessionParser() {
   box-shadow: 0 6px 16px var(--brand-glow);
   border: 1px solid rgba(255, 255, 255, 0.2);
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .capture-btn::after {
@@ -836,6 +916,7 @@ async function stopSessionParser() {
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   transition: all 0.2s ease;
+  pointer-events: none; /* 伪元素不干扰点击 */
 }
 
 .capture-btn:hover {
@@ -878,6 +959,11 @@ async function stopSessionParser() {
   z-index: 10;
   flex-direction: column;
   gap: 4px;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .stat-item {
@@ -885,6 +971,10 @@ async function stopSessionParser() {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 .stat-label {
@@ -903,7 +993,7 @@ async function stopSessionParser() {
   letter-spacing: 0.5px;
 }
 
-/* ========== 左下角统计数据样式 ========== */
+/* ========== 左下角统计数据样式（重点禁用复制） ========== */
 .bottom-left-stat {
   position: absolute;
   left: 16px;
@@ -911,7 +1001,20 @@ async function stopSessionParser() {
   font-size: 14px;
   color: var(--text-secondary);
   z-index: 10;
-  pointer-events: auto; /* 确保文字本身不阻挡交互 */
+  pointer-events: auto; /* 确保文字本身不阻挡交互，但禁用选中 */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 内部span也继承禁用 */
+.bottom-left-stat span {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 /* ========== 设备断开提示样式 ========== */
@@ -929,6 +1032,11 @@ async function stopSessionParser() {
   align-items: center;
   z-index: 100;
   pointer-events: auto;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .disconnect-message {
@@ -941,12 +1049,21 @@ async function stopSessionParser() {
   gap: 20px;
   border: 1px solid var(--border-subtle);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .disconnect-message span {
   font-size: 18px;
   font-weight: 500;
   color: var(--text-primary);
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 .disconnect-back-btn {
@@ -960,6 +1077,11 @@ async function stopSessionParser() {
   cursor: pointer;
   transition: all 0.2s ease;
   border: 1px solid rgba(255, 255, 255, 0.15);
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .disconnect-back-btn:hover {
@@ -973,26 +1095,29 @@ async function stopSessionParser() {
 
 .save-dialog-content h3 {
   margin: 0 0 8px 0;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
-.save-dialog-content input {
-  width: 100%;
-  padding: 8px 10px;
-  margin: 8px 0 12px 0;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: #fff;
-}
-.save-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
+
+/* 对话框内按钮禁用选中 */
 .save-actions button {
   padding: 8px 12px;
   border-radius: 8px;
   border: none;
   cursor: pointer;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.save-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 @media (max-width: 768px) {
@@ -1022,7 +1147,6 @@ async function stopSessionParser() {
     right: 16px;
   }
 
-  /* 适配小屏幕上的顶部中央统计 */
   .top-center-stat {
     top: 16px;
     left: 50%;
@@ -1031,14 +1155,12 @@ async function stopSessionParser() {
     min-width: 90px;
   }
 
-  /* 适配小屏幕上的左下角统计 */
   .bottom-left-stat {
     font-size: 12px;
     left: 12px;
     bottom: 12px;
   }
 
-  /* 适配小屏幕上的断开提示 */
   .disconnect-message {
     padding: 20px 24px;
   }

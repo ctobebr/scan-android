@@ -53,7 +53,7 @@ import { bluetoothService } from '@/services/bluetoothService'
 import { showToast } from '@/utils/toast'
 import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { Share } from '@capacitor/share'
-import { AppLauncher, LaunchWebUrlResult } from '@capacitor/app-launcher'
+// import { AppLauncher, LaunchWebUrlResult } from '@capacitor/app-launcher'
 const loadingFiles = ref(false)
 const sessions = ref([])
 
@@ -61,7 +61,7 @@ const loadFileList = async () => {
   loadingFiles.value = true
   try {
     const folders = await bluetoothService.listPointCloudFolders()
-    console.log('folders:', JSON.stringify(folders))
+    // console.log('folders:', JSON.stringify(folders))
     const items = []
     for (const f of folders) {
       const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${f.name}`)
@@ -98,7 +98,7 @@ const loadFileList = async () => {
       return timeB.localeCompare(timeA);
     });
     sessions.value = items
-    console.log('sessions=====',JSON.stringify(sessions))
+    // console.log('sessions=====',JSON.stringify(sessions))
   } catch (error) {
     console.error('加载项目列表失败:', error)
     showToast('加载项目列表失败: ' + (error.message || error))
