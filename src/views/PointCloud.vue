@@ -596,16 +596,16 @@ async function performSave(folderName) {
     savedDuringDialog.value = true
     lastSavedFolder.value = folderName
     closeSaveDialog()
-    // 通知外部刷新（主页面会监听此事件并调用 loadProjectFolders）
-    try {
-      if (typeof window !== 'undefined' && window.dispatchEvent) {
-        window.dispatchEvent(
-          new CustomEvent('pointcloud-updated', { detail: { folder: folderName } }),
-        )
-      }
-    } catch (e) {
-      console.warn('dispatch pointcloud-updated failed', e)
-    }
+    // // 通知外部刷新
+    // try {
+    //   if (typeof window !== 'undefined' && window.dispatchEvent) {
+    //     window.dispatchEvent(
+    //       new CustomEvent('pointcloud-updated', { detail: { folder: folderName } }),
+    //     )
+    //   }
+    // } catch (e) {
+    //   console.warn('dispatch pointcloud-updated failed', e)
+    // }
     // 完成后返回主页面
     router.back()
   } catch (error) {

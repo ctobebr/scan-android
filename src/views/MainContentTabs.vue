@@ -2,9 +2,7 @@
   <div class="project-collection-container">
     <!-- 外层滚动容器 -->
     <div class="scroll-container">
-      <!-- 顶部导航栏 -->
       <!-- 标签切换区 -->
-      <!-- <div class="sticky-tabs"> -->
       <div class="tabs">
         <button
           class="tab-button"
@@ -28,15 +26,15 @@
           设置
         </button>
       </div>
-      <!-- </div> -->
 
       <!-- 内容区域 - 使用动态组件和 Transition -->
       <div class="content-area">
         <transition name="slide-left" mode="out-in">
-          <component :is="currentComponent" :projects="projectFolders" :key="activeTab" />
+          <component :is="currentComponent" :key="activeTab" />
         </transition>
       </div>
     </div>
+
     <div class="floating-bottom-buttons">
       <button class="connect-button" @click="toggleConnectionDialog">
         <img :src="getConnectIconSrc()" alt="Connection Status" class="connect-icon" />
@@ -99,127 +97,98 @@
 
 <script setup>
 import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount, watch } from 'vue'
-import { Capacitor } from '@capacitor/core'
 import FileList from './FileList.vue'
 import ProjectList from './ProjectList.vue'
 import SettingList from './SettingList.vue'
 import { bluetoothService } from '@/services/bluetoothService'
-import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { showToast } from '@/utils/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
+import { useFoldersStore } from '@/stores/folders'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { lockToPortrait } from '@/utils/screen'
 defineOptions({
   name: 'MainContentTabs',
 })
+
 const router = useRouter()
 const bluetoothStore = useBluetoothStore()
+const folderStore = useFoldersStore()
+
 const { devices, scanning, connectingStatus, connectingDeviceId } = storeToRefs(bluetoothStore)
 
 // 计算属性：过滤掉 name 为 "N/A" 的设备
 const filteredDevices = computed(() => {
   return devices.value.filter((device) => device.name !== 'N/A')
 })
-let pointcloudUpdatedHandler = null
 
-// 统一的注册函数
-const registerEventListener = () => {
-  try {
-    if (pointcloudUpdatedHandler) {
-      window.removeEventListener('pointcloud-updated', pointcloudUpdatedHandler)
-    }
-
-    pointcloudUpdatedHandler = (e) => {
-      console.log('[MainContentTabs] pointcloud-updated received, reloading folders', e && e.detail)
-      loadProjectFolders()
-    }
-    window.addEventListener('pointcloud-updated', pointcloudUpdatedHandler)
-    console.log('[MainContentTabs] 事件监听器已注册')
-  } catch (e) {
-    console.warn('addEventListener pointcloud-updated failed', e)
-  }
-}
-
-// 统一的清理函数
-const unregisterEventListener = () => {
-  try {
-    if (pointcloudUpdatedHandler) {
-      window.removeEventListener('pointcloud-updated', pointcloudUpdatedHandler)
-      pointcloudUpdatedHandler = null
-      console.log('[MainContentTabs] 事件监听器已清理')
-    }
-  } catch (e) {
-    console.warn('removeEventListener failed', e)
-  }
-}
 // ========== 监听连接状态变化，更新设备列表中的显示 ==========
 // 当连接状态或连接设备ID变化时，强制刷新设备列表的计算属性
 watch(
   [connectingStatus, connectingDeviceId],
   () => {
-    // 直接触发 computed 重新计算即可
     console.log('连接状态变化，更新设备列表显示')
   },
   { deep: false },
 )
-// ========== 结束：监听连接状态变化 ==========
 
 onMounted(async () => {
   await lockToPortrait()
   console.log('onmounted')
   bluetoothStore.autoScanOnEnter()
-  // 加载本地项目文件夹列表
-  loadProjectFolders()
-  // 监听外部对 pointcloud 的更新事件，触发刷新
-  registerEventListener()
+
+  // 使用 store 加载项目文件夹列表
+  await folderStore.loadProjectFolders()
+
   // 如果显示已连接，但实际可能已断开，做个状态校验
   setTimeout(() => {
     if (connectingStatus.value === 2 && connectingDeviceId.value) {
       bluetoothService.checkConnectionStatus(connectingDeviceId.value).catch(() => {
-        // 校验失败时，store 中的 handleDeviceDisconnected 会被触发
         console.log('页面启动时检测到连接已断开')
       })
     }
   }, 500)
-  // ========== 结束：页面激活时检查连接状态 ==========
 })
+
 onActivated(async () => {
   await lockToPortrait()
-  // 每次激活都重新注册监听（确保监听器存在）
-  registerEventListener()
+
   // 重新扫描以获取最新的设备状态
   if (showConnectionDialog.value) {
     bluetoothStore.autoScanOnEnter()
   }
-  // 页面激活时刷新项目列表（双重保障）
-  await loadProjectFolders()
+
+  // 加载本地项目文件夹列表（使用 store，利用缓存机制）
+  await folderStore.loadProjectFolders()
 })
+
 onBeforeUnmount(() => {
-  unregisterEventListener()
 })
+
 const handleStartRecord = () => {
   if (connectingStatus.value != 2) {
     showToast('请先连接设备')
     return
   }
   closeConnectionDialog()
-  // 页面跳转之后直接开始采集
   router.push('/pointCloud')
   showToast('请旋转手机，并放置在云台上')
 }
+
 const handleConnect = (device) => {
   bluetoothStore.handleConnect(device)
 }
+
 const handleDisconnect = (device) => {
   bluetoothStore.handleDisconnect(device)
   showToast('已断开连接')
 }
+
 // 定义 Tab 数据，关联到具体的组件
 const tabs = [
-  { id: 'Projects', label: '项目', component: ProjectList }, // 关联 ProjectList 组件
-  { id: 'FileList', label: '文件', component: FileList }, // 关联 FileList 组件
-  { id: 'SettingList', label: '设置', component: SettingList }, // 关联 SettingList 组件
+  { id: 'Projects', label: '项目', component: ProjectList },
+  { id: 'FileList', label: '文件', component: FileList },
+  { id: 'SettingList', label: '设置', component: SettingList },
 ]
 
 // 管理当前激活的 Tab
@@ -261,73 +230,10 @@ const toggleConnectionDialog = () => {
   }
 }
 
-// 关闭连接对话框（点击遮罩层）
+// 关闭连接对话框
 const closeConnectionDialog = () => {
   showConnectionDialog.value = false
 }
-
-// ========== 项目缩略数据 ==========
-const projectFolders = ref([])
-
-async function loadProjectFolders() {
-  try {
-    const folders = await bluetoothService.listPointCloudFolders()
-    // 为每个文件夹尝试获取第一张缩略图 URI
-    const withThumbs = await Promise.all(
-      folders.map(async (f) => {
-        const rawThumbUri = await bluetoothService.getFirstPhotoUri(f.name).catch(() => null)
-        let thumb = null
-        if (rawThumbUri) {
-          try {
-            thumb = Capacitor.convertFileSrc(rawThumbUri)
-          } catch (e) {
-            console.warn('[MainContentTabs] convertFileSrc failed for', rawThumbUri, e)
-            thumb = null
-          }
-        }
-        // 解析项目名与 sessionId
-        let projectName = f.name
-        let sessionId = f.name
-        const idx = f.name.lastIndexOf('_')
-        if (idx > 0) {
-          projectName = f.name.slice(0, idx)
-          sessionId = f.name.slice(idx + 1)
-        }
-        const displayName = parseSessionIdToFormattedTime(sessionId) || sessionId
-        // 获取文件夹内最新修改时间，用于排序
-        let lastModified = 0
-        try {
-          const files = await bluetoothService.listFilesInFolder(`pointcloud/${f.name}`)
-          for (const ff of files || []) {
-            if (ff && ff.mtime && ff.mtime > lastModified) lastModified = ff.mtime
-          }
-        } catch (e) {
-          // ignore
-        }
-        return {
-          name: f.name,
-          // uri: f.uri,
-          thumbUri: thumb,
-          projectName,
-          sessionId,
-          displayName,
-          lastModified,
-        }
-      }),
-    )
-    // 按最后修改时间倒序排列，最新的在前
-    withThumbs.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
-    projectFolders.value = withThumbs
-  } catch (e) {
-    console.warn('加载项目列表失败', e)
-  }
-}
-// const handleRefresh = () => {
-//   console.log('handleRefresh device')
-//   bluetoothStore.autoScanOnEnter()
-//   // 这里可以打开添加设备的页面或弹窗
-//   closeConnectionDialog()
-// }
 </script>
 
 <style scoped>

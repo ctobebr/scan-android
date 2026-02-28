@@ -378,28 +378,23 @@ export class BluetoothService {
 
   // ========== 结束：连接状态监控方法 ==========
 
-  async saveBleDataToFile(dataLines) {
-    if (!Array.isArray(dataLines) || dataLines.length === 0) {
-      throw new Error('无数据可保存')
-    }
-    const content = dataLines.join('\n')
-    const timestamp = new Date(Date.now() + 28800000)
-      .toISOString()
-      .replace(/[-:T.Z]/g, '')
-      .slice(0, 14)
-
-    const filename = `pointCloud_data_${timestamp}.txt`
-    await Filesystem.writeFile({
-      path: filename,
-      data: content,
-      directory: Directory.Documents,
-      encoding: 'utf8',
-    })
-
-    return {
-      path: Directory.Documents,
-      filePath: filename,
-      lineCount: dataLines.length,
+  // ========== 开始：文件状态信息相关===========
+  dispatchFolderUpdate(type, data) {
+    try {
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(
+          new CustomEvent('pointcloud-updated', {
+            detail: {
+              type,
+              timestamp: Date.now(),
+              ...data,
+            },
+          }),
+        )
+        console.log(`[bluetoothService] dispatched pointcloud-updated: ${type}`, data)
+      }
+    } catch (e) {
+      console.warn('[bluetoothService] dispatch pointcloud-updated failed', e)
     }
   }
   /**
@@ -435,7 +430,7 @@ export class BluetoothService {
       const baseDirPath = 'pointcloud'
       const sessionDirPath = `${baseDirPath}/${sessionID}`
 
-      // --- 修改点：检查目录是否存在 ---
+      // 检查目录是否存在，不存在则创建
       try {
         // 尝试读取目录内容，如果成功，说明目录存在
         await Filesystem.readdir({
@@ -443,10 +438,12 @@ export class BluetoothService {
           directory: Directory.Documents,
         })
         console.log(`目录已存在: ${sessionDirPath}`)
-        // 目录存在，无需创建，直接继续
       } catch (readdirError) {
-        // readdir 失败，检查错误信息是否是 "Directory does not exist"
-        if (readdirError.message.includes('Directory does not exist')) {
+        // readdir 失败，检查错误信息
+        if (
+          readdirError.message.includes('Directory does not exist') ||
+          readdirError.message.includes('ENOENT')
+        ) {
           console.log(`目录不存在，即将创建: ${sessionDirPath}`)
           // 目录不存在，尝试创建它及其父目录
           await Filesystem.mkdir({
@@ -456,21 +453,21 @@ export class BluetoothService {
           })
           console.log(`目录创建成功: ${sessionDirPath}`)
         } else {
-          // 如果不是 "Directory does not exist" 的错误，则抛出
           console.error('检查目录时发生未知错误:', readdirError)
           throw readdirError
         }
       }
-      // --- 结束修改 ---
 
+      // 生成时间戳文件名
       const content = dataLines.join('\n')
-      const timestamp = new Date(Date.now() + 28800000) // 注意：这是东八区时间戳
+      const timestamp = new Date(Date.now() + 28800000) // 东八区时间戳
         .toISOString()
         .replace(/[-:T.Z]/g, '')
         .slice(0, 14)
       const txtFilename = `pointCloud_data_${timestamp}.txt`
       const txtFilePath = `${sessionDirPath}/${txtFilename}`
 
+      // 写入数据文件
       await Filesystem.writeFile({
         path: txtFilePath,
         data: content,
@@ -483,6 +480,7 @@ export class BluetoothService {
         directory: Directory.Documents,
       })
 
+      // 保存照片
       const savedPhotoPaths = []
       for (let i = 0; i < photos.length; i++) {
         const photo = photos[i]
@@ -512,12 +510,11 @@ export class BluetoothService {
             console.error('写入 base64 照片失败:', photo.name || photoPath, writeError)
           }
         } else {
-          // 不再处理 photo.path 路径
           console.warn(`照片 ${i} 缺少有效的 base64 字段，跳过。`, photo)
         }
       }
 
-      // --- 关键输出 ---
+      // 输出保存结果
       console.log(`本次共保存了 ${savedPhotoPaths.length} 张照片。`)
       console.log(`数据文件保存路径: ${fullTxtUri.uri}`)
       if (savedPhotoPaths.length > 0) {
@@ -525,7 +522,9 @@ export class BluetoothService {
       } else {
         console.log(`没有照片被保存。`)
       }
-      // --- End of 关键输出 ---
+
+      // 广播更新事件，通知界面刷新项目/数据列表
+      this.dispatchFolderUpdate('new_session', { session: sessionID })
 
       const result = {
         path: Directory.Documents,
@@ -533,6 +532,7 @@ export class BluetoothService {
         fullUri: fullTxtUri.uri,
         photoPaths: savedPhotoPaths,
         lineCount: dataLines.length,
+        sessionId: sessionID,
       }
 
       console.log('--- [saveBleDataToFileWithSessionStructure] 执行完成 ---')
@@ -627,8 +627,8 @@ export class BluetoothService {
         path: filename,
         directory: Directory.Documents, // 确保与存储文件时的目录一致
       })
-
       console.log(`文件 " ${filename}" 删除成功`)
+      this.dispatchFolderUpdate('file_deleted', { filename })
     } catch (error) {
       console.error(`删除文件 " ${filename}" 失败:`, error)
       // 如果是文件不存在的错误，可以提供更友好的提示
@@ -641,17 +641,31 @@ export class BluetoothService {
   }
 
   /**
-   * 删除 pointcloud 下指定会话文件夹及其内容
-   * @param {string} folderOrRel - 可以是 'pointcloud/<folder>' 或 '<folder>' 或 仅文件夹名
+   * 删除 pointcloud 下的指定会话文件夹及其内容
+   * @param {string} folderOrRel - 可以是 'pointcloud/<folder>' 或 '<folder>' 或仅文件夹名
+   * @returns {Promise<boolean>} 删除是否成功
    */
   async deleteFolder(folderOrRel) {
     if (!folderOrRel) throw new Error('folderOrRel required')
+
     let rel = folderOrRel
-    if (rel.startsWith('pointcloud/')) rel = rel.replace('pointcloud/', '')
+    if (rel.startsWith('pointcloud/')) {
+      rel = rel.replace('pointcloud/', '')
+    }
+
     const folderPath = `pointcloud/${rel}`
+    let deletedFilesCount = 0
+
     try {
+      // 列出文件夹中的所有文件
       const files = await this.listFilesInFolder(folderPath)
-      console.log('[bluetoothService] deleteFolder listing:', JSON.stringify(files))
+      console.log(
+        `[bluetoothService] deleteFolder listing for ${folderPath}:`,
+        files.length,
+        'files found',
+      )
+
+      // 删除文件夹中的所有文件
       for (const f of files) {
         try {
           await Filesystem.deleteFile({
@@ -659,36 +673,65 @@ export class BluetoothService {
             directory: Directory.Documents,
           })
           console.log(`[bluetoothService] 删除文件: ${folderPath}/${f.name}`)
+          deletedFilesCount++
         } catch (e) {
           console.warn(`[bluetoothService] 删除文件失败: ${folderPath}/${f.name}`, e)
         }
       }
 
-      // 尝试删除目录（如果平台支持 rmdir）
+      // 尝试删除目录本身
       try {
+        // 检查平台是否支持 rmdir
         if (Filesystem.rmdir) {
-          await Filesystem.rmdir({ path: folderPath, directory: Directory.Documents })
+          await Filesystem.rmdir({
+            path: folderPath,
+            directory: Directory.Documents,
+          })
           console.log('[bluetoothService] rmdir 成功:', folderPath)
         } else {
-          // 某些平台没有 rmdir，尝试删除文件夹路径作为文件（可能失败但无害）
-          await Filesystem.deleteFile({ path: folderPath, directory: Directory.Documents }).catch(
-            () => {},
-          )
+          // 某些平台没有 rmdir，尝试用 deleteFile 删除目录（可能失败）
+          try {
+            await Filesystem.deleteFile({
+              path: folderPath,
+              directory: Directory.Documents,
+            })
+            console.log('[bluetoothService] 使用 deleteFile 删除目录成功:', folderPath)
+          } catch (deleteErr) {
+            console.log(
+              '[bluetoothService] 使用 deleteFile 删除目录失败（可能正常）:',
+              deleteErr.message,
+            )
+          }
         }
       } catch (e) {
-        console.warn('[bluetoothService] 删除目录失败（可能平台不支持），忽略:', e)
+        // 如果目录非空或平台不支持，记录警告但继续
+        console.warn('[bluetoothService] 删除目录失败（可能非空或平台不支持）:', e.message)
       }
 
       // 广播更新事件，通知界面刷新项目/数据列表
-      try {
-        if (typeof window !== 'undefined' && window.dispatchEvent) {
-          window.dispatchEvent(new CustomEvent('pointcloud-updated', { detail: { folder: rel } }))
-          console.log('[bluetoothService] dispatched pointcloud-updated for', rel)
-        }
-      } catch (e) {
-        console.warn('[bluetoothService] dispatch pointcloud-updated failed', e)
-      }
+      this.dispatchFolderUpdate('delete', { folder: rel, deletedFilesCount })
 
+      console.log(
+        `[bluetoothService] 文件夹删除操作完成: ${folderPath}, 删除了 ${deletedFilesCount} 个文件`,
+      )
+
+      setTimeout(async () => {
+        try {
+          const folders = await this.listPointCloudFolders()
+          console.log(
+            `[bluetoothService] 删除后验证，当前文件夹列表:`,
+            folders.map((f) => f.name),
+          )
+
+          // 检查被删除的文件夹是否还在列表中
+          const stillExists = folders.some((f) => f.name === rel)
+          if (stillExists) {
+            console.error(`[bluetoothService] ⚠️ 警告：文件夹 ${rel} 删除后仍然出现在列表中！`)
+          }
+        } catch (e) {
+          console.warn('[bluetoothService] 验证失败', e)
+        }
+      }, 500)
       return true
     } catch (error) {
       console.error('[bluetoothService] deleteFolder 失败:', error)
@@ -928,12 +971,14 @@ export class BluetoothService {
       console.log(
         '[bluetoothService] zipSessionToFile 写入完成 uri -> ' + String(uriRes && uriRes.uri),
       )
+      this.dispatchFolderUpdate('zip_created', { folder: sessionFolderName, zipName: zipFileName })
       return { uri: uriRes.uri, path: zipPath, relativePath: zipPath }
     } catch (error) {
       console.error('打包项目失败', error)
       throw error
     }
   }
+  // ========== 结束：文件状态信息相关===========
   /**
    * 通用发送函数：根据命令字和数据构建协议帧并发送
    * @param {string} deviceId - 蓝牙设备ID

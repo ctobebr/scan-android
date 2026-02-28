@@ -1,7 +1,7 @@
 <template>
   <div class="favorites-list">
     <main class="list-container">
-      <div v-if="loadingFiles" class="loading-state">
+      <div v-if="folderStore.loading" class="loading-state">
         <p>加载中...</p>
       </div>
 
@@ -12,15 +12,12 @@
       <div v-else class="list">
         <div v-for="session in sessions" :key="session.folderName" class="list-item">
           <div class="info">
+            <!-- title 显示 projectName 或 sessionId -->
             <div class="title">{{ session.displayName }}</div>
+            <!-- date 显示：如果有文件则显示时间，否则显示"空" -->
             <div class="date">
-              <span>{{ session.firstFile ? session.timeStr : '空' }}</span>
+              <span>{{ session.timeStr }}</span>
             </div>
-            <!-- <div class="date">
-              <span>{{
-                session.firstFile ? formatFileSize(session.firstFile.size || 0) : '空'
-              }}</span>
-            </div> -->
           </div>
 
           <!-- 操作图标容器 -->
@@ -43,70 +40,20 @@
     </main>
   </div>
 </template>
-
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { Filesystem, Directory } from '@capacitor/filesystem'
-import { App } from '@capacitor/app'
-import { Capacitor } from '@capacitor/core'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { bluetoothService } from '@/services/bluetoothService'
 import { showToast } from '@/utils/toast'
 import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { Share } from '@capacitor/share'
-// import { AppLauncher, LaunchWebUrlResult } from '@capacitor/app-launcher'
-const loadingFiles = ref(false)
-const sessions = ref([])
+import { useFoldersStore } from '@/stores/folders'
 
-const loadFileList = async () => {
-  loadingFiles.value = true
-  try {
-    const folders = await bluetoothService.listPointCloudFolders()
-    // console.log('folders:', JSON.stringify(folders))
-    const items = []
-    for (const f of folders) {
-      const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${f.name}`)
-      // 选择最新的文件作为 firstFile（按 mtime 倒序）
-      const sortedFiles = (filesInFolder || [])
-        .slice()
-        .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
-      const firstFile = sortedFiles.length > 0 ? sortedFiles[0] : null
-      // 尝试从文件夹名解析项目名与 sessionId
-      let projectName = f.name
-      let sessionId = f.name
-      // 如果命名为 project_sessionId，则拆分
-      const idx = f.name.lastIndexOf('_')
-      if (idx > 0) {
-        projectName = f.name.slice(0, idx)
-        sessionId = f.name.slice(idx + 1)
-      }
-      const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId
-      // 标题显示优先级：项目名称 > 会话ID
-      const title = projectName && projectName !== sessionId ? projectName : sessionId
-      items.push({
-        folderName: f.name,
-        projectName,
-        sessionId,
-        displayName: title,
-        timeStr,
-        firstFile,
-      })
-    }
-    items.sort((a, b) => {
-      // 如果 timeStr 不存在，将其视为最早的时间
-      const timeA = a.timeStr || '';
-      const timeB = b.timeStr || '';
-      return timeB.localeCompare(timeA);
-    });
-    sessions.value = items
-    // console.log('sessions=====',JSON.stringify(sessions))
-  } catch (error) {
-    console.error('加载项目列表失败:', error)
-    showToast('加载项目列表失败: ' + (error.message || error))
-    sessions.value = []
-  } finally {
-    loadingFiles.value = false
-  }
-}
+const folderStore = useFoldersStore()
+// 直接从 store 的计算属性获取会话列表
+const sessions = computed(() => {
+  return folderStore.fileListItems
+})
+
 const onShareClick = async (folderName, projectName, sessionId) => {
   try {
     // 检查项目文件夹是否为空
@@ -114,7 +61,8 @@ const onShareClick = async (folderName, projectName, sessionId) => {
     if (!filesInFolder || filesInFolder.length === 0) {
       if (confirm('当前项目文件夹为空，是否删除该项目？')) {
         await bluetoothService.deleteFolder(folderName)
-        await loadFileList()
+        // 删除后刷新 store（事件会触发，但这里可以立即刷新）
+        await folderStore.refreshFolders()
       }
       return
     }
@@ -134,20 +82,6 @@ const onShareClick = async (folderName, projectName, sessionId) => {
         url: res.uri,
         dialogTitle: '选择应用分享压缩包',
       })
-      // 分享后尝试在文件管理器中打开目标文件夹，便于手动复制到 U 盘
-      // 调用 FileManagerOpener.openFolder 中3...
-      // 调用 FileManagerOpener.openFolder 失败 ReferenceError: Plugins is not defined
-      try {
-        const rel = folderName
-        console.warn('调用 FileManagerOpener.openFolder 中3...')
-        if (Plugins && Plugins.FileManagerOpener && Plugins.FileManagerOpener.openFolder) {
-          await Plugins.FileManagerOpener.openFolder({ path: rel })
-        } else if ((window ).Capacitor && (window).Capacitor.Plugins?.FileManagerOpener) {
-          await (window).Capacitor.Plugins.FileManagerOpener.openFolder({ path: rel })
-        }
-      } catch (e) {
-        console.warn('调用 FileManagerOpener.openFolder 失败', e)
-      }
       showToast('压缩包已生成：' + String(res.path) + '，可使用文件管理器复制到 U 盘')
     } else {
       showToast('打包失败，未生成可分享文件')
@@ -164,104 +98,15 @@ const onShareClick = async (folderName, projectName, sessionId) => {
     }
   }
 }
-// const onShareClick = async (folderName, projectName, sessionId) => {
-//   try {
-//     // 检查项目文件夹是否为空
-//     const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${folderName}`)
-//     if (!filesInFolder || filesInFolder.length === 0) {
-//       if (confirm('当前项目文件夹为空，是否删除该项目？')) {
-//         await bluetoothService.deleteFolder(folderName)
-//         await loadFileList()
-//       }
-//       return
-//     }
 
-//     const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId
-//     const zipBaseName = `${timeStr}_${projectName || sessionId}`
-//     console.log(
-//       '[FileList] 请求打包分享 folder=' +
-//         String(folderName) +
-//         ' zipBaseName=' +
-//         String(zipBaseName),
-//     )
-//     const res = await bluetoothService.zipSessionToFile(folderName, zipBaseName)
-//     if (res) {
-//       // 准备分享数据
-//       let fileUri = null;
-//       // 尝试获取文件 URI
-//       if (res.uri) {
-//         fileUri = res.uri;
-//       } else if (res.path) {
-//         // 如果插件返回了绝对路径，尝试通过 getURL 获取 URI
-//         try {
-//           fileUri = await bluetoothService.getURL(res.path);
-//         } catch (e) {
-//           console.warn('通过 res.path 获取 URI 失败:', e);
-//         }
-//       } else if (res.relativePath) {
-//          // 如果插件返回了相对路径，也尝试通过 getURL 获取 URI
-//         try {
-//           fileUri = await bluetoothService.getURL(res.relativePath);
-//         } catch (e) {
-//           console.warn('通过 res.relativePath 获取 URI 失败:', e);
-//         }
-//       }
-
-//       if (fileUri) {
-//         await Share.share({
-//           title: `分享数据文件: ${zipBaseName}.zip`,
-//           url: fileUri,
-//           dialogTitle: '选择应用分享文件',
-//         })
-//       } else {
-//         // 如果无法获取 URI，则回退到原来的逻辑，打开文件管理器
-//         console.warn('无法获取文件URI，回退到打开文件管理器');
-//         let targetDir = folderName
-//         if (res.relativePath && typeof res.relativePath === 'string') {
-//           const rp = res.relativePath.replace(/\\/g, '/')
-//           const parts = rp.split('/')
-//           if (parts.length > 1) parts.pop()
-//           targetDir = parts.join('/') || folderName
-//         }
-//         const plugin = Capacitor.Plugins && Capacitor.Plugins.FileManagerOpener
-//         if (plugin && plugin.openFolder) {
-//           await plugin.openFolder({ path: targetDir })
-//           showToast('已打开文件管理器，定位到：' + targetDir)
-//         } else if (window?.Capacitor?.Plugins?.FileManagerOpener) {
-//           await window.Capacitor.Plugins.FileManagerOpener.openFolder({ path: targetDir })
-//           showToast('已打开文件管理器，定位到：' + targetDir)
-//         } else {
-//           showToast(
-//             '未找到原生插件，压缩包已生成：' + String(res.path || res.relativePath || res.uri),
-//           )
-//         }
-//       }
-//     } else {
-//       showToast('打包失败，未生成文件')
-//     }
-//   } catch (error) {
-//     console.error('分享项目失败:', error)
-//     // 使用与模板相同的错误处理
-//     showToast(`分享文件 "${zipBaseName || sessionId}" 失败 (可能因文件过大): ${error.message}`)
-
-//     const msg = (error && error.message) || String(error)
-//     if (/cancel|canceled|用户取消|Share canceled/i.test(msg)) {
-//       showToast('分享已取消')
-//     } else if (/FILE_NOTCREATED/i.test(msg)) {
-//       showToast('打包失败：未创建文件')
-//     } else {
-//       showToast('分享失败: ' + msg)
-//     }
-//   }
-// }
 
 /**
  * 处理 Delete 按钮点击
- * @param {string} fileName - 被点击项的文件名
+ * @param {string} fileNameOrFolder - 被点击项的文件
  */
 const onDeleteClick = (fileNameOrFolder) => {
   console.log(`删除按钮被点击，目标:  ${fileNameOrFolder}`)
-  showMoreOptions(fileNameOrFolder) // Reuse the existing confirmation logic
+  showMoreOptions(fileNameOrFolder)
 }
 
 const showMoreOptions = (filename) => {
@@ -273,24 +118,23 @@ const showMoreOptions = (filename) => {
 }
 
 const deleteFile = async (filename) => {
-  // 支持删除单文件或整个文件夹（若传入为文件夹名）
   try {
-    // 如果是文件夹（pointcloud/<folder>），使用统一接口删除整个文件夹
     if (filename && filename.includes('pointcloud/')) {
       const rel = filename.replace('pointcloud/', '')
       console.log('[FileList] 请求删除文件夹: ' + rel)
       await bluetoothService.deleteFolder(rel)
+      // 删除后从 store 中移除（事件也会触发，但这里可以立即更新）
+      folderStore.removeFolder(rel)
     } else {
-      // 删除单个文件位于 Documents 根
       console.log('[FileList] 请求删除单文件: ' + filename)
       await bluetoothService.deleteBleDataFile(filename)
+      // 单文件删除后刷新整个列表（事件也会触发，但这里可以立即更新）
+      await folderStore.refreshFolders()
     }
     showToast('删除完成')
   } catch (e) {
     console.error('删除失败', e)
     showToast('删除失败: ' + (e.message || e))
-  } finally {
-    await loadFileList()
   }
 }
 
@@ -308,19 +152,9 @@ const formatFileSize = (bytes) => {
 }
 
 onMounted(() => {
-  loadFileList()
-  try {
-    window.addEventListener('pointcloud-updated', loadFileList)
-  } catch (e) {
-    console.warn('addEventListener pointcloud-updated failed', e)
-  }
-})
-
-onBeforeUnmount(() => {
-  try {
-    window.removeEventListener('pointcloud-updated', loadFileList)
-  } catch (e) {
-    console.warn('removeEventListener failed', e)
+  // 组件挂载时，如果 store 还没有数据，则加载
+  if (folderStore.projectFolders.length === 0) {
+    folderStore.loadProjectFolders()
   }
 })
 </script>

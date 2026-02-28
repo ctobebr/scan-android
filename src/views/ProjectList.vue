@@ -2,10 +2,18 @@
   <div class="project-list-container">
     <!-- 项目列表内容区域 (可滚动) -->
     <div class="content-area">
-      <div v-for="(item, index) in projectListItems" :key="index" class="list-item">
+      <div v-if="folderStore.loading && projectListItems.length === 0" class="loading-state">
+        <p>加载项目中...</p>
+      </div>
+
+      <div v-else-if="projectListItems.length === 0" class="empty-state">
+        <p>暂无项目</p>
+      </div>
+
+      <div v-for="(item, index) in projectListItems" :key="item.id || index" class="list-item">
         <div class="thumbnail">
           <img
-            :src="item.thumbnail"
+            :src="item.thumbnail || noImg"
             :alt="`Project  ${index + 1} Thumbnail`"
             @error="
               (e) => {
@@ -35,51 +43,58 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
-
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useFoldersStore } from '@/stores/folders'
 import noImg from '@/assets/img/noImg.png'
 
-const props = defineProps({
-  projects: { type: Array, default: () => null },
+const folderStore = useFoldersStore()
+// 直接从 store 获取项目列表数据
+const projectListItems = computed(() => {
+  return folderStore.projectListItems
 })
-const projectListItems = ref([])
 
+onMounted(() => {
+  // 组件挂载时，如果 store 还没有数据，则加载
+  if (folderStore.projectFolders.length === 0) {
+    folderStore.loadProjectFolders()
+  }
+})
 // 响应 props.projects 的变化
-watch(
-  () => props.projects,
-  (newVal) => {
-    const arr = Array.isArray(newVal) ? newVal : (newVal && newVal.value) || []
-    if (arr && Array.isArray(arr)) {
-      const mapped = arr.map((p, idx) => ({
-        id: idx + 1,
-        name: p.projectName || p.name || p.folderName || `项目 ${idx + 1}`,
-        thumbnail: p.thumbUri || p.thumbnail || noImg,
-        status: '已保存',
-        date: p.displayName || p.sessionId || '',
-        source: p.projectName || '手机',
-      }))
+// watch(
+//   () => props.projects,
+//   (newVal) => {
+//     const arr = Array.isArray(newVal) ? newVal : (newVal && newVal.value) || []
+//     if (arr && Array.isArray(arr)) {
+//       const mapped = arr.map((p, idx) => ({
+//         id: idx + 1,
+//         name: p.projectName || p.name || p.folderName || `项目 ${idx + 1}`,
+//         thumbnail: p.thumbUri || p.thumbnail || noImg,
+//         status: '已保存',
+//         date: p.displayName || p.sessionId || '',
+//         source: p.projectName || '手机',
+//       }))
 
-      // 按照 date 字段进行排序，最新的在前
-      const sortedMapped = mapped.sort((a, b) => {
-        // 尝试将 a.date 和 b.date 转换为 Date 对象进行比较
-        // 如果转换失败 (isNaN)，则将其视为最早的时间 (负无穷)
-        const dateA = new Date(a.date)
-        const dateB = new Date(b.date)
+//       // 按照 date 字段进行排序，最新的在前
+//       const sortedMapped = mapped.sort((a, b) => {
+//         // 尝试将 a.date 和 b.date 转换为 Date 对象进行比较
+//         // 如果转换失败 (isNaN)，则将其视为最早的时间 (负无穷)
+//         const dateA = new Date(a.date)
+//         const dateB = new Date(b.date)
 
-        // 如果 a 的日期更晚（更大），则返回负数，a 排在 b 前面
-        if (dateA > dateB) return -1
-        // 如果 a 的日期更早（更小），则返回正数，b 排在 a 前面
-        if (dateA < dateB) return 1
-        // 如果相等，则保持原有顺序
-        return 0
-      })
+//         // 如果 a 的日期更晚（更大），则返回负数，a 排在 b 前面
+//         if (dateA > dateB) return -1
+//         // 如果 a 的日期更早（更小），则返回正数，b 排在 a 前面
+//         if (dateA < dateB) return 1
+//         // 如果相等，则保持原有顺序
+//         return 0
+//       })
 
-      projectListItems.value = sortedMapped
-    }
-    // 调试：输出接收到的项目数组，便于诊断缩略图路径问题
-  },
-  { immediate: true },
-)
+//       projectListItems.value = sortedMapped
+//     }
+//     // 调试：输出接收到的项目数组，便于诊断缩略图路径问题
+//   },
+//   { immediate: true },
+// )
 
 // 切换项目状态
 // const toggleStatus = (index) => {
