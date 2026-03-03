@@ -1,3 +1,5 @@
+// src/composables/usePointCloudRenderer.js
+
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { showToast } from '@/utils/toast'
@@ -50,9 +52,7 @@ export function usePointCloudRenderer(container) {
       0.1,
       200, // 缩短远裁剪面，提升性能  200
     )
-    // 50  0  0
     camera.position.set(50, 0, 0)
-    // camera.position.set(0, 5, 20)
     camera.lookAt(0, 0, 0)
 
     // 渲染器
@@ -75,8 +75,9 @@ export function usePointCloudRenderer(container) {
       vertexColors: true, // 使用 geometry 中的 color attribute
       sizeAttenuation: true, // 远小近大
     })
+
+    // 创建点云对象但先不添加到场景
     pointCloud = new THREE.Points(pointsGeometry, pointsMaterial)
-    scene.add(pointCloud)
 
     // 坐标轴（红=X右，绿=Y上，蓝=Z后） （缩小，避免遮挡）
     const axesHelper = new THREE.AxesHelper(10)
@@ -100,11 +101,11 @@ export function usePointCloudRenderer(container) {
     controls.maxDistance = 160
     // 移动端优化：禁用右键/滚轮
     controls.enableZoom = true
-    // controls.enablePan = false // 禁用平移，避免误触
 
     // 启动渲染循环
     animate()
   }
+
   // 更新全局 Y 范围（增量式）
   const updateYRange = (newPoints) => {
     for (const p of newPoints) {
@@ -112,6 +113,7 @@ export function usePointCloudRenderer(container) {
       if (p.y > globalMaxY) globalMaxY = p.y
     }
   }
+
   // 根据 Y 值(高度)生成颜色（归一化到 [0,1] 后映射到彩虹色）
   const getColorByHeight = (y) => {
     // 防止除零
@@ -198,6 +200,11 @@ export function usePointCloudRenderer(container) {
     try {
       if (!pointsGeometry || newPoints.length === 0) return
 
+      // 如果这是第一批点云，将点云对象添加到场景
+      if (currentPointCount === 0 && !scene.children.includes(pointCloud)) {
+        scene.add(pointCloud)
+      }
+
       if (currentPointCount + newPoints.length > MAX_POINTS) {
         console.warn(
           `[Renderer] Point limit reached: current=${currentPointCount}, incoming=${newPoints.length}, max=${MAX_POINTS}`,
@@ -225,7 +232,7 @@ export function usePointCloudRenderer(container) {
         posArr[offset + 2] = p.z
 
         const color = getColorByHeight(p.y)
-        colArr[offset] = color.r // 直接存 [0,1]，因为 color 是 Float32Array
+        colArr[offset] = color.r
         colArr[offset + 1] = color.g
         colArr[offset + 2] = color.b
 
@@ -239,15 +246,8 @@ export function usePointCloudRenderer(container) {
       pointsGeometry.attributes.position.needsUpdate = true
       pointsGeometry.attributes.color.needsUpdate = true
 
-      // 6. 只渲染有效点
+      // 6. 设置绘制范围
       pointsGeometry.setDrawRange(0, currentPointCount)
-
-      // 7. 调试日志
-      // if (process.env.NODE_ENV === 'development' && newPoints.length > 0) {
-      //   console.log(
-      //     `[Renderer] Added ${newPoints.length} points. Total: ${currentPointCount}, Y range: [${globalMinY.toFixed(2)}, ${globalMaxY.toFixed(2)}]`,
-      //   )
-      // }
     } catch (err) {
       console.error('[Renderer] addPoints failed:', err)
       showToast('点云数据异常，请重试')
@@ -255,11 +255,16 @@ export function usePointCloudRenderer(container) {
   }
 
   const resetPointCloud = () => {
+    // 从场景中移除点云对象
+    if (scene && pointCloud && scene.children.includes(pointCloud)) {
+      scene.remove(pointCloud)
+    }
+
     currentPointCount = 0
     globalMinY = Infinity
     globalMaxY = -Infinity
-    pointsGeometry.setDrawRange(0, 0) // 关键：不渲染任何点
-    console.log('[Renderer] Point cloud reset')
+
+    console.log('[Renderer] Point cloud reset and removed from scene')
   }
 
   // 限制帧率（默认为 30 FPS，以保持显示平滑）
@@ -278,7 +283,10 @@ export function usePointCloudRenderer(container) {
       try {
         if (time - lastFrameTime >= frameInterval) {
           controls.update() // 必须调用 damping
+
+          // 无论有无点云，都正常渲染（场景中始终有网格和坐标轴）
           renderer.render(scene, camera)
+
           lastFrameTime = time
         }
       } catch (err) {
@@ -311,10 +319,8 @@ export function usePointCloudRenderer(container) {
     camera.aspect = container.clientWidth / container.clientHeight
     camera.updateProjectionMatrix()
     renderer.setSize(container.clientWidth, container.clientHeight)
-    // if (animationId) {
-    //   console.log(animationId)
-    // }
   }
+
   return {
     init,
     addPoints,

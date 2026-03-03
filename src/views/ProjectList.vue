@@ -15,12 +15,6 @@
           <img
             :src="item.thumbnail || noImg"
             :alt="`Project  ${index + 1} Thumbnail`"
-            @error="
-              (e) => {
-                console.warn('[ProjectList] thumbnail load error', item, e)
-                e.target.src = noImg
-              }
-            "
           />
         </div>
         <div class="info">

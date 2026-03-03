@@ -43,6 +43,12 @@ const routes = [
     component: FileSave,
   },
   {
+    path: '/batchDetail/:session/:bid',
+    name: 'BatchDetail',
+    component: () => import('@/views/BatchDetail.vue'),
+    props: true,
+  },
+  {
     path: '/bluetoothTest',
     name: 'BluetoothTest',
     component: BluetoothTest,

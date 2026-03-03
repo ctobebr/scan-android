@@ -12,7 +12,7 @@
 
 <script setup>
 import { ref, reactive, toRefs, onBeforeMount, onMounted, watch, onUnmounted, onActivated } from 'vue';
-import { useRoute, useRouter, onBeforeRouteEnter, onBeforeRouteLeave } from 'vue-router';
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { bluetoothService } from '@/services/bluetoothService'
 import { App } from '@capacitor/app'
@@ -179,6 +179,7 @@ const init = async () => {
       parser = null
     }
     parser = new parseBleData({
+      enableDebug: true,
       onCalibParamResponse: (data) => {
         calibParamResponse.value = data
         // 在这里进行业务处理

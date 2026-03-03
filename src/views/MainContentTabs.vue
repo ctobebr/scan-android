@@ -5,25 +5,13 @@
       <!-- 标签切换区 -->
       <div class="tabs">
         <button
+          v-for="tab in displayedTabs"
+          :key="tab.id"
           class="tab-button"
-          :class="{ active: activeTab === 'Projects' }"
-          @click="switchTo('Projects')"
+          :class="{ active: activeTab === tab.id }"
+          @click="handleTabClick(tab)"
         >
-          项目
-        </button>
-        <button
-          class="tab-button"
-          :class="{ active: activeTab === 'FileList' }"
-          @click="switchTo('FileList')"
-        >
-          数据
-        </button>
-        <button
-          class="tab-button"
-          :class="{ active: activeTab === 'SettingList' }"
-          @click="switchTo('SettingList')"
-        >
-          设置
+          {{ tab.label }}
         </button>
       </div>
 
@@ -65,8 +53,6 @@
               <div v-for="device in filteredDevices" :key="device.deviceId" class="device-item">
                 <div class="device-info">
                   <strong class="device-name">{{ device.name }}</strong>
-                  <!-- <small>{{ device.deviceId }}</small> -->
-                  <!-- 可选：显示ID -->
                 </div>
                 <div class="action">
                   <!-- 情况1: 正在连接当前设备 -->
@@ -107,6 +93,8 @@ import { useFoldersStore } from '@/stores/folders'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { lockToPortrait } from '@/utils/screen'
+import { StatusBar } from '@capacitor/status-bar'
+
 defineOptions({
   name: 'MainContentTabs',
 })
@@ -123,7 +111,6 @@ const filteredDevices = computed(() => {
 })
 
 // ========== 监听连接状态变化，更新设备列表中的显示 ==========
-// 当连接状态或连接设备ID变化时，强制刷新设备列表的计算属性
 watch(
   [connectingStatus, connectingDeviceId],
   () => {
@@ -134,7 +121,8 @@ watch(
 
 onMounted(async () => {
   await lockToPortrait()
-  console.log('onmounted')
+  await StatusBar.setOverlaysWebView({ overlay: false })
+  await StatusBar.setBackgroundColor({ color: '#e6f7ff' })
   bluetoothStore.autoScanOnEnter()
 
   // 使用 store 加载项目文件夹列表
@@ -152,14 +140,15 @@ onMounted(async () => {
 
 onActivated(async () => {
   await lockToPortrait()
-
+  await StatusBar.setOverlaysWebView({ overlay: false })
+  await StatusBar.setBackgroundColor({ color: '#e6f7ff' })
   // 重新扫描以获取最新的设备状态
   if (showConnectionDialog.value) {
     bluetoothStore.autoScanOnEnter()
   }
 
-  // 加载本地项目文件夹列表（使用 store，利用缓存机制）
-  await folderStore.loadProjectFolders()
+  // 页面激活时刷新项目列表，确保获取最新数据
+  await folderStore.refreshFolders()
 })
 
 onBeforeUnmount(() => {
@@ -184,26 +173,78 @@ const handleDisconnect = (device) => {
   showToast('已断开连接')
 }
 
-// 定义 Tab 数据，关联到具体的组件
-const tabs = [
+const baseTabs = [
   { id: 'Projects', label: '项目', component: ProjectList },
-  { id: 'FileList', label: '文件', component: FileList },
+  { id: 'FileList', label: '数据', component: FileList },
+]
+
+  // 完整的 Tabs
+const allTabs = [
+  { id: 'Projects', label: '项目', component: ProjectList },
+  { id: 'FileList', label: '数据', component: FileList },
   { id: 'SettingList', label: '设置', component: SettingList },
 ]
 
-// 管理当前激活的 Tab
-const activeTab = ref(tabs[0].id) // 默认显示“项目”
+// ========== 开始：解锁设置页面相关 ==========
+//  控制设置页面是否解锁
+const isSettingUnlocked = ref(false)
 
-// 计算属性：根据 activeTab 获取当前应渲染的组件
+// 计数器相关变量
+let clickCount = 0
+let lastClickTime = 0
+const REQUIRED_CLICKS = 7 // 需要点7次
+// 时间窗口设定：1000ms (1秒)
+
+// 1秒内点7次大约是每秒7下的频率。
+const TIME_WINDOW_MS = 1000
+
+// 计算属性：根据是否解锁返回不同的 Tab 列表
+const displayedTabs = computed(() => {
+  return isSettingUnlocked.value ? allTabs : baseTabs
+})
+// --- 根据 displayedTabs 的变化自动生效 ---
 const currentComponent = computed(() => {
-  const activeTabObj = tabs.find((tab) => tab.id === activeTab.value)
+  // 注意：这里我们直接从 displayedTabs 中找，确保只渲染可见的组件
+  const activeTabObj = displayedTabs.value.find((tab) => tab.id === activeTab.value)
   return activeTabObj ? activeTabObj.component : null
 })
+
+// 管理当前激活的 Tab
+const activeTab = ref('Projects') // 默认显示“项目”
 
 // 切换标签的方法
 const switchTo = (tabId) => {
   activeTab.value = tabId
 }
+// 点击处理逻辑
+const handleTabClick = (tab) => {
+  switchTo(tab.id);
+
+  if (tab.id === 'FileList') {
+    const now = Date.now()
+
+    if (isSettingUnlocked.value) {
+      showToast('设置页面已开启')
+      clickCount = 0
+    }
+    else {
+      // 检查时间窗口
+      if (now - lastClickTime > TIME_WINDOW_MS) {
+        clickCount = 0
+      }
+      clickCount++
+      lastClickTime = now
+
+      // 检查是否触发彩蛋
+      if (clickCount >= REQUIRED_CLICKS) {
+        isSettingUnlocked.value = true
+        showToast('开启设置页面')
+        clickCount = 0 // 触发后重置
+      }
+    }
+  }
+}
+// ========== 结束：解锁设置页面相关 ==========
 
 // 获取连接状态图标路径
 const getConnectIconSrc = () => {
@@ -219,7 +260,18 @@ const getConnectIconSrc = () => {
 
 // 控制连接对话框的显示/隐藏
 const showConnectionDialog = ref(false)
-
+// 监听对话框状态变化，控制状态栏样式
+watch(showConnectionDialog, async (newVal) => {
+  if (newVal) {
+    // 显示对话框时：进入沉浸式，让遮罩层覆盖状态栏
+    // await StatusBar.setOverlaysWebView({ overlay: true })
+    await StatusBar.setBackgroundColor({ color: '80000000' })// 透明背景上用亮色文字
+  } else {
+    // 关闭对话框时：恢复普通模式
+    // await StatusBar.setOverlaysWebView({ overlay: false })
+    await StatusBar.setBackgroundColor({ color: '#e6f7ff' }) // 浅色背景上用深色文字
+  }
+}, { immediate: false }) // immediate: false 表示只在变化时触发
 // 显示连接对话框
 const toggleConnectionDialog = () => {
   showConnectionDialog.value = !showConnectionDialog.value
@@ -240,9 +292,9 @@ const closeConnectionDialog = () => {
 /* 主容器 - 用于整体布局和固定底部按钮 */
 .project-collection-container {
   width: 100%;
-  height: 100vh; /* 使用 height 而不是 min-height */
-  display: flex; /* 启用 Flexbox */
-  flex-direction: column; /* 垂直排列子元素 */
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   padding: 16px;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans',
@@ -250,133 +302,35 @@ const closeConnectionDialog = () => {
   box-sizing: border-box;
 }
 
-/* 外层滚动容器 - 所有 sticky 元素都在这里滚动 */
 .scroll-container {
-  flex: 1; /* 占据主容器剩余空间 */
-  overflow-y: auto; /* 关键：提供滚动容器 */
+  flex: 1;
+  overflow-y: auto;
   display: flex;
-  flex-direction: column; /* 确保子元素垂直堆叠 */
-  /* 可以添加滚动条样式 */
-  scrollbar-width: thin; /* Firefox */
-  scrollbar-color: #c1c1c1 transparent; /* Firefox */
+  flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: #c1c1c1 transparent;
 }
 
 .scroll-container::-webkit-scrollbar {
-  width: 6px; /* Chrome, Safari */
+  width: 6px;
 }
 
 .scroll-container::-webkit-scrollbar-thumb {
-  background-color: #c1c1c1; /* Chrome, Safari */
+  background-color: #c1c1c1;
   border-radius: 3px;
 }
 
 .scroll-container::-webkit-scrollbar-track {
-  background: transparent; /* Chrome, Safari */
+  background: transparent;
 }
 
-/* 吸顶的顶部导航栏容器 */
-.sticky-top-nav {
-  position: sticky; /* 关键：实现吸顶效果 */
-  top: 0; /* 吸附到滚动容器的顶部 */
-  background: linear-gradient(180deg, #e6f7ff 0%, #f0f9ff 100%); /* 与主背景色一致 */
-  z-index: 100; /* 确保在滚动时能盖住下面的内容 */
-  padding: 0 16px 16px 16px; /* 保持原有间距，但与标签区分离 */
-}
-
-/* 顶部导航栏 */
-.top-nav {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px; /* 与标签区的距离 */
-  /* flex-shrink: 0; /* 可选：防止此区域在空间不足时收缩 */
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.user-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start; /* 确保 team-badge 紧贴内容 */
-}
-
-.username {
-  font-size: 16px;
-  font-weight: 500;
-  color: #333;
-}
-
-.team-badge {
-  font-size: 12px;
-  background-color: #1890ff;
-  color: white;
-  padding: 2px 6px; /* 调整内边距 */
-  border-radius: 8px;
-  /* display: inline-block; /* 默认 inline-block 在 flex 容器里行为会改变，但 align-items: flex-start 已经解决了 */
-  /* width: auto; /* 不需要固定宽度 */
-}
-
-.notification-icon {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  cursor: pointer;
-}
-
-.icon-bell {
-  font-size: 20px;
-  color: #666;
-}
-
-.badge {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 12px;
-  height: 12px;
-  background-color: #ff4d4f;
-  border-radius: 50%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 8px;
-  color: white;
-}
-
-/* 吸顶的标签区容器 */
-.sticky-tabs {
-  position: sticky;
-  top: 0; /* 标签区初始位置也是0，但会被导航栏顶上去 */
-  background: linear-gradient(180deg, #e6f7ff 0%, #f0f9ff 100%); /* 与主背景色一致 */
-  z-index: 99; /* 低于导航栏 */
-  padding: 0 16px 16px 16px; /* 与内容区域分离 */
-}
-
-/* 标签切换区 */
 .tabs {
   display: flex;
   gap: 16px;
   margin-bottom: 20px;
-  /* border-bottom: 1px solid #ddd; */
   padding-bottom: 8px;
-  /* flex-shrink: 0; /* 可选：防止此区域在空间不足时收缩 */
 }
 
-/* Tab 按钮样式 - 去掉按钮外观 */
 .tab-button {
   border: none;
   background: transparent;
@@ -393,7 +347,6 @@ const closeConnectionDialog = () => {
   user-select: none;
 }
 
-/* 选中状态的 Tab 按钮样式 */
 .tab-button.active {
   font-weight: bold;
   color: #1890ff;
@@ -401,16 +354,11 @@ const closeConnectionDialog = () => {
   padding-bottom: 6px;
 }
 
-/* 内容区域 - 修改为 flex-grow: 1 */
 .content-area {
-  flex: 1; /* 占据剩余空间 */
-  overflow-y: hidden; /* 让子组件内部滚动 */
-  /* margin-bottom: 20px; /* 可选：保留底部外边距，已移至主容器 */
-  /* 移除 height: calc(100vh - 200px); */
-  /* overflow: hidden; /* 移除，因为 flex-grow 已处理空间 */
+  flex: 1;
+  overflow-y: hidden;
 }
 
-/* --- 动画样式 --- */
 .slide-left-enter-active,
 .slide-left-leave-active {
   transition: transform 0.1s ease;
@@ -424,30 +372,28 @@ const closeConnectionDialog = () => {
   transform: translateX(-100%);
 }
 
-/* 浮动底部按钮 - 脱离文档流，固定在视口底部 */
 .floating-bottom-buttons {
-  position: fixed; /* 固定定位 */
-  bottom: 16px; /* 距离视口底部 */
-  left: 0; /* 左侧对齐 */
-  right: 0; /* 右侧对齐 */
+  position: fixed;
+  bottom: 16px;
+  left: 0;
+  right: 0;
   display: flex;
-  justify-content: space-between; /* 水平居中 */
-  align-items: center; /* 垂直居中 */
-  gap: 8px; /* 按钮间距 */
-  z-index: 1001; /* 确保在对话框之上 */
-  background: transparent; /* 完全透明 */
-  padding: 0 20px; /* 添加左右内边距，防止按钮紧贴屏幕边缘 */
-  pointer-events: none; /* 关键：使该区域不拦截鼠标事件，允许点击穿透 */
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  z-index: 1001;
+  background: transparent;
+  padding: 0 20px;
+  pointer-events: none;
 }
 
-/* 底部按钮 - 添加 pointer-events: auto 确保按钮本身可点击 */
 .floating-bottom-buttons button {
-  pointer-events: auto; /* 恢复按钮的交互能力 */
+  pointer-events: auto;
 }
 
 .btn-start {
-  padding: 16px 32px; /* 根据需要调整padding以匹配之前的尺寸 */
-  background-color: rgba(24, 144, 255, 0.7); /* 保持原有透明度 */
+  padding: 16px 32px;
+  background-color: rgba(24, 144, 255, 0.7);
   color: white;
   border: none;
   border-radius: 8px;
@@ -455,26 +401,25 @@ const closeConnectionDialog = () => {
   font-weight: 500;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
-  /* flex-shrink: 0; 不要让它收缩 */
   -webkit-tap-highlight-color: transparent;
   flex: 3;
 }
 
 .connect-button {
-  background: none; /* 保持无背景 */
+  background: none;
   border: none;
   cursor: pointer;
-  padding: 0; /* 移除默认 padding */
+  padding: 0;
   border-radius: 50%;
-  width: 40px; /* 设定固定宽度，例如 40px */
-  height: 40px; /* 设定固定高度，与宽度相同，确保是正方形 */
+  width: 40px;
+  height: 40px;
   display: flex;
   justify-content: center;
-  align-items: center; /* 在按钮内部垂直居中图标 */
+  align-items: center;
   transition: all 0.2s ease;
   -webkit-tap-highlight-color: transparent;
   flex: 1;
-  outline: none; /* 移除焦点轮廓 */
+  outline: none;
 }
 
 .connect-icon {
@@ -492,7 +437,7 @@ const closeConnectionDialog = () => {
   background-color: transparent;
   outline: none;
   box-shadow: none;
-  transform: scale(0.95); /* 可选：添加按下效果 */
+  transform: scale(0.95);
 }
 
 /* 连接对话框样式 */
@@ -533,17 +478,16 @@ const closeConnectionDialog = () => {
 
 .dialog-body {
   padding: 16px 20px;
-  max-height: 50vh; /* 限制最大高度 */
-  overflow-y: auto; /* 允许内容滚动 */
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .scan-status-item,
 .no-devices-item {
   padding: 12px 0;
   font-size: 14px;
-  color: #999; /* 或其他表示状态的颜色 */
-  text-align: center; /* 居中显示文字 */
-  /* 移除 border-bottom 和 cursor */
+  color: #999;
+  text-align: center;
   border-bottom: none;
   cursor: default;
 }
@@ -553,31 +497,24 @@ const closeConnectionDialog = () => {
   border-bottom: 1px solid #eee;
   font-size: 14px;
   color: #333;
-  /* cursor: pointer; */ /* 移除整体的 cursor pointer，让按钮自己处理 */
   display: flex;
   align-items: center;
-  justify-content: space-between; /* 分别对齐左侧信息和右侧操作按钮 */
+  justify-content: space-between;
 }
 
 .device-info {
   flex: 1;
   padding-right: 16px;
   display: flex;
-  min-width: 0; /* 关键：允许 flex 容器收缩其内容，否则 flex item 可能不会按预期缩小 */
-}
-.device-name {
-  /* 类名对应的样式 */
-  flex: 1; /* 占据所有可用空间 */
-  overflow: hidden; /* 隐藏超出部分 */
-  text-overflow: ellipsis; /* 超出部分显示省略号 */
-  white-space: nowrap; /* 防止文字换行 */
-  margin: 0; /* 重置 strong 标签默认的 margin */
+  min-width: 0;
 }
 
-.device-info small {
-  color: #9aa4b2;
-  display: block;
-  margin-top: 4px;
+.device-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
 }
 
 .connect-btn {
@@ -587,7 +524,7 @@ const closeConnectionDialog = () => {
   color: white;
   border-radius: 6px;
   cursor: pointer;
-  white-space: nowrap; /* 防止按钮文字换行 */
+  white-space: nowrap;
 }
 
 .connect-btn.connected {
@@ -617,63 +554,5 @@ const closeConnectionDialog = () => {
 
 .device-item:last-child {
   border-bottom: none;
-}
-
-.projects-grid {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 12px 16px;
-}
-.project-card {
-  width: 120px;
-  background: #fff;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-.project-card .thumb {
-  height: 80px;
-  background: #f3f3f3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.project-card .thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.project-meta {
-  padding: 8px;
-}
-.project-name {
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.project-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-.project-actions button {
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: none;
-  background: #1890ff;
-  color: #fff;
-  cursor: pointer;
-}
-
-/* 移除旧的 add-device 样式 */
-/* .device-item.add-device { ... } */
-/* .icon-refresh { ... } */
-
-.device-item:hover {
-  /* 移除 hover 效果，因为现在只有按钮可点击 */
-  /* background-color: #f0f7ff; */
 }
 </style>

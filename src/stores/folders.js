@@ -1,9 +1,9 @@
 // stores/folders.js
 import { defineStore } from 'pinia'
 import { ref, computed, onScopeDispose } from 'vue'
-import { bluetoothService } from '@/services/bluetoothService'
+import * as filePathUtils from '@/utils/filePathUtils'
 import { Capacitor } from '@capacitor/core'
-import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
+import noImg from '@/assets/img/noImg.png'
 
 export const useFoldersStore = defineStore('folders', () => {
   // 状态
@@ -46,44 +46,46 @@ export const useFoldersStore = defineStore('folders', () => {
   // 计算属性
   const foldersCount = computed(() => projectFolders.value.length)
 
-const fileListItems = computed(() => {
-  return projectFolders.value
-    .map((folder) => {
-      const title =
-        folder.projectName && folder.projectName !== folder.sessionId
-          ? folder.projectName
-          : folder.sessionId || folder.name
+  const fileListItems = computed(() => {
+    return projectFolders.value
+      .map((folder) => {
+        const title =
+          folder.projectName && folder.projectName !== folder.sessionId
+            ? folder.projectName
+            : folder.sessionId || folder.name
+        const displayDate = folder.hasFiles ? folder.displayDate : '空'
 
-      //  直接使用 folder.hasFiles
-      const displayDate = folder.hasFiles ? folder.displayName || folder.sessionId || '' : '空'
+        return {
+          folderName: folder.name,
+          projectName: folder.projectName || folder.name,
+          sessionId: folder.sessionId || folder.name,
+          displayName: title,
+          timeStr: displayDate,
+          firstFile: folder.firstFile || null,
+          hasFiles: folder.hasFiles,
+          sortTime: folder.lastModified || 0,
+        }
+      })
+      .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0))
+  })
 
-      return {
-        folderName: folder.name,
-        projectName: folder.projectName || folder.name,
-        sessionId: folder.sessionId || folder.name,
-        displayName: title,
-        timeStr: displayDate,
-        firstFile: folder.firstFile || null,
-        hasFiles: folder.hasFiles,
-        sortTime: folder.lastModified || 0,
-      }
-    })
-    .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0))
-})
-
-  // ✅ 修改：用于 ProjectList 的数据格式
+  // 计算属性：用于 ProjectList 组件的数据格式
   const projectListItems = computed(() => {
     return projectFolders.value
       .map((folder) => ({
         id: folder.name,
         name: folder.projectName || folder.name,
-        thumbnail: folder.thumbUri || null, // 如果没有照片则为 null，组件会显示 noImg
+        thumbnail: folder.thumbnail || noImg,
         date: folder.displayName || folder.sessionId || '',
-        source: folder.projectName || '手机',
+        source: '云台',
         original: folder,
         sortTime: folder.lastModified || 0,
+        hasPhoto: folder.hasPhoto || false,
+        batchInfo: folder.batchInfo || '',
+        batchStats: folder.batchStats || [], // 批次统计信息，默认空数组
+        totalPhotoCount: folder.totalPhotoCount || 0, // 照片总数
       }))
-      .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0)) // 按时间倒序排列
+      .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0))
   })
 
   // 方法：加载项目文件夹
@@ -105,66 +107,92 @@ const fileListItems = computed(() => {
     fetchPromise.value = (async () => {
       try {
         console.log('[FoldersStore] 开始加载项目文件夹')
-        const folders = await bluetoothService.listPointCloudFolders()
+        const folders = await filePathUtils.listPointCloudFolders()
 
         const withDetails = await Promise.all(
-          folders.map(async (f) => {
-            // 获取缩略图
-            const rawThumbUri = await bluetoothService.getFirstPhotoUri(f.name).catch(() => null)
-            let thumb = null
-            if (rawThumbUri) {
-              try {
-                thumb = Capacitor.convertFileSrc(rawThumbUri)
-              } catch (e) {
-                console.warn('[FoldersStore] convertFileSrc failed', e)
+          folders.map(async (folder) => {
+            const folderInfo = folder.info
+
+            // 获取项目缩略图（使用新的动态选择策略）
+            let thumbnail = null
+            let hasPhoto = false
+            let batchInfo = ''
+            let batchStats = []
+            let totalPhotoCount = 0
+
+            try {
+              // 使用新的缩略图选择函数
+              const thumbResult = await filePathUtils.getProjectThumbnail(folder.name)
+              hasPhoto = thumbResult.hasPhoto
+              batchInfo = thumbResult.batchInfo
+
+              if (hasPhoto && thumbResult.uri) {
+                thumbnail = Capacitor.convertFileSrc(thumbResult.uri)
+                // console.log(`[FoldersStore] 为项目 ${folder.name} 选择缩略图: ${thumbResult.batchInfo}`)
               }
+
+              // 获取批次统计信息
+              batchStats = await filePathUtils.getProjectBatchInfo(folder.name)
+              totalPhotoCount = batchStats.reduce((sum, batch) => sum + batch.photoCount, 0)
+            } catch (e) {
+              console.warn(`[FoldersStore] 获取文件夹 ${folder.name} 缩略图失败:`, e)
             }
 
             // 解析项目名与 sessionId
-            let projectName = f.name
-            let sessionId = f.name
-            const idx = f.name.lastIndexOf('_')
-            if (idx > 0) {
-              projectName = f.name.slice(0, idx)
-              sessionId = f.name.slice(idx + 1)
-            }
+            let projectName = folderInfo.projectName || folderInfo.displayName
+            let sessionId = folderInfo.sessionId
+            let displayName = folderInfo.displayName
+            let displayDate = folderInfo.displayDate
 
-            const displayName = parseSessionIdToFormattedTime(sessionId) || sessionId
-
-            // 获取文件夹内文件信息
+            // 获取文件夹内文件信息（用于排序）
             let lastModified = 0
-            let firstFile = null
             let hasFiles = false
+            let fileCount = 0
+
             try {
-              const files = await bluetoothService.listFilesInFolder(`pointcloud/${f.name}`)
-              hasFiles = files && files.length > 0
+              const allPaths = await filePathUtils.listFilesRecursive(`pointcloud/${folder.name}`)
+              hasFiles = allPaths && allPaths.length > 0
+              fileCount = allPaths.length
 
-              const sortedFiles = (files || [])
-                .slice()
-                .sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
-              firstFile = sortedFiles.length > 0 ? sortedFiles[0] : null
-
-              for (const ff of files || []) {
-                if (ff?.mtime && ff.mtime > lastModified) lastModified = ff.mtime
+              if (hasFiles) {
+                const stats = []
+                for (const p of allPaths) {
+                  try {
+                    const st = await filePathUtils.stat(p)
+                    stats.push({ path: p, mtime: st.mtime || 0 })
+                  } catch (e) {
+                    // 忽略单个文件的失败
+                  }
+                }
+                if (stats.length > 0) {
+                  stats.sort((a, b) => b.mtime - a.mtime)
+                  lastModified = stats[0].mtime
+                }
               }
             } catch (e) {
-              // ignore
+              // 忽略错误
             }
 
             return {
-              name: f.name,
-              thumbUri: thumb,
+              name: folder.name,
+              thumbnail,
+              hasPhoto,
+              totalPhotoCount,
+              batchInfo,
+              batchStats,
               projectName,
               sessionId,
               displayName,
               lastModified,
-              firstFile,
+              displayDate,
               hasFiles,
+              fileCount,
+              type: folderInfo.type,
             }
           }),
         )
 
-        // 按最后修改时间倒序排列，最新的在前
+        // 按最后修改时间倒序排列
         withDetails.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
         projectFolders.value = withDetails
         lastFetched.value = Date.now()
@@ -185,6 +213,7 @@ const fileListItems = computed(() => {
 
   // 刷新数据
   async function refreshFolders() {
+    console.log('[FoldersStore] 刷新项目列表')
     return loadProjectFolders(true)
   }
 

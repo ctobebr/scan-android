@@ -40,15 +40,17 @@
     </main>
   </div>
 </template>
+
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { bluetoothService } from '@/services/bluetoothService'
+import { ref, computed, onMounted } from 'vue'
 import { showToast } from '@/utils/toast'
 import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { Share } from '@capacitor/share'
 import { useFoldersStore } from '@/stores/folders'
+import * as filePathUtils from '@/utils/filePathUtils'
 
 const folderStore = useFoldersStore()
+
 // 直接从 store 的计算属性获取会话列表
 const sessions = computed(() => {
   return folderStore.fileListItems
@@ -56,12 +58,11 @@ const sessions = computed(() => {
 
 const onShareClick = async (folderName, projectName, sessionId) => {
   try {
-    // 检查项目文件夹是否为空
-    const filesInFolder = await bluetoothService.listFilesInFolder(`pointcloud/${folderName}`)
-    if (!filesInFolder || filesInFolder.length === 0) {
+    // 递归检查项目文件夹是否为空（包括子文件夹）
+    const allFiles = await filePathUtils.listFilesRecursive(`pointcloud/${folderName}`)
+    if (!allFiles || allFiles.length === 0) {
       if (confirm('当前项目文件夹为空，是否删除该项目？')) {
-        await bluetoothService.deleteFolder(folderName)
-        // 删除后刷新 store（事件会触发，但这里可以立即刷新）
+        await filePathUtils.deletePointCloudFolder(folderName)
         await folderStore.refreshFolders()
       }
       return
@@ -75,7 +76,10 @@ const onShareClick = async (folderName, projectName, sessionId) => {
         ' zipBaseName=' +
         String(zipBaseName),
     )
-    const res = await bluetoothService.zipSessionToFile(folderName, zipBaseName)
+
+    const res = await filePathUtils.zipSessionToFile(folderName, zipBaseName)
+    console.log('[FileList] zipSessionToFile result', res)
+
     if (res && res.uri) {
       await Share.share({
         title: `${zipBaseName}.zip`,
@@ -99,13 +103,12 @@ const onShareClick = async (folderName, projectName, sessionId) => {
   }
 }
 
-
 /**
  * 处理 Delete 按钮点击
  * @param {string} fileNameOrFolder - 被点击项的文件
  */
 const onDeleteClick = (fileNameOrFolder) => {
-  console.log(`删除按钮被点击，目标:  ${fileNameOrFolder}`)
+  console.log(`删除按钮被点击，目标: ${fileNameOrFolder}`)
   showMoreOptions(fileNameOrFolder)
 }
 
@@ -117,24 +120,22 @@ const showMoreOptions = (filename) => {
   }
 }
 
-const deleteFile = async (filename) => {
+const deleteFile = async (folderPath) => {
   try {
-    if (filename && filename.includes('pointcloud/')) {
-      const rel = filename.replace('pointcloud/', '')
-      console.log('[FileList] 请求删除文件夹: ' + rel)
-      await bluetoothService.deleteFolder(rel)
-      // 删除后从 store 中移除（事件也会触发，但这里可以立即更新）
-      folderStore.removeFolder(rel)
-    } else {
-      console.log('[FileList] 请求删除单文件: ' + filename)
-      await bluetoothService.deleteBleDataFile(filename)
-      // 单文件删除后刷新整个列表（事件也会触发，但这里可以立即更新）
-      await folderStore.refreshFolders()
+    if (!folderPath?.includes('pointcloud/')) {
+      throw new Error('无效的项目文件夹路径')
     }
-    showToast('删除完成')
+
+    const relativePath = folderPath.replace('pointcloud/', '')
+    console.log('[FileList] 删除项目文件夹:', relativePath)
+
+    await filePathUtils.deletePointCloudFolder(relativePath)
+    folderStore.removeFolder(relativePath)
+    showToast('删除成功')
+
   } catch (e) {
-    console.error('删除失败', e)
-    showToast('删除失败: ' + (e.message || e))
+    console.error('[FileList] 删除失败:', e)
+    showToast(`删除失败: ${e.message || '未知错误'}`)
   }
 }
 
@@ -152,7 +153,6 @@ const formatFileSize = (bytes) => {
 }
 
 onMounted(() => {
-  // 组件挂载时，如果 store 还没有数据，则加载
   if (folderStore.projectFolders.length === 0) {
     folderStore.loadProjectFolders()
   }
@@ -193,7 +193,6 @@ onMounted(() => {
   background-color: #fff;
   border-radius: 12px;
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
-  /* 移除 cursor: pointer; 防止鼠标悬停时显示手型光标 */
   transition: all 0.18s ease;
   position: relative;
   width: 100%;
@@ -201,11 +200,10 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* 禁用 hover 效果 */
 .list-item:hover {
-  background-color: #fff; /* 保持背景色不变 */
-  transform: none; /* 禁用位移效果 */
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06); /* 禁用阴影变化 */
+  background-color: #fff;
+  transform: none;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
 }
 
 .info {
@@ -261,13 +259,6 @@ onMounted(() => {
   filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.08));
   -webkit-tap-highlight-color: transparent;
 }
-
-/* .icon-review:hover,
-.icon-share:hover,
-.icon-delete:hover {
-  opacity: 1;
-  transform: translateY(-2px) scale(1.06);
-} */
 
 .icon-review {
   filter: hue-rotate(190deg) saturate(0.9);

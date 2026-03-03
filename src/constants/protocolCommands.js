@@ -53,3 +53,5 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_CTRL_CAMERA_COMPLETE: 0x82, // 自动拍摄任务完成
   CMD_CTRL_CAMERA_START: 0x83, // 开始自动拍摄任务
 })
+
+export const TEMP_PREFIX = 'a7f3c9d1-'

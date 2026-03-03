@@ -16,6 +16,15 @@
  */
 import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from '@/constants/protocolCommands'
 // import { bluetoothService } from '@/services/bluetoothService'
+
+// helper to convert Uint8Array to hex string
+function uint8ArrayToHex(arr) {
+  if (!arr) return ''
+  return Array.from(arr)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 export class parseBleData {
   constructor(options = {}) {
     this.options = options || {}
@@ -38,6 +47,11 @@ export class parseBleData {
 
     this.isProcessingPhoto = false // 标记是否正在处理拍照
     this.pendingEndRequests = [] // 存储等待处理的结束请求
+    this.photoRequestQueue = [] // queue for take-photo commands received while busy
+    // debug counters
+    this.cameraCmdCount = 0
+    this.cameraCallbackCount = 0
+    this.enableDebugLogging = !!options.enableDebug
   }
   // 验证数据包
   validateBinaryPacket(receivedChecksum) {
@@ -317,6 +331,17 @@ export class parseBleData {
           if (this.validateBinaryPacket(byte)) {
             try {
               // 校验成功，处理协议数据包
+              if (
+                this.enableDebugLogging &&
+                this.protocolState.cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA
+              ) {
+                this.cameraCmdCount++
+                console.log(
+                  `[Parser][${new Date().toISOString()}] camera cmd #${this.cameraCmdCount}, data=${uint8ArrayToHex(
+                    this.protocolState.packetData,
+                  )}`,
+                )
+              }
               this.handleProtocolPacket(this.protocolState.cmd, this.protocolState.packetData)
             } catch (err) {
               let cmdStr =
@@ -392,10 +417,25 @@ export class parseBleData {
   }
 
   async _handleTakePhoto(data) {
+    if (this.enableDebugLogging) {
+      console.log(
+        `[Camera][${new Date().toISOString()}] _handleTakePhoto start data=${uint8ArrayToHex(data)}`,
+      )
+    }
     console.log('CMD_CTRL_CAMERA received')
 
     // --- 将拍照请求加入处理流程 ---
     return new Promise((resolve, reject) => {
+      // if already processing, enqueue for later
+      if (this.isProcessingPhoto) {
+        if (this.enableDebugLogging) {
+          console.log(
+            `[Camera][${new Date().toISOString()}] photo command queued (busy). queue_length=${this.photoRequestQueue.length}`,
+          )
+        }
+        this.photoRequestQueue.push({ data, resolve, reject })
+        return
+      }
       const task = async () => {
         try {
           // 设置处理标志
@@ -436,6 +476,12 @@ export class parseBleData {
           }
 
           if (this.options.onTakePhoto && typeof this.options.onTakePhoto === 'function') {
+            if (this.enableDebugLogging) {
+              this.cameraCallbackCount++
+              console.log(
+                `[Camera][${new Date().toISOString()}] invoking onTakePhoto callback. cmdCount=${this.cameraCmdCount}, callbackCount=${this.cameraCallbackCount}`,
+              )
+            }
             console.log('即将执行 onTakePhoto 回调')
             await this.options.onTakePhoto({ fileBaseName, meta })
             console.log('onTakePhoto 回调执行完成')
@@ -447,7 +493,18 @@ export class parseBleData {
           this.isProcessingPhoto = false
           // 尝试处理挂起的结束请求
           this._tryProcessPendingEndRequests()
+          if (this.enableDebugLogging) {
+            console.log(
+              `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,
+            )
+          }
           resolve() // 完成当前任务
+          // check queue for more requests
+          if (this.photoRequestQueue.length > 0) {
+            const next = this.photoRequestQueue.shift()
+            // fire next command asynchronously
+            this._handleTakePhoto(next.data).then(next.resolve).catch(next.reject)
+          }
         }
       }
 

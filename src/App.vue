@@ -12,7 +12,35 @@
 </template>
 
 <script setup>
-// import Test from './components/Test.vue';
+import { onMounted } from 'vue'
+import * as filePathUtils from '@/utils/filePathUtils'
+
+async function cleanupOrphanedSessions() {
+  try {
+    console.log('[App] 启动时清理孤儿会话...')
+    const folders = await filePathUtils.listPointCloudFolders(true)
+
+    for (const folder of folders) {
+      const folderName = folder.name
+      const info = filePathUtils.parseFolderName(folderName)
+
+      // 只删除临时文件夹（isTemp为true的）
+      if (info.isTemp) {
+        console.log('[App] 删除未保存的临时会话:', folderName)
+        await filePathUtils.deleteSession(folderName).catch(e => {
+          console.warn('[App] 删除失败', folderName, e)
+        })
+      }
+      // 纯会话ID（已保存）和项目名_会话ID都保留
+    }
+  } catch (e) {
+    console.error('[App] 启动时清理失败', e)
+  }
+}
+
+onMounted(() => {
+  cleanupOrphanedSessions()
+})
 
 </script>
 

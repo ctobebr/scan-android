@@ -6,7 +6,7 @@
 function pad(num, size) {
   return num.toString().padStart(size, '0')
 }
-
+// 将 Date 对象转换为数字时间戳字符串  2024-01-01 12:00:00 → "20240101120000"
 function dateToTimestampString(date, includeMillis = true) {
   const year = date.getUTCFullYear()
   const month = pad(date.getUTCMonth() + 1, 2)
@@ -21,6 +21,7 @@ function dateToTimestampString(date, includeMillis = true) {
   return `${year}${month}${day}${hours}${minutes}${seconds}`
 }
 
+// 将数字时间戳字符串解析回 Date 对象
 function timestampStringToDateFlexible(s) {
   if (typeof s !== 'string' || s.length < 14) return null
 
@@ -60,7 +61,7 @@ function base36ToBigInt(str) {
   }
   return acc
 }
-
+// 将会话ID解析为 Date 对象
 export function parseSessionIdToDate(sessionId) {
   if (!sessionId || typeof sessionId !== 'string') return null
   try {
@@ -88,6 +89,7 @@ export function parseSessionIdToDate(sessionId) {
   }
 }
 
+//将会话ID格式化为可读的时间字符串  "k8j9h2g5f3d" → "2024-01-01 12:00:00"
 export function parseSessionIdToFormattedTime(sessionId) {
   const date = parseSessionIdToDate(sessionId)
   if (!date) return null
@@ -99,7 +101,7 @@ export function parseSessionIdToFormattedTime(sessionId) {
   const seconds = String(date.getSeconds()).padStart(2, '0')
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
-
+// 将 Date 对象转换为 base36 编码的会话ID
 export function dateToSessionId(date, includeMillis = true) {
   if (!(date instanceof Date) || isNaN(date.getTime())) return null
   const ts = dateToTimestampString(date, includeMillis)
@@ -113,7 +115,7 @@ export function dateToSessionId(date, includeMillis = true) {
 }
 
 /**
- * 生成当前时间对应的优化后 sessionId（便于外部直接调用）
+ * 生成当前时间的优化后会话ID
  */
 export function generateOptimizedSessionId(includeMillis = true) {
   return dateToSessionId(new Date(), includeMillis)
