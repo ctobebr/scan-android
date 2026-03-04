@@ -530,10 +530,10 @@ export class BluetoothService {
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
-   * @param {number} lowerLimitRad - 俯仰角下限 (单位: 弧度 rad)
    * @param {number} upperLimitRad - 俯仰角上限 (单位: 弧度 rad)
+   * @param {number} lowerLimitRad - 俯仰角下限 (单位: 弧度 rad)
    */
-  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, lowerLimitRad, upperLimitRad) {
+  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitRad, lowerLimitRad) {
     const buffer = new ArrayBuffer(8) // 2 * float = 8 bytes
     const view = new DataView(buffer)
     view.setFloat32(0, upperLimitRad, true) // 上限 limit, 小端序，第一个 float
@@ -547,6 +547,45 @@ export class BluetoothService {
     )
   }
 
+  /**
+   * 发送“设置输出XYZ值”指令
+   * @param {number} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {boolean} on - true 表示开启，false 表示关闭
+   */
+  async sendSetOutputXYZ(deviceId, serviceUUID, characteristicUUID, on) {
+    const buffer = new ArrayBuffer(1) // 1 * bool = 1 byte
+    const view = new Uint8Array(buffer)
+    view[0] = on ? 1 : 0 // 1 表示开启，0 表示关闭
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_OUTPUT_XYZ,
+      buffer,
+    )
+  }
+
+  /**
+   * 发送“设置输出极坐标值”指令
+   * @param {number} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {boolean} on - true 表示开启，false 表示关闭
+   */
+  async sendSetOutputPolar(deviceId, serviceUUID, characteristicUUID, on) {
+    const buffer = new ArrayBuffer(1) // 1 * bool = 1 byte
+    const view = new Uint8Array(buffer)
+    view[0] = on ? 1 : 0 // 1 表示开启，0 表示关闭
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_OUTPUT_POLAR,
+      buffer,
+    )
+  }
   /**
    * 发送“控制上位机拍照”指令
    * @param {number} yaw - 偏航角 (弧度)
@@ -567,72 +606,104 @@ export class BluetoothService {
   //   )
   // }
 
-  // /**
-  //  * 发送读取参数指令 (无数据)
-  //  * @param {number} readCommand - 读取命令字 (CONTROL_COMMANDS.CMD_READ_*)
-  //  */
-  // async sendReadCommand(deviceId, serviceUUID, characteristicUUID, readCommand) {
-  //   // 可以加入验证，确保传入的是读取命令
-  //   if (
-  //     ![
-  //       CONTROL_COMMANDS.CMD_READ_CALIB_PARAM,
-  //       CONTROL_COMMANDS.CMD_READ_ROTATE_SPEED,
-  //       CONTROL_COMMANDS.CMD_READ_SCAN_TIME,
-  //       CONTROL_COMMANDS.CMD_READ_PITCH_LIMIT,
-  //     ].includes(readCommand)
-  //   ) {
-  //     console.warn(`Warning: Command  $ {readCommand} might not be a standard read command.`)
-  //   }
-  //   await this.sendCommand(deviceId, serviceUUID, characteristicUUID, readCommand, null)
-  // }
+  /**
+   * 发送读取参数指令 (无数据)
+   * @param {number} readCommand - 读取命令字 (CONTROL_COMMANDS.CMD_READ_*)
+   */
+  async sendReadCommand(deviceId, serviceUUID, characteristicUUID, readCommand) {
+    // 可以加入验证，确保传入的是读取命令
+    if (
+      ![
+        DEVICE_DATA_COMMANDS.CMD_READ_CALIB_PARAM,
+        DEVICE_DATA_COMMANDS.CMD_READ_ROTATE_SPEED,
+        DEVICE_DATA_COMMANDS.CMD_READ_SCAN_TIME,
+        DEVICE_DATA_COMMANDS.CMD_READ_PITCH_LIMIT,
+      ].includes(readCommand)
+    ) {
+      console.warn(`Warning: Command  ${readCommand} might not be a standard read command.`)
+    }
+    await this.sendCommand(deviceId, serviceUUID, characteristicUUID, readCommand, null)
+  }
 
-  // /**
-  //  * 发送读取转动速度指令
-  //  */
-  // async sendReadRotateSpeed(deviceId, serviceUUID, characteristicUUID) {
-  //   await this.sendReadCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_READ_ROTATE_SPEED,
-  //   )
-  // }
+  /**
+   * 发送读取转动速度指令
+   */
+  async sendReadRotateSpeed(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendReadCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_ROTATE_SPEED,
+    )
+  }
 
-  // /**
-  //  * 发送读取扫描时间指令
-  //  */
-  // async sendReadScanCycles(deviceId, serviceUUID, characteristicUUID) {
-  //   await this.sendReadCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_READ_SCAN_TIME,
-  //   )
-  // }
+  /**
+   * 发送读取扫描时间指令
+   */
+  async sendReadScanCycles(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendReadCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_SCAN_TIME,
+    )
+  }
 
-  // /**
-  //  * 发送读取俯仰角上下限指令
-  //  */
-  // async sendReadPitchLimit(deviceId, serviceUUID, characteristicUUID) {
-  //   await this.sendReadCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_READ_PITCH_LIMIT,
-  //   )
-  // }
+  /**
+   * 发送读取俯仰角上下限指令
+   */
+  async sendReadPitchLimit(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendReadCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_PITCH_LIMIT,
+    )
+  }
 
-  // /**
-  //  * 发送读取标定参数指令
-  //  */
-  // async sendReadCalibParam(deviceId, serviceUUID, characteristicUUID) {
-  //   await this.sendReadCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_READ_CALIB_PARAM,
-  //   )
-  // }
+  /**
+   * 发送读取标定参数指令
+   */
+  async sendReadCalibParam(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendReadCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_CALIB_PARAM,
+    )
+  }
+
+  /**
+   * 发送查询输出XYZ状态指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadOutputXYZ(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ,
+      null,
+    )
+  }
+
+  /**
+   * 发送查询输出极坐标状态指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadOutputPolar(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR,
+      null,
+    )
+  }
 }
 
 export const bluetoothService = new BluetoothService()

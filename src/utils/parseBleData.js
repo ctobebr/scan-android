@@ -85,18 +85,21 @@ export class parseBleData {
     // 使用对象映射查找处理器
     const commandHandlers = {
       // [CONTROL_COMMANDS.CMD_START]: this._handleStart,
-      [CONTROL_COMMANDS.CMD_STOP]: this._handleStop,
+      // [CONTROL_COMMANDS.CMD_STOP]: this._handleStop,
 
       [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START]: this._handleStartTakePhoto,
       [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE]: this._handleEndTakePhoto,
-
       [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA]: this._handleTakePhoto,
+
       [DEVICE_DATA_COMMANDS.CMD_OUTPUT_XYZ]: this._handlePointData,
       [DEVICE_DATA_COMMANDS.CMD_OUTPUT_POLAR]: this._handleRawPointData,
       [DEVICE_DATA_COMMANDS.CMD_READ_CALIB_PARAM]: this._handleReadCalibParam,
       [DEVICE_DATA_COMMANDS.CMD_READ_ROTATE_SPEED]: this._handleReadRotateSpeed,
       [DEVICE_DATA_COMMANDS.CMD_READ_SCAN_TIME]: this._handleReadScanTime,
       [DEVICE_DATA_COMMANDS.CMD_READ_PITCH_LIMIT]: this._handleReadPitchLimit,
+
+      [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ]: this._handleReadOutputXYZ,
+      [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR]: this._handleReadOutputPolar,
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
       // [CONTROL_COMMANDS.CMD_GET_POS]: this._handleGetPos,
       // [CONTROL_COMMANDS.CMD_SET_HOME]: this._handleSetHome,
@@ -205,18 +208,18 @@ export class parseBleData {
       // const pitch_rad1 = -pitch_int16 / 1000.0  //
 
       // 转换为笛卡尔坐标
-      // const point = this.sphericalToCartesian(pitch_rad, yaw_rad, distance_m, 1.0)
+      const point = this.sphericalToCartesian(pitch_rad, yaw_rad, distance_m, 1.0)
       // pitch 和 yaw 是 弧度（radians）
       // distance_m 是分米 ，所以此处dy，dy，dz也传入分米单位数据
-      const point = this.sphericalToCartesian1(
-        pitch_rad,
-        yaw_rad,
-        distance_m,
-        1.0,
-        0.18,
-        -0.141,
-        0.5225,
-      )
+      // const point = this.sphericalToCartesian1(
+      //   pitch_rad,
+      //   yaw_rad,
+      //   distance_m,
+      //   1.0,
+      //   0.18,
+      //   -0.141,
+      //   0.5225,
+      // )
       points.push(point)
     }
     return points
@@ -225,29 +228,29 @@ export class parseBleData {
   // yaw: 方位角（在水平面上的角度，-π到π）
   // r: 距离（分米）
   // intensity: 强度
-  // sphericalToCartesian(pitch, yaw, r, intensity) {
-  //   // 计算笛卡尔坐标
-  //   const x1 = (r * Math.cos(pitch) * Math.cos(yaw))
-  //   const y1 = (r * Math.sin(pitch)) // 高度
-  //   const z1 = (r * Math.cos(pitch) * Math.sin(yaw))
-  //   const x = r * Math.cos(pitch) * Math.cos(yaw)
-  //   const y = r * Math.sin(pitch) // 高度
-  //   const z = r * Math.cos(pitch) * Math.sin(yaw)
-  //   // 返回点对象，包含原始数据方便调试
-  //   return {
-  //       x1, y1, z1,       // 分米
-  //       x,y,z,
-  //       pitch: pitch,     // 弧度
-  //       yaw: yaw,         // 弧度
-  //       distance: r * 1000,
-  //       intensity: intensity,
+  sphericalToCartesian(pitch, yaw, r, intensity) {
+    // 计算笛卡尔坐标
+    const x1 = (r * Math.cos(pitch) * Math.cos(yaw))
+    const y1 = (r * Math.sin(pitch)) // 高度
+    const z1 = (r * Math.cos(pitch) * Math.sin(yaw))
+    const x = r * Math.cos(pitch) * Math.cos(yaw)
+    const y = r * Math.sin(pitch) // 高度
+    const z = r * Math.cos(pitch) * Math.sin(yaw)
+    // 返回点对象，包含原始数据方便调试
+    return {
+        x1, y1, z1,       // 分米
+        x,y,z,
+        pitch: pitch,     // 弧度
+        yaw: yaw,         // 弧度
+        distance: r * 1000,
+        intensity: intensity,
 
-  //       // 角度版本（方便查看） => 弧度转角度  (degree * 180 / π)
-  //       pitchDeg: pitch * 180 / Math.PI,  // 角度
-  //       yawDeg: yaw * 180 / Math.PI,  // 角度
-  //       distanceM: r     // 这里是分米，这里如果转成米，点云显示会很密集
-  //   }
-  // }
+        // 角度版本（方便查看） => 弧度转角度  (degree * 180 / π)
+        pitchDeg: pitch * 180 / Math.PI,  // 角度
+        yawDeg: yaw * 180 / Math.PI,  // 角度
+        distanceM: r     // 这里是分米，这里如果转成米，点云显示会很密集
+    }
+  }
 
   /**
    * 输入原始蓝牙数据流（Uint8Array），解析并返回当前累积的点
@@ -382,10 +385,10 @@ export class parseBleData {
   //   console.log(' CMD_START (0x' + CONTROL_COMMANDS.CMD_START.toString(16) + ') received')
   // }
 
-  _handleStop(data) {
-    // TODO: 实现停止扫描逻辑
-    console.log(' CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
-  }
+  // _handleStop(data) {
+  //   // TODO: 实现停止扫描逻辑
+  //   console.log(' CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
+  // }
 
   _handleStartTakePhoto() {
     // 收到开始拍照指令：进入拍照预览并让调用方启动预览
@@ -655,7 +658,7 @@ export class parseBleData {
           // console.log(` Parsed ${points.length} points from CMD_POINT_DATA`)
         } else {
           console.warn(
-            ` CMD_POINT_DATA (0x ${CONTROL_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
+            ` CMD_POINT_DATA (0x ${DEVICE_DATA_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
           )
         }
       }
@@ -678,7 +681,7 @@ export class parseBleData {
           // console.log(` Parsed ${points.length} points from CMD_POINT_DATA`)
         } else {
           console.warn(
-            ` CMD_POINT_DATA (0x ${CONTROL_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
+            ` CMD_POINT_DATA (0x ${DEVICE_DATA_COMMANDS.CMD_OUTPUT_POLAR.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
           )
         }
       }
@@ -771,6 +774,43 @@ export class parseBleData {
       this.options.onPitchLimitResponse({ upperLimitRad, lowerLimitRad })
     }
   }
+
+  /**
+   * 处理查询输出XYZ状态的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadOutputXYZ(data) {
+    if (data.byteLength !== 1) {
+      console.warn('查询输出XYZ状态数据长度错误，期望 1 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const status = view.getUint8(0) // 0:关闭, 1:开启
+
+    console.log('✅ 收到下位机查询输出XYZ状态响应: status=' + status)
+    if (this.options.onOutputXYZResponse) {
+      this.options.onOutputXYZResponse({ status: status === 1 })
+    }
+  }
+
+  /**
+   * 处理查询输出极坐标状态的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadOutputPolar(data) {
+    if (data.byteLength !== 1) {
+      console.warn('查询输出极坐标状态数据长度错误，期望 1 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const status = view.getUint8(0) // 0:关闭, 1:开启
+
+    console.log('✅ 收到下位机查询输出极坐标状态响应: status=' + status)
+    if (this.options.onOutputPolarResponse) {
+      this.options.onOutputPolarResponse({ status: status === 1 })
+    }
+  }
+
   // 将原始数据输入该函数 + dx dy dz 做一下校正保存
   sphericalToCartesian1(pitch, yaw, r, intensity, dx = 0, dy = 0, dz = 0) {
     // 理想点坐标

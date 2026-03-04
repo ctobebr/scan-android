@@ -189,6 +189,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
     //   }
     //   this.displayedMessages.push(msg)
     // },
+    // ========== 开始：发送指令方法 ==========
     async handleDisconnect(device) {
       try {
         // 断开连接时停止定时器
@@ -208,10 +209,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('断开连接失败', e)
       }
     },
-    handleSendStart() {
+    async handleSendStart() {
       try {
         // deviceId, serviceUUID, characteristicUUID
-        bluetoothService.sendStartScan(
+        await bluetoothService.sendStartScan(
           this.connectingDeviceId,
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
@@ -220,10 +221,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('发送开始指令失败：', err)
       }
     },
-    handleSendEnd() {
+    async handleSendEnd() {
       try {
         // deviceId, serviceUUID, characteristicUUID
-        bluetoothService.sendStopScan(
+        await bluetoothService.sendStopScan(
           this.connectingDeviceId,
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
@@ -233,10 +234,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
       }
     },
 
-    handleSendCalibParam(x, y, z) {
+    async handleSendCalibParam(x, y, z) {
       try {
         // deviceId, serviceUUID, characteristicUUID
-        bluetoothService.sendSetCalibParam(
+        await bluetoothService.sendSetCalibParam(
           this.connectingDeviceId,
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
@@ -248,10 +249,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('发送设置标定参数指令失败：', err)
       }
     },
-    handleSendRotateSpeed(pitchSpeed, yawSpeed) {
+    async handleSendRotateSpeed(pitchSpeed, yawSpeed) {
       try {
         // deviceId, serviceUUID, characteristicUUID
-        bluetoothService.sendSetRotateSpeed(
+        await bluetoothService.sendSetRotateSpeed(
           this.connectingDeviceId,
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
@@ -262,10 +263,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('发送设置转动速度指令失败：', err)
       }
     },
-    handleSendScanTime(seconds) {
+    async handleSendScanTime(seconds) {
       try {
         // deviceId, serviceUUID, characteristicUUID
-        bluetoothService.sendSetScanTime(
+        await bluetoothService.sendSetScanTime(
           this.connectingDeviceId,
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
@@ -275,20 +276,161 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('发送设置扫描时间指令失败：', err)
       }
     },
-    handleSendPitchLimit(lowerLimitRad, upperLimitRad) {
+    async handleSendPitchLimit(upperLimitRad, lowerLimitRad) {
       try {
         // deviceId, serviceUUID, characteristicUUID
-        bluetoothService.sendSetPitchLimit(
+        await bluetoothService.sendSetPitchLimit(
           this.connectingDeviceId,
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
-          lowerLimitRad,
           upperLimitRad,
+          lowerLimitRad,
         )
       } catch (err) {
         console.log('发送设置俯仰角上下限指令失败：', err)
       }
     },
+    /**
+     * 发送设置输出XYZ值指令
+     * @param {boolean} on - true 表示开启，false 表示关闭
+     */
+    async handleSendOutputXYZ(on) {
+      try {
+        await bluetoothService.sendSetOutputXYZ(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          on,
+        )
+        console.log(`发送设置输出XYZ指令成功: ${on ? '开启' : '关闭'}`)
+      } catch (err) {
+        console.log('发送设置输出XYZ指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 发送设置输出极坐标值指令
+     * @param {boolean} on - true 表示开启，false 表示关闭
+     */
+    async handleSendOutputPolar(on) {
+      try {
+        await bluetoothService.sendSetOutputPolar(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          on,
+        )
+        console.log(`发送设置输出极坐标指令成功: ${on ? '开启' : '关闭'}`)
+      } catch (err) {
+        console.log('发送设置输出极坐标指令失败：', err)
+        throw err
+      }
+    },
+    // ========== 结束：发送指令方法 ==========
+
+    // ========== 开始：读取参数方法 ==========
+    /**
+     * 读取标定参数
+     */
+    async handleReadCalibParam() {
+      try {
+        await bluetoothService.sendReadCalibParam(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送读取标定参数指令成功')
+      } catch (err) {
+        console.log('发送读取标定参数指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 读取转动速度
+     */
+    async handleReadRotateSpeed() {
+      try {
+        await bluetoothService.sendReadRotateSpeed(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送读取转动速度指令成功')
+      } catch (err) {
+        console.log('发送读取转动速度指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 读取扫描时间
+     */
+    async handleReadScanTime() {
+      try {
+        await bluetoothService.sendReadScanCycles(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送读取扫描时间指令成功')
+      } catch (err) {
+        console.log('发送读取扫描时间指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 读取俯仰角限位
+     */
+    async handleReadPitchLimit() {
+      try {
+        await bluetoothService.sendReadPitchLimit(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送读取俯仰角限位指令成功')
+      } catch (err) {
+        console.log('发送读取俯仰角限位指令失败：', err)
+        throw err
+      }
+    },
+    /**
+     * 查询输出XYZ状态
+     */
+    async handleReadOutputXYZ() {
+      try {
+        await bluetoothService.sendReadOutputXYZ(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送查询输出XYZ状态指令成功')
+      } catch (err) {
+        console.log('发送查询输出XYZ状态指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 查询输出极坐标状态
+     */
+    async handleReadOutputPolar() {
+      try {
+        await bluetoothService.sendReadOutputPolar(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送查询输出极坐标状态指令成功')
+      } catch (err) {
+        console.log('发送查询输出极坐标状态指令失败：', err)
+        throw err
+      }
+    },
+    // ==========结束： 读取参数方法 ==========
     setCleanupStatus(status) {
       this.isCleanupInProgress = status
     },

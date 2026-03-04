@@ -62,9 +62,7 @@ onMounted(() => {
   background: linear-gradient(180deg, #e6f7ff 0%, #f0f9ff 100%);
   max-width: 980px;
   margin: 0 auto;
-  height: calc(
-    100vh - 56px
-  ); /* 为底部导航留空间56px， 且每个页面总高度都为这么高，子页面直接使用100% */
+  height: 100%;
 }
 
 .tab-bar {

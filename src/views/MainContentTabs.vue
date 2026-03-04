@@ -18,7 +18,9 @@
       <!-- 内容区域 - 使用动态组件和 Transition -->
       <div class="content-area">
         <transition name="slide-left" mode="out-in">
-          <component :is="currentComponent" :key="activeTab" />
+          <keep-alive>
+            <component :is="currentComponent" :key="activeTab" />
+          </keep-alive>
         </transition>
       </div>
     </div>
@@ -85,15 +87,16 @@
 import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount, watch } from 'vue'
 import FileList from './FileList.vue'
 import ProjectList from './ProjectList.vue'
-import SettingList from './SettingList.vue'
+import SettingList from './setting/SettingList.vue'
 import { bluetoothService } from '@/services/bluetoothService'
-import { showToast } from '@/utils/toast'
+// import { showToast } from '@/utils/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { lockToPortrait } from '@/utils/screen'
 import { StatusBar } from '@capacitor/status-bar'
+import { showLoadingToast, closeToast, showToast } from 'vant'
 
 defineOptions({
   name: 'MainContentTabs',
@@ -220,29 +223,26 @@ const switchTo = (tabId) => {
 const handleTabClick = (tab) => {
   switchTo(tab.id);
 
-  if (tab.id === 'FileList') {
+  // 只有在未解锁且点击数据页面时才处理计数
+  if (tab.id === 'FileList' && !isSettingUnlocked.value && connectingStatus.value == 2) {
     const now = Date.now()
 
-    if (isSettingUnlocked.value) {
-      showToast('设置页面已开启')
+    // 检查时间窗口
+    if (now - lastClickTime > TIME_WINDOW_MS) {
       clickCount = 0
     }
-    else {
-      // 检查时间窗口
-      if (now - lastClickTime > TIME_WINDOW_MS) {
-        clickCount = 0
-      }
-      clickCount++
-      lastClickTime = now
+    clickCount++
+    lastClickTime = now
 
-      // 检查是否触发彩蛋
-      if (clickCount >= REQUIRED_CLICKS) {
-        isSettingUnlocked.value = true
-        showToast('开启设置页面')
-        clickCount = 0 // 触发后重置
-      }
+    // 检查是否触发彩蛋
+    if (clickCount >= REQUIRED_CLICKS) {
+      isSettingUnlocked.value = true
+      showToast('设置页面已解锁')  // 只提示一次
+      clickCount = 0
     }
   }
+
+  // 解锁后点击数据页面不做任何事
 }
 // ========== 结束：解锁设置页面相关 ==========
 
@@ -264,7 +264,7 @@ const showConnectionDialog = ref(false)
 watch(showConnectionDialog, async (newVal) => {
   if (newVal) {
     // 显示对话框时：进入沉浸式，让遮罩层覆盖状态栏
-    // await StatusBar.setOverlaysWebView({ overlay: true })
+    // await StatusBar.setOverlaysWebView({ overlay: true })  // 开启全面屏
     await StatusBar.setBackgroundColor({ color: '80000000' })// 透明背景上用亮色文字
   } else {
     // 关闭对话框时：恢复普通模式
@@ -292,23 +292,31 @@ const closeConnectionDialog = () => {
 /* 主容器 - 用于整体布局和固定底部按钮 */
 .project-collection-container {
   width: 100%;
-  height: 100vh;
+  height: 100vh;  /* 使用视口高度确保占满整个屏幕 */
+  min-height: 100vh;  /* 即使内容很少也保持最小高度 */
   display: flex;
   flex-direction: column;
   padding: 16px;
+  padding-bottom: 0;  /* 移除底部padding，由滚动容器处理 */
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans',
     'Helvetica Neue', sans-serif;
   box-sizing: border-box;
+  background: transparent;  /* 透明，让父容器渐变显示 */
+  position: relative;  /* 为子元素定位提供参考 */
 }
 
 .scroll-container {
   flex: 1;
+  min-height: 0;  /* 防止flex溢出 */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   scrollbar-width: thin;
   scrollbar-color: #c1c1c1 transparent;
+  background: transparent;
+  /* 为底部固定按钮预留空间，确保内容不会被按钮遮挡 */
+  padding-bottom: 86px;  /* 按钮容器高度(56px) + 底部间距(16px) + 额外空间(14px) */
 }
 
 .scroll-container::-webkit-scrollbar {
@@ -329,6 +337,8 @@ const closeConnectionDialog = () => {
   gap: 16px;
   margin-bottom: 20px;
   padding-bottom: 8px;
+  flex-shrink: 0;  /* 防止被压缩 */
+  background: transparent;
 }
 
 .tab-button {
@@ -356,12 +366,24 @@ const closeConnectionDialog = () => {
 
 .content-area {
   flex: 1;
+  min-height: 0;  /* 允许内容区域滚动 */
   overflow-y: hidden;
+  background: transparent;
+  position: relative;  /* 为子元素定位提供参考 */
+}
+
+/* 确保动态组件容器也占满 */
+.content-area > * {
+  height: 100%;
+  background: transparent;
 }
 
 .slide-left-enter-active,
 .slide-left-leave-active {
   transition: transform 0.1s ease;
+  position: absolute;  /* 绝对定位避免动画期间布局问题 */
+  width: 100%;
+  height: 100%;
 }
 
 .slide-left-enter-from {
@@ -385,10 +407,13 @@ const closeConnectionDialog = () => {
   background: transparent;
   padding: 0 20px;
   pointer-events: none;
+  flex-shrink: 0;
+  height: 56px;  /* 固定按钮容器高度 */
 }
 
 .floating-bottom-buttons button {
   pointer-events: auto;
+  z-index: 2;
 }
 
 .btn-start {

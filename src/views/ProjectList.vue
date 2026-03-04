@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { useFoldersStore } from '@/stores/folders'
 import noImg from '@/assets/img/noImg.png'
 
@@ -52,6 +52,10 @@ onMounted(() => {
   if (folderStore.projectFolders.length === 0) {
     folderStore.loadProjectFolders()
   }
+})
+onActivated(() => {
+  console.log('激活projectlist')
+  // folderStore.loadProjectFolders()
 })
 // 响应 props.projects 的变化
 // watch(
@@ -102,25 +106,52 @@ onMounted(() => {
 /* 项目列表容器 */
 .project-list-container {
   width: 100%;
-  height: 100%; /* 占满父容器 */
+  height: 100%;
   display: flex;
   flex-direction: column;
+  background: transparent;
 }
 
 /* 内容区域 - 可滚动 */
 .content-area {
-  flex: 1; /* 占据剩余空间 */
-  overflow-y: auto; /* 关键：当内容超出时允许垂直滚动 */
+  flex: 1;
+  overflow-y: auto;
+  /* 添加透明背景 */
+  background: transparent;
+  /* 确保内容区域占满 */
+  height: 100%;
   /* 隐藏滚动条 */
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .content-area::-webkit-scrollbar {
-  display: none; /* Chrome, Safari */
+  display: none;
+}
+.loading-state {
+  text-align: center;
+  padding: 40px 0;
+  color: #999;
+  background: transparent;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* 为了演示，保持与原来一致的样式 */
+/* 空状态 - 同样透明 */
+.empty-state {
+  text-align: center;
+  padding: 40px 0;
+  color: #999;
+  background: transparent;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 列表项保持白色卡片效果 */
 .list-item {
   background: white;
   border-radius: 12px;

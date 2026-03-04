@@ -8,7 +8,8 @@
         <button class="back-btn" @click="goBack" aria-label="Back">
           <img src="@/assets/img/back.png" alt="返回" />
         </button>
-        <button @click="openSaveDialog" class="save-btn" :disabled="saving">
+        <button @click="openSaveDialog" class="save-btn" :disabled="saving ">
+        <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave"> -->
           {{ saving ? '保存中...' : '保存' }}
         </button>
         <button class="capture-btn" @click="startDataStream"></button>
@@ -77,7 +78,7 @@ import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'v
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
-import { showToast } from '@/utils/toast'
+// import { showToast } from '@/utils/toast'
 import { StatusBar } from '@capacitor/status-bar'
 import { setImmersive } from '@/utils/immersive'
 import { bluetoothService } from '@/services/bluetoothService'
@@ -94,6 +95,7 @@ import {
 } from '@/utils/screen'
 import { generateOptimizedSessionId } from '@/utils/sessionIdUtils'
 import * as filePathUtils from '@/utils/filePathUtils'
+import { showLoadingToast, closeToast, showToast } from 'vant'
 
 const bluetoothStore = useBluetoothStore()
 const router = useRouter()
@@ -692,15 +694,10 @@ const openSaveDialog = async () => {
   }
 
   // 检查整个项目是否有数据（所有点位）
-  if (dataBatchCounter.value === 0) {
-    showToast('暂无数据可保存')
-    return
-  }
-
-  if (!enableSave) {
-    showToast('至少需要完成一个点位的数据采集')
-    return
-  }
+  // if (dataBatchCounter.value === 0) {
+  //   showToast('暂无数据可保存')
+  //   return
+  // }
 
   // await unlockOrientation()
   showSaveDialog.value = true
@@ -736,8 +733,33 @@ const confirmSave = async () => {
   const folderName = name ? `${name}_${currentSessionId}` : currentSessionId
   lastSavedFolder.value = folderName
   savedDuringDialog.value = false
-  await performSave(folderName)
+
+  // 先关闭保存对话框
+  closeSaveDialog()
+
+  try {
+    // 显示加载中提示
+    showLoadingToast({
+      message: '保存中...',
+      forbidClick: true,
+    })
+    // 执行保存操作
+    await performSave(folderName)
+
+    // 保存成功后关闭加载提示
+    closeToast()
+  } catch (error) {
+    // 保存失败也关闭加载提示
+    closeToast()
+    showToast({
+      message: '保存失败',
+      position: 'bottom',
+    })
+  } finally {
+    router.back()
+  }
 }
+
 let isDeletingSession = false
 
 const delSessionDir = async () => {
@@ -764,7 +786,7 @@ async function performSave(folderName) {
     // 确定目标文件夹名
     let targetName
     if (folderName && folderName !== currentSessionId) {
-      targetName = `${folderName}_${currentSessionId}`
+      targetName = folderName
     } else {
       // 用户没输入项目名，直接使用会话ID
       targetName = currentSessionId
@@ -777,6 +799,10 @@ async function performSave(folderName) {
       if (tempName !== targetName) {
         await filePathUtils.renameSession(tempName, targetName)
         currentSessionId = targetName
+        // await folderStore.refreshFolders()
+        console.log('[PointCloud] 开始刷新项目列表...')
+        await folderStore.refreshFolders()
+        console.log('[PointCloud] 刷新完成')
       }
     } catch (e) {
       console.warn('[PointCloud] 临时文件夹不存在', tempName)
@@ -787,14 +813,17 @@ async function performSave(folderName) {
     //   currentSessionId = folderName
     // }
 
-    showToast('保存成功')
+    // showToast('保存成功')
+    showToast({
+      message: '保存成功',
+      position: 'bottom',
+    })
     savedDuringDialog.value = true
     lastSavedFolder.value = targetName
-    closeSaveDialog()
-    router.back()
   } catch (error) {
     console.error('保存失败:', error)
     showToast('保存失败：' + (error.message || '未知错误'))
+    throw error // 重新抛出错误以便上层捕获
   } finally {
     saving.value = false
   }
@@ -961,12 +990,11 @@ function isLeavingSession(to) {
   color: var(--text-primary);
   position: relative;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  /* 全局禁用选中（可继承的元素） */
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
-  -webkit-touch-callout: none; /* 禁用长按菜单 */
+  -webkit-touch-callout: none;
 }
 
 .three-container {
@@ -994,7 +1022,23 @@ function isLeavingSession(to) {
   z-index: 10;
 }
 
-/* 所有按钮默认禁用选中，但允许点击 */
+/* ========== 通用按钮样式 ========== */
+.back-btn,
+.save-btn,
+.capture-btn,
+.batch-btn,
+.disconnect-back-btn,
+.save-actions button {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  transition: all 0.2s ease;
+}
+
+/* ========== 返回按钮 ========== */
 .back-btn {
   position: absolute;
   left: 16px;
@@ -1011,16 +1055,8 @@ function isLeavingSession(to) {
   border: 1px solid var(--border-subtle);
   pointer-events: auto;
   z-index: 12;
-  transition: all 0.2s ease;
   cursor: pointer;
   padding: 0;
-  -webkit-tap-highlight-color: transparent;
-  /* 确保图片也不会触发选中 */
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
 }
 
 .back-btn:hover {
@@ -1040,12 +1076,11 @@ function isLeavingSession(to) {
   display: block;
   filter: brightness(0.95);
   opacity: 0.9;
-  /* 图片本身也禁止拖动/保存 */
   -webkit-user-drag: none;
   pointer-events: none;
 }
 
-/* 保存按钮 - 禁用选中 */
+/* ========== 保存按钮 ========== */
 .save-btn {
   position: absolute;
   top: 16px;
@@ -1065,7 +1100,6 @@ function isLeavingSession(to) {
   pointer-events: auto;
   z-index: 11;
   cursor: pointer;
-  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1073,95 +1107,16 @@ function isLeavingSession(to) {
   -webkit-backdrop-filter: blur(4px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   line-height: 1;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
 }
 
-/* 保存对话框覆盖层需要接收事件 */
-.save-dialog-overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  background: rgba(0, 0, 0, 0.6);
-  pointer-events: auto;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-.save-dialog-content {
-  width: 100vw;
-  height: 100vh;
-  max-width: 100vw;
-  max-height: 100vh;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: auto;
-}
-
-.save-dialog-card {
-  width: 60vw;
-  max-width: 700px;
-  max-height: 90vh;
-  background: rgba(15, 23, 36, 0.98);
-  color: #fff;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
-  overflow: auto;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-/* 对话框内的文字也禁止选中，但输入框除外 */
-.save-dialog-card h3,
-.save-dialog-card label,
-.save-dialog-card .save-actions button {
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-/* 输入框允许选中和编辑，覆盖父级限制 */
-.save-dialog-content input {
-  width: 100%;
-  margin: 8px 0 12px 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: #fff;
-  -webkit-user-select: text;
-  -moz-user-select: text;
-  -ms-user-select: text;
-  user-select: text;
-  -webkit-touch-callout: default; /* 允许长按菜单（复制/粘贴） */
-}
-
-.save-btn:hover {
+.save-btn:hover:not(:disabled) {
   background: linear-gradient(145deg, #4d9eff, #2a7aff);
   box-shadow: 0 6px 16px var(--brand-glow);
   transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.25);
 }
 
-.save-btn:active {
+.save-btn:active:not(:disabled) {
   transform: translateY(1px);
   box-shadow: 0 2px 8px var(--brand-glow);
 }
@@ -1175,6 +1130,7 @@ function isLeavingSession(to) {
   color: rgba(255, 255, 255, 0.6);
 }
 
+/* ========== 采集按钮 ========== */
 .capture-btn {
   position: absolute;
   right: 16px;
@@ -1190,15 +1146,8 @@ function isLeavingSession(to) {
   pointer-events: auto;
   z-index: 11;
   cursor: pointer;
-  transition: all 0.2s ease;
   box-shadow: 0 6px 16px var(--brand-glow);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  -webkit-tap-highlight-color: transparent;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
 }
 
 .capture-btn::after {
@@ -1213,33 +1162,33 @@ function isLeavingSession(to) {
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   transition: all 0.2s ease;
-  pointer-events: none; /* 伪元素不干扰点击 */
+  pointer-events: none;
 }
 
-.capture-btn:hover {
+.capture-btn:hover:not(:disabled) {
   transform: translateY(-50%) scale(1.05);
   box-shadow: 0 10px 24px var(--brand-glow);
   border-color: rgba(255, 255, 255, 0.3);
 }
 
-.capture-btn:hover::after {
+.capture-btn:hover:not(:disabled)::after {
   background: white;
   transform: translate(-50%, -50%) scale(0.95);
 }
 
-.capture-btn:active {
+.capture-btn:active:not(:disabled) {
   transform: translateY(-50%) scale(0.97);
   box-shadow: 0 4px 12px var(--brand-glow);
 }
 
-.capture-btn:active::after {
+.capture-btn:active:not(:disabled)::after {
   transform: translate(-50%, -50%) scale(0.9);
 }
 
-/* ========== 批次按钮行样式 ========== */
+/* ========== 批次按钮行 ========== */
 .batch-buttons-row {
   position: absolute;
-  bottom: 80px; /* 调整距离底部的位置 */
+  bottom: 80px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1260,7 +1209,6 @@ function isLeavingSession(to) {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
   box-shadow: 0 4px 12px var(--brand-glow);
 }
 
@@ -1274,7 +1222,29 @@ function isLeavingSession(to) {
   box-shadow: 0 2px 8px var(--brand-glow);
 }
 
-/* ========== 顶部中央统计数据样式 ========== */
+/* ========== 统计数据 ========== */
+.bottom-left-stat {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  z-index: 10;
+  pointer-events: auto;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.bottom-left-stat span {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
 .top-center-stat {
   position: absolute;
   top: 16px;
@@ -1328,31 +1298,7 @@ function isLeavingSession(to) {
   letter-spacing: 0.5px;
 }
 
-/* ========== 左下角统计数据样式（重点禁用复制） ========== */
-.bottom-left-stat {
-  position: absolute;
-  left: 16px;
-  bottom: 16px;
-  font-size: 14px;
-  color: var(--text-secondary);
-  z-index: 10;
-  pointer-events: auto; /* 确保文字本身不阻挡交互，但禁用选中 */
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-
-/* 内部span也继承禁用 */
-.bottom-left-stat span {
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-}
-
-/* ========== 设备断开提示样式 ========== */
+/* ========== 设备断开提示 ========== */
 .disconnect-overlay {
   position: absolute;
   top: 0;
@@ -1410,13 +1356,7 @@ function isLeavingSession(to) {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
   border: 1px solid rgba(255, 255, 255, 0.15);
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
 }
 
 .disconnect-back-btn:hover {
@@ -1428,20 +1368,16 @@ function isLeavingSession(to) {
   transform: translateY(1px);
 }
 
-.save-dialog-content h3 {
-  margin: 0 0 8px 0;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-}
-
-/* 对话框内按钮禁用选中 */
-.save-actions button {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
+/* ========== 保存对话框 ========== */
+.save-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
@@ -1449,12 +1385,162 @@ function isLeavingSession(to) {
   -webkit-touch-callout: none;
 }
 
+.save-dialog-content {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.save-dialog-card {
+  width: 60vw;
+  max-width: 700px;
+  max-height: 90vh;
+  background: rgba(15, 23, 36, 0.98);
+  color: #fff;
+  padding: 24px;
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  overflow: auto;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.save-dialog-card h3 {
+  margin: 0 0 16px 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.save-dialog-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.save-dialog-content input {
+  width: 100%;
+  margin: 8px 0 16px 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 16px;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.save-dialog-content input:focus {
+  border-color: var(--brand-primary);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(42, 122, 255, 0.2);
+}
+
+.save-dialog-content input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* 对话框按钮容器 */
 .save-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
+  margin-top: 24px;
 }
 
+.save-actions button {
+  padding: 12px 24px;
+  border-radius: 30px;
+  border: none;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  min-width: 100px;
+  letter-spacing: 0.3px;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 完成按钮 */
+.save-actions button:first-child {
+  background: var(--brand-gradient);
+  color: white;
+  box-shadow: 0 4px 12px var(--brand-glow);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.save-actions button:first-child:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px var(--brand-glow);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.save-actions button:first-child:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px var(--brand-glow);
+}
+
+/* 取消按钮 */
+.save-actions button:last-child {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.save-actions button:last-child:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.save-actions button:last-child:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateY(1px);
+}
+
+/* 禁用状态 */
+.save-actions button:disabled,
+.save-btn:disabled,
+.disconnect-back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ========== 移动端适配 ========== */
 @media (max-width: 768px) {
   .overlay-controls {
     padding: 16px;
@@ -1507,6 +1593,22 @@ function isLeavingSession(to) {
   .disconnect-back-btn {
     padding: 8px 20px;
     font-size: 13px;
+  }
+
+  .save-dialog-card {
+    width: 85vw;
+    padding: 20px;
+  }
+
+  .save-actions {
+    gap: 10px;
+    margin-top: 20px;
+  }
+
+  .save-actions button {
+    padding: 10px 20px;
+    min-width: 80px;
+    font-size: 14px;
   }
 }
 </style>

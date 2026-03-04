@@ -2,7 +2,7 @@
 import { Filesystem, Directory } from '@capacitor/filesystem'
 import { parseSessionIdToFormattedTime } from './sessionIdUtils'
 import { Share } from '@capacitor/share'
-import { TEMP_PREFIX }  from '@/constants/protocolCommands'
+import { TEMP_PREFIX } from '@/constants/protocolCommands'
 
 // 所有文件操作都相对于 Directory.Documents 目录
 // 我们集中管理 pointcloud/session/batch 结构的路径构建
@@ -11,7 +11,7 @@ import { TEMP_PREFIX }  from '@/constants/protocolCommands'
  * 顶层点云数据目录的路径
  */
 export const POINTCLOUD_ROOT = 'pointcloud'
-// ========== 新增：文件夹分类相关函数 ==========
+// ========== ：文件夹分类相关函数 ==========
 
 /**
  * 会话ID的正则模式：纯小写字母数字，8-12位
@@ -596,8 +596,8 @@ export async function readBatch(sessionId, batchId) {
             const mime = lower.endsWith('.png')
               ? 'image/png'
               : lower.endsWith('.webp')
-              ? 'image/webp'
-              : 'image/jpeg'
+                ? 'image/webp'
+                : 'image/jpeg'
             result.photos.push(`data:${mime};base64,${read.data}`)
           }
         }
@@ -656,7 +656,6 @@ export async function ensureNoMedia(basePath) {
   }
 }
 
-
 /**
  * 重命名会话文件夹（当用户确认项目名称时使用）
  * @param {string} oldName - 原文件夹名称
@@ -683,8 +682,7 @@ export async function renameSession(oldName, newName) {
   try {
     // 直接调用 rename，让原生 API 处理所有检查
     await rename(oldPath, newPath)
-
-    dispatchFolderUpdate('rename', { oldName, newName })
+    // dispatchFolderUpdate('rename', { oldName, newName })   // 在pointcloud页面重命名之后强制刷新，不再在此处去派发文件夹更新事件
     console.log('[renameSession] 重命名成功')
     return true
   } catch (e) {
@@ -890,7 +888,8 @@ export async function listPointCloudFolders(includeAll = false) {
  * @param {string} fileName - 文件名（如 "Batch_001_45.23_89.56====1.jpg"）
  * @returns {Object|null} 解析结果
  */
-export function parsePhotoFileName(fileName) {    // 暂时没有使用到
+export function parsePhotoFileName(fileName) {
+  // 暂时没有使用到
   if (!fileName) return null
 
   // 匹配格式：Batch_XXX_角度_角度[====X].jpg 或 .jpeg 或 .png
@@ -1121,9 +1120,10 @@ export async function getFirstPhotoUri(sessionId) {
  * 将会话文件夹内的文件打包为 zip 文件
  * @param {string} sessionFolderName - pointcloud 下的文件夹名
  * @param {string} zipFileName - 输出 zip 文件名（不含扩展名）
- * @returns {Promise<{uri:string, path:string, relativePath:string}>} 包含 zip 文件信息的对象
+ * @param {string[]} existingFiles - 可选的已有文件列表，避免重复递归
+ * @returns {Promise<{uri:string, path:string, relativePath:string}>}
  */
-export async function zipSessionToFile(sessionFolderName, zipFileName) {
+export async function zipSessionToFile(sessionFolderName, zipFileName, existingFiles = null) {
   if (!sessionFolderName) throw new Error('需要提供会话文件夹名称')
   const folderPath = `${POINTCLOUD_ROOT}/${sessionFolderName}`
 
@@ -1181,7 +1181,7 @@ export async function zipSessionToFile(sessionFolderName, zipFileName) {
   const zip = new JSZipLib()
 
   try {
-    const allFiles = await listFilesRecursive(folderPath)
+    const allFiles = existingFiles || await listFilesRecursive(folderPath)
     if (!allFiles || allFiles.length === 0) throw new Error('项目文件夹下无文件')
 
     for (const p of allFiles) {
@@ -1211,7 +1211,7 @@ export async function zipSessionToFile(sessionFolderName, zipFileName) {
         String(content.length),
     )
 
-    // 确保目录存在
+    // 压缩进去之前需要确保目录存在
     try {
       await mkdir(targetDir, { recursive: true })
       console.log('[filePathUtils] 创建目录成功或目录已存在: ' + targetDir)
@@ -1222,7 +1222,7 @@ export async function zipSessionToFile(sessionFolderName, zipFileName) {
     await writeFile(zipPath, content)
     const uriRes = await getUri(zipPath)
     console.log('[filePathUtils] zipSessionToFile 写入完成 uri -> ' + String(uriRes && uriRes.uri))
-    dispatchFolderUpdate('zip_created', { folder: sessionFolderName, zipName: zipFileName })
+    // dispatchFolderUpdate('zip_created', { folder: sessionFolderName, zipName: zipFileName })  // 与展示无关不再派发更新文件夹事件
     return { uri: uriRes.uri, path: zipPath, relativePath: zipPath }
   } catch (error) {
     console.error('打包项目失败', error)

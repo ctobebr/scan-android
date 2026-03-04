@@ -6,7 +6,19 @@ import router from './router'
 import '@/styles/base.css'
 import * as filePathUtils from '@/utils/filePathUtils'
 
+// 按需引入
+import { Button, Cell, Field, Toast, Dialog, Switch } from 'vant'
+import 'vant/lib/index.css'
 // 防止系统扫描 Documents 目录中的媒体文件
 filePathUtils.ensureNoMedia('')
 
-createApp(App).use(router).use(createPinia()).mount('#app')
+createApp(App)
+  .use(router)
+  .use(createPinia())
+  .use(Button)
+  .use(Cell)
+  .use(Field)
+  .use(Toast)
+  .use(Dialog)
+  .use(Switch)
+  .mount('#app')

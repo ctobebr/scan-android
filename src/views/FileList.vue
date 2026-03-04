@@ -42,8 +42,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { showToast } from '@/utils/toast'
+import { ref, computed, onMounted, onActivated } from 'vue'
+// import { showToast } from '@/utils/toast'
+import { showLoadingToast, closeToast, showToast } from 'vant'
 import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { Share } from '@capacitor/share'
 import { useFoldersStore } from '@/stores/folders'
@@ -68,17 +69,31 @@ const onShareClick = async (folderName, projectName, sessionId) => {
       return
     }
 
+    showLoadingToast({
+      message: '加载中...',
+      forbidClick: true,
+    })
+
     const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId
     const zipBaseName = `${timeStr}_${projectName || sessionId}`
+
     console.log(
       '[FileList] 请求打包分享 folder=' +
         String(folderName) +
         ' zipBaseName=' +
-        String(zipBaseName),
+        String(zipBaseName) +
+        ' 文件数=' +
+        allFiles.length,
     )
 
-    const res = await filePathUtils.zipSessionToFile(folderName, zipBaseName)
+    const res = await filePathUtils.zipSessionToFile(
+      folderName,
+      zipBaseName,
+      allFiles  // 传入已获取的文件列表，避免二次递归
+    )
+
     console.log('[FileList] zipSessionToFile result', res)
+    closeToast()
 
     if (res && res.uri) {
       await Share.share({
@@ -86,19 +101,31 @@ const onShareClick = async (folderName, projectName, sessionId) => {
         url: res.uri,
         dialogTitle: '选择应用分享压缩包',
       })
-      showToast('压缩包已生成：' + String(res.path) + '，可使用文件管理器复制到 U 盘')
     } else {
-      showToast('打包失败，未生成可分享文件')
+      showToast({
+        message: '打包失败，未生成可分享文件',
+        position: 'bottom',
+      })
     }
   } catch (error) {
     console.error('分享项目失败:', error)
+    closeToast()  // 确保错误时也关闭加载提示
     const msg = (error && error.message) || String(error)
     if (/cancel|canceled|用户取消|Share canceled/i.test(msg)) {
-      showToast('分享已取消')
+      showToast({
+        message: '分享已取消',
+        position: 'bottom',
+      })
     } else if (/FILE_NOTCREATED/i.test(msg)) {
-      showToast('打包失败：未创建文件')
+      showToast({
+        message: '打包失败：未创建文件',
+        position: 'bottom',
+      })
     } else {
-      showToast('分享失败: ' + msg)
+      showToast({
+        message: '分享失败',
+        position: 'bottom',
+      })
     }
   }
 }
@@ -131,11 +158,17 @@ const deleteFile = async (folderPath) => {
 
     await filePathUtils.deletePointCloudFolder(relativePath)
     folderStore.removeFolder(relativePath)
-    showToast('删除成功')
+    showToast({
+      message: '删除成功',
+      position: 'bottom',
+    })
 
   } catch (e) {
     console.error('[FileList] 删除失败:', e)
-    showToast(`删除失败: ${e.message || '未知错误'}`)
+    showToast({
+      message: `删除失败: ${e.message || '未知错误'}`,
+      position: 'bottom',
+    })
   }
 }
 
@@ -157,6 +190,10 @@ onMounted(() => {
     folderStore.loadProjectFolders()
   }
 })
+onActivated(() => {
+  console.log('激活filelist')
+  // folderStore.loadProjectFolders()
+})
 </script>
 
 <style scoped>
@@ -169,9 +206,9 @@ onMounted(() => {
 
 .list-container {
   flex: 1;
-  min-height: 0;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  background: transparent;
+  height: 100%;
 }
 
 .loading-state,
@@ -179,6 +216,11 @@ onMounted(() => {
   text-align: center;
   padding: 40px 0;
   color: #999;
+  background: transparent;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .list {
