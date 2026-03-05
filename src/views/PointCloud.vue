@@ -91,6 +91,7 @@ import {
 import { generateOptimizedSessionId } from '@/utils/sessionIdUtils'
 import * as filePathUtils from '@/utils/filePathUtils'
 import { showLoadingToast, closeToast, showToast } from 'vant'
+import sessionService from '@/services/sessionService'
 
 const bluetoothStore = useBluetoothStore()
 const folderStore = useFoldersStore()
@@ -388,7 +389,7 @@ function registerDisconnectListener() {
       // 停止订阅和清空累加器
       try {
         bluetoothStore.setCleanupStatus(true) // 清理中
-        await stopSessionParser() // 这里会取消订阅
+        await sessionService.stopSessionParser() // 这里会取消订阅
       } catch (e) {
         console.warn('[PointCloudPage] 清理会话失败', e)
       } finally {
@@ -412,7 +413,7 @@ watch(
         isCollecting.value = false
         try {
           bluetoothStore.setCleanupStatus(true) // 清理中
-          await stopSessionParser() // 这里会取消订阅
+          await sessionService.stopSessionParser() // 这里会取消订阅
         } catch (e) {
           console.warn('[PointCloudPage] 清理会话失败', e)
         } finally {
@@ -433,7 +434,7 @@ async function cleanupResourcesForPause() {
   if (isCollecting.value) {
     try {
       bluetoothStore.setCleanupStatus(true) // 清理中
-      await stopSessionParser() // 这里会取消订阅
+      await sessionService.stopSessionParser() // 这里会取消订阅
     } catch (e) {
       console.warn('[PointCloudPage] 清理会话失败', e)
     } finally {
@@ -491,10 +492,9 @@ async function cleanupResourcesForExit() {
   }, 100)
 
   await disableScreenKeepAwake()
-  await cameraHelper.stopPreview()
   try {
     bluetoothStore.setCleanupStatus(true) // 清理中
-    await stopSessionParser() // 这里会取消订阅
+    await sessionService.stopSessionParser() // 这里会取消订阅
   } catch (e) {
     console.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
@@ -655,6 +655,8 @@ function startSessionParser() {
   }, ACCUMULATION_INTERVAL)
 
   hasStarted = true   // 表示是否开始过采集，如果没有则不用删除文件夹
+  sessionService.setParser(parser)
+  sessionService.setAccumulationTimer(accumulationTimer)
 }
 
 async function startDataStream() {
@@ -801,7 +803,7 @@ async function performSave(folderName) {
       await filePathUtils.stat(`pointcloud/${tempName}`)
 
       if (tempName !== targetName) {
-        await filePathUtils.renameSession(tempName, targetName)
+        await sessionService.renameSession(tempName, targetName)
         currentSessionId = targetName
         console.log('[PointCloud] 开始刷新项目列表...')
         await folderStore.refreshFolders()
@@ -928,31 +930,6 @@ async function performSave(folderName) {
 //     saving.value = false
 //   }
 // }
-
-async function stopSessionParser() {
-  if (!parser) {
-    return
-  }
-  console.log('[stopSessionParser] Stopping parser and subscription...')
-  if (accumulationTimer) {
-    clearInterval(accumulationTimer)
-    accumulationTimer = null
-  }
-  try {
-    const deviceId = bluetoothStore.connectingDeviceId
-    if (deviceId) {
-      await bluetoothService.unsubscribeFromNotifications(
-        deviceId,
-        NUS_SERVICE_UUID,
-        NUS_NOTIFY_CHAR_UUID,
-      )
-    }
-  } catch (e) {
-    console.warn('unsubscribe failed', e)
-  }
-  await cameraHelper.stopPreview().catch(() => {})
-  parser = null
-}
 // 判断是否真的是离开会话页面（返回主页）
 function isLeavingSession(to) {
   // 如果跳转到 BatchDetail，不是离开
