@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { showToast } from '@/utils/toast'
+import { showLoadingToast, closeToast, showToast, showConfirmDialog } from 'vant'
 import { bluetoothService } from '@/services/bluetoothService'
 import {
   NUS_SERVICE_UUID,
@@ -38,7 +38,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
     async autoScanOnEnter() {
       // 权限
       if (!(await this.requestRequirePermissions())) {
-        showToast('需要蓝牙和位置权限才能扫描设备')
+        showToast({ message: '需要蓝牙和位置权限才能扫描设备', position: 'bottom' })
         return
       }
       // 初始化
@@ -58,9 +58,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
       // 扫描
       this.scanning = true
       try {
-        // showToast(JSON.stringify(122))
         const found = await bluetoothService.scanDevices(5000)
-        // showToast(JSON.stringify(found))
         console.log('发现附近的设备:', JSON.stringify(found))
         this.devices = found
       } catch (err) {
@@ -97,7 +95,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
       // 非手动断开才显示提示
       if (!isManualDisconnect) {
-        showToast('设备已断开连接', 3000)
+        showToast({ message: '设备已断开连接', position: 'bottom' })
       }
     },
 
@@ -140,7 +138,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
         this.connectingStatus = 0 // 回到未连接
         this.connectingDeviceId = null
         this.stopAccumulationTimer()
-        showToast('连接失败')
+        showToast({ message: '连接失败', position: 'bottom' })
       }
     },
 

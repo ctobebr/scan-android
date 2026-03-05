@@ -172,7 +172,7 @@ onActivated(() => {
 /* 列表项保持白色卡片效果 */
 .list-item {
   background: white;
-  border-radius: 12px;
+  border-radius: 20px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin-bottom: 12px;

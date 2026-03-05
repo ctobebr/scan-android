@@ -13,7 +13,8 @@
             plain
             @click="saveParam('calib')"
             :loading="savingState.calib"
-            :disabled="deviceDisconnected || savingState.calib"
+            :disabled="deviceDisconnected || savingState.calib || !isCalibValid"
+            style="width: 64px;"
             >保存</van-button
           >
         </div>
@@ -28,10 +29,14 @@
                 type="text"
                 placeholder="0.00"
                 inputmode="decimal"
-                @blur="() => formatNumber('calib', 'x', 2)"
-                @input="validateDecimalInput"
+                @blur="() => validateAndFormat('calib', 'x', 2)"
+                @input="handleNumberInput"
                 :disabled="deviceDisconnected"
+                :error="!!calibErrors.x"
               />
+              <div v-if="calibErrors.x" class="field-error-hint">
+                <van-icon name="warning-o" /> {{ calibErrors.x }}
+              </div>
             </div>
             <div class="axis-item">
               <label>Y <span class="unit">(mm)</span></label>
@@ -40,10 +45,14 @@
                 type="text"
                 placeholder="0.00"
                 inputmode="decimal"
-                @blur="() => formatNumber('calib', 'y', 2)"
-                @input="validateDecimalInput"
+                @blur="() => validateAndFormat('calib', 'y', 2)"
+                @input="handleNumberInput"
                 :disabled="deviceDisconnected"
+                :error="!!calibErrors.y"
               />
+              <div v-if="calibErrors.y" class="field-error-hint">
+                <van-icon name="warning-o" /> {{ calibErrors.y }}
+              </div>
             </div>
             <div class="axis-item">
               <label>Z <span class="unit">(mm)</span></label>
@@ -52,10 +61,14 @@
                 type="text"
                 placeholder="0.00"
                 inputmode="decimal"
-                @blur="() => formatNumber('calib', 'z', 2)"
-                @input="validateDecimalInput"
+                @blur="() => validateAndFormat('calib', 'z', 2)"
+                @input="handleNumberInput"
                 :disabled="deviceDisconnected"
+                :error="!!calibErrors.z"
               />
+              <div v-if="calibErrors.z" class="field-error-hint">
+                <van-icon name="warning-o" /> {{ calibErrors.z }}
+              </div>
             </div>
           </div>
           <!-- 第二行 pitch roll yaw -->
@@ -88,7 +101,8 @@
             plain
             @click="saveParam('speed')"
             :loading="savingState.speed"
-            :disabled="deviceDisconnected || savingState.speed"
+            :disabled="deviceDisconnected || savingState.speed || !isSpeedValid"
+            style="width: 64px;"
             >保存</van-button
           >
         </div>
@@ -101,10 +115,14 @@
               type="text"
               placeholder="0.0000"
               inputmode="decimal"
-              @blur="() => formatNumber('speed', 'pitchSpeed', 4)"
-              @input="validateDecimalInput"
+              @blur="() => validateAndFormat('speed', 'pitchSpeed', 4)"
+              @input="handleNumberInput"
               :disabled="deviceDisconnected"
+              :error="!!speedErrors.pitchSpeed"
             />
+            <div v-if="speedErrors.pitchSpeed" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ speedErrors.pitchSpeed }}
+            </div>
           </div>
           <div class="axis-item">
             <label>yaw <span class="unit">(rad/ms)</span></label>
@@ -113,10 +131,14 @@
               type="text"
               placeholder="0.0000"
               inputmode="decimal"
-              @blur="() => formatNumber('speed', 'yawSpeed', 4)"
-              @input="validateDecimalInput"
+              @blur="() => validateAndFormat('speed', 'yawSpeed', 4)"
+              @input="handleNumberInput"
               :disabled="deviceDisconnected"
+              :error="!!speedErrors.yawSpeed"
             />
+            <div v-if="speedErrors.yawSpeed" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ speedErrors.yawSpeed }}
+            </div>
           </div>
         </div>
       </div>
@@ -133,7 +155,8 @@
             plain
             @click="saveParam('scan')"
             :loading="savingState.scan"
-            :disabled="deviceDisconnected || savingState.scan"
+            :disabled="deviceDisconnected || savingState.scan || !isScanValid"
+            style="width: 64px;"
             >保存</van-button
           >
         </div>
@@ -145,11 +168,15 @@
               type="text"
               placeholder="输入秒数"
               @blur="validateScanTime"
-              @input="validateIntegerInput"
+              @input="handleIntegerInput"
               :disabled="deviceDisconnected"
+              :error="!!scanErrors.seconds"
             />
           </div>
           <span class="scan-unit">秒</span>
+        </div>
+        <div v-if="scanErrors.seconds" class="field-error-hint">
+          <van-icon name="warning-o" /> {{ scanErrors.seconds }}
         </div>
       </div>
 
@@ -166,6 +193,7 @@
             @click="saveParam('pitchLimit')"
             :loading="savingState.pitchLimit"
             :disabled="deviceDisconnected || savingState.pitchLimit || !isPitchLimitValid"
+            style="width: 64px;"
             >保存</van-button
           >
         </div>
@@ -178,10 +206,14 @@
               type="text"
               placeholder="0.00"
               inputmode="decimal"
-              @blur="() => formatNumber('pitchLimit', 'upperLimitRad', 2)"
-              @input="validateDecimalInput"
+              @blur="() => validateAndFormat('pitchLimit', 'upperLimitRad', 2)"
+              @input="handleNumberInput"
               :disabled="deviceDisconnected"
+              :error="!!pitchLimitErrors.upper"
             />
+            <div v-if="pitchLimitErrors.upper" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pitchLimitErrors.upper }}
+            </div>
           </div>
           <div class="axis-item">
             <label>下限 <span class="unit">(rad)</span></label>
@@ -190,15 +222,19 @@
               type="text"
               placeholder="0.00"
               inputmode="decimal"
-              @blur="() => formatNumber('pitchLimit', 'lowerLimitRad', 2)"
-              @input="validateDecimalInput"
+              @blur="() => validateAndFormat('pitchLimit', 'lowerLimitRad', 2)"
+              @input="handleNumberInput"
               :disabled="deviceDisconnected"
+              :error="!!pitchLimitErrors.lower"
             />
+            <div v-if="pitchLimitErrors.lower" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pitchLimitErrors.lower }}
+            </div>
           </div>
         </div>
 
         <!-- 上限小于下限的提示 -->
-        <div v-if="!isPitchLimitValid" class="limit-error-hint">
+        <div v-if="!isPitchLimitValid && !hasPitchLimitEmptyError" class="limit-error-hint">
           <van-icon name="warning-o" /> 上限必须大于下限
         </div>
       </div>
@@ -291,7 +327,7 @@ import { bluetoothService } from '@/services/bluetoothService'
 import { App } from '@capacitor/app'
 import { parseBleData } from '@/utils/parseBleData'
 import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/protocolCommands'
-import { showToast } from '@/utils/toast'
+import { showLoadingToast, closeToast, showToast } from 'vant'
 import { SETTING_DEFAULT_VALUES } from '@/constants/protocolCommands'
 import { showConfirmDialog } from 'vant'
 
@@ -351,12 +387,172 @@ const savingState = reactive({
   outputFormat: false, // 输出格式保存状态
 })
 
-// 计算属性：检查俯仰角上限是否大于下限
+// ========== 错误状态管理 ==========
+const calibErrors = reactive({
+  x: '',
+  y: '',
+  z: '',
+})
+
+const speedErrors = reactive({
+  pitchSpeed: '',
+  yawSpeed: '',
+})
+
+const scanErrors = reactive({
+  seconds: '',
+})
+
+const pitchLimitErrors = reactive({
+  upper: '',
+  lower: '',
+})
+
+// ========== 计算属性 - 校验状态 ==========
+// 标定参数是否有效
+const isCalibValid = computed(() => {
+  return !calibErrors.x && !calibErrors.y && !calibErrors.z
+})
+
+// 速度参数是否有效
+const isSpeedValid = computed(() => {
+  return !speedErrors.pitchSpeed && !speedErrors.yawSpeed
+})
+
+// 扫描时间是否有效
+const isScanValid = computed(() => {
+  return !scanErrors.seconds
+})
+
+// 俯仰角限位是否有效（包含数值有效性和逻辑有效性）
 const isPitchLimitValid = computed(() => {
+  if (pitchLimitErrors.upper || pitchLimitErrors.lower) return false
+
   const upper = parseFloat(pitchLimit.upperLimitRad)
   const lower = parseFloat(pitchLimit.lowerLimitRad)
   return upper > lower
 })
+
+// 俯仰角限位是否有空值错误
+const hasPitchLimitEmptyError = computed(() => {
+  return pitchLimitErrors.upper || pitchLimitErrors.lower
+})
+
+// ========== 校验函数 ==========
+// 校验数值是否有效
+const validateNumber = (value, fieldName) => {
+  if (value === undefined || value === null || value === '') {
+    return `${fieldName}不能为空`
+  }
+
+  const num = parseFloat(value)
+  if (isNaN(num)) {
+    return `${fieldName}必须为有效数字`
+  }
+
+  return ''
+}
+
+// 校验整数
+const validateInteger = (value, fieldName, min = 0, max = 65535) => {
+  if (value === undefined || value === null || value === '') {
+    return `${fieldName}不能为空`
+  }
+
+  const num = parseInt(value)
+  if (isNaN(num)) {
+    return `${fieldName}必须为有效整数`
+  }
+
+  if (num < min || num > max) {
+    return `${fieldName}必须在${min}~${max}之间`
+  }
+
+  return ''
+}
+
+// 统一验证和格式化
+const validateAndFormat = (category, field, decimals) => {
+  let value
+  let errorMsg = ''
+
+  switch (category) {
+    case 'calib':
+      value = calibParams[field]
+      errorMsg = validateNumber(value, field.toUpperCase())
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        calibParams[field] = num.toFixed(decimals)
+        calibErrors[field] = ''
+      } else {
+        calibErrors[field] = errorMsg
+      }
+      break
+
+    case 'speed':
+      value = speedParams[field]
+      errorMsg = validateNumber(value, field === 'pitchSpeed' ? 'Pitch速度' : 'Yaw速度')
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        speedParams[field] = num.toFixed(decimals)
+        speedErrors[field] = ''
+      } else {
+        speedErrors[field] = errorMsg
+      }
+      break
+
+    case 'pitchLimit':
+      value = pitchLimit[field]
+      const label = field === 'upperLimitRad' ? '上限' : '下限'
+      errorMsg = validateNumber(value, label)
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        pitchLimit[field] = num.toFixed(decimals)
+        if (field === 'upperLimitRad') pitchLimitErrors.upper = ''
+        if (field === 'lowerLimitRad') pitchLimitErrors.lower = ''
+      } else {
+        if (field === 'upperLimitRad') pitchLimitErrors.upper = errorMsg
+        if (field === 'lowerLimitRad') pitchLimitErrors.lower = errorMsg
+      }
+      break
+  }
+}
+
+// 修改验证扫描时间函数
+const validateScanTime = () => {
+  const value = scanTime.value.seconds
+  const errorMsg = validateInteger(value, '扫描时间', 0, 65535)
+
+  if (errorMsg) {
+    scanErrors.seconds = errorMsg
+  } else {
+    let num = parseInt(value)
+    if (num > 65535) num = 65535
+    if (num < 0) num = 0
+    scanTime.value.seconds = num
+    scanErrors.seconds = ''
+  }
+}
+
+// ========== 输入处理函数（保持原有过滤逻辑）==========
+const handleNumberInput = (e) => {
+  // 原有过滤逻辑保持不变
+  const value = e.target.value
+  e.target.value = value.replace(/[^\d.-]/g, '')
+}
+
+const handleIntegerInput = (e) => {
+  // 原有过滤逻辑保持不变
+  const value = e.target.value
+  e.target.value = value.replace(/[^\d-]/g, '')
+}
+
+// 计算属性：检查俯仰角上限是否大于下限
+// const isPitchLimitValid = computed(() => {
+//   const upper = parseFloat(pitchLimit.upperLimitRad)
+//   const lower = parseFloat(pitchLimit.lowerLimitRad)
+//   return upper > lower
+// })
 
 // 获取连接状态文本
 // const getConnectionStatusText = () => {
@@ -573,7 +769,7 @@ function registerDisconnectListener() {
     deviceDisconnected.value = true
 
     // 显示提示
-    showToast('设备已断开连接', 3000)
+    showToast({ message: '设备已断开连接', position: 'bottom' })
   })
 }
 
@@ -599,65 +795,65 @@ async function unsubscribe() {
 }
 
 // 通用数字格式化函数
-const formatNumber = (category, field, decimals) => {
-  let value
-  switch (category) {
-    case 'calib':
-      value = calibParams[field]
-      break
-    case 'speed':
-      value = speedParams[field]
-      break
-    case 'pitchLimit':
-      value = pitchLimit[field]
-      break
-    default:
-      return
-  }
+// const formatNumber = (category, field, decimals) => {
+//   let value
+//   switch (category) {
+//     case 'calib':
+//       value = calibParams[field]
+//       break
+//     case 'speed':
+//       value = speedParams[field]
+//       break
+//     case 'pitchLimit':
+//       value = pitchLimit[field]
+//       break
+//     default:
+//       return
+//   }
 
-  if (value === undefined || value === null || value === '') return
+//   if (value === undefined || value === null || value === '') return
 
-  const num = parseFloat(value)
-  if (!isNaN(num)) {
-    switch (category) {
-      case 'calib':
-        calibParams[field] = num.toFixed(decimals)
-        break
-      case 'speed':
-        speedParams[field] = num.toFixed(decimals)
-        break
-      case 'pitchLimit':
-        pitchLimit[field] = num.toFixed(decimals)
-        break
-    }
-  }
-}
+//   const num = parseFloat(value)
+//   if (!isNaN(num)) {
+//     switch (category) {
+//       case 'calib':
+//         calibParams[field] = num.toFixed(decimals)
+//         break
+//       case 'speed':
+//         speedParams[field] = num.toFixed(decimals)
+//         break
+//       case 'pitchLimit':
+//         pitchLimit[field] = num.toFixed(decimals)
+//         break
+//     }
+//   }
+// }
 
 // ：小数输入实时过滤
-const validateDecimalInput = (e) => {
-  const value = e.target.value
-  // 允许：数字、小数点、负号
-  e.target.value = value.replace(/[^\d.-]/g, '')
-}
+// const validateDecimalInput = (e) => {
+//   const value = e.target.value
+//   // 允许：数字、小数点、负号
+//   e.target.value = value.replace(/[^\d.-]/g, '')
+// }
 
 // 整数输入实时过滤
-const validateIntegerInput = (e) => {
-  const value = e.target.value
-  // 只允许数字和负号
-  e.target.value = value.replace(/[^\d-]/g, '')
-}
+// const validateIntegerInput = (e) => {
+//   const value = e.target.value
+//   // 只允许数字和负号
+//   e.target.value = value.replace(/[^\d-]/g, '')
+// }
 
 // 修改验证函数 - 使用数字类型
-const validateScanTime = () => {
-  let value = parseInt(scanTime.value.seconds)
-  if (isNaN(value)) {
-    scanTime.value.seconds = 0
-  } else {
-    if (value > 65535) value = 65535
-    if (value < 0) value = 0
-    scanTime.value.seconds = value
-  }
-}
+// const validateScanTime = () => {
+//   let value = parseInt(scanTime.value.seconds)
+//   if (isNaN(value)) {
+//     scanTime.value.seconds = 0
+//   } else {
+//     if (value > 65535) value = 65535
+//     if (value < 0) value = 0
+//     scanTime.value.seconds = value
+//   }
+// }
 
 // 更新响应处理函数，将收到的数据更新到UI并格式化
 // 根据 isFromSaveAction 标记决定是否显示提示
@@ -672,8 +868,12 @@ function handleCalibParamResponse(data) {
     // if (data.roll !== undefined) calibParams.roll = data.roll
     // if (data.yaw !== undefined) calibParams.yaw = data.yaw
   }
+  // 清除对应字段的错误
+  calibErrors.x = ''
+  calibErrors.y = ''
+  calibErrors.z = ''
   if (isFromSaveAction.value) {
-    showToast('标定参数保存成功')
+    showToast({ message: '标定参数保存成功', position: 'bottom' })
     isFromSaveAction.value = false // 重置标记
   }
 }
@@ -689,8 +889,11 @@ function handleRotateSpeedResponse(data) {
       speedParams.yawSpeed = parseFloat(data.yawSpeed).toFixed(4)
     }
   }
+  // 清除对应字段的错误
+  speedErrors.pitchSpeed = ''
+  speedErrors.yawSpeed = ''
   if (isFromSaveAction.value) {
-    showToast('转动速度保存成功')
+    showToast({ message: '转动速度保存成功', position: 'bottom' })
     isFromSaveAction.value = false // 重置标记
   }
 }
@@ -705,8 +908,10 @@ function handleScanTimeResponse(data) {
   } else if (typeof data === 'number') {
     scanTime.value.seconds = parseInt(data)
   }
+  // 清除对应字段的错误
+  scanErrors.seconds = ''
   if (isFromSaveAction.value) {
-    showToast('扫描时间保存成功')
+    showToast({ message: '扫描时间保存成功', position: 'bottom' })
     isFromSaveAction.value = false // 重置标记
   }
 }
@@ -721,8 +926,11 @@ function handlePitchLimitResponse(data) {
       pitchLimit.lowerLimitRad = parseFloat(data.lowerLimitRad).toFixed(2)
     }
   }
+  // 清除对应字段的错误
+  pitchLimitErrors.upper = ''
+  pitchLimitErrors.lower = ''
   if (isFromSaveAction.value) {
-    showToast('俯仰角限位保存成功')
+    showToast({ message: '俯仰角限位保存成功', position: 'bottom' })
     isFromSaveAction.value = false // 重置标记
   }
 }
@@ -736,7 +944,7 @@ function handleOutputXYZResponse(data) {
   }
   // 如果是来自保存操作的响应，显示成功提示
   if (isFromSaveAction.value) {
-    showToast(`XYZ坐标输出已${data.status ? '开启' : '关闭'}`)
+    showToast({ message: `XYZ坐标输出已${data.status ? '开启' : '关闭'}`, position: 'bottom' })
     isFromSaveAction.value = false
   }
 }
@@ -751,46 +959,63 @@ function handleOutputPolarResponse(data) {
   }
   // 如果是来自保存操作的响应，显示成功提示
   if (isFromSaveAction.value) {
-    showToast(`极坐标输出已${data.status ? '开启' : '关闭'}`)
+    showToast({ message: `极坐标输出已${data.status ? '开启' : '关闭'}`, position: 'bottom' })
     isFromSaveAction.value = false
   }
 }
 
 // 保存单个参数 - 移除 showToast 参数，不在发送后提示
 // 设置标记，表示这是来自保存操作的响应
-// MODIFIED: 添加 silent 参数，用于控制是否显示提示（恢复默认值时使用）
+// 添加 silent 参数，用于控制是否显示提示（恢复默认值时使用）
 const saveParam = async (type, silent = false) => {
   if (deviceDisconnected.value) {
-    showToast('请先连接设备')
+    showToast({ message: '请先连接设备', position: 'bottom' })
     return
   }
 
-  // 保存前格式化
+  // 保存前验证
   switch (type) {
     case 'calib':
-      formatNumber('calib', 'x', 2)
-      formatNumber('calib', 'y', 2)
-      formatNumber('calib', 'z', 2)
+      validateAndFormat('calib', 'x', 2)
+      validateAndFormat('calib', 'y', 2)
+      validateAndFormat('calib', 'z', 2)
+      if (!isCalibValid.value) {
+        showToast({ message: '请填写正确的标定参数', position: 'bottom' })
+        return
+      }
       break
     case 'speed':
-      formatNumber('speed', 'pitchSpeed', 4)
-      formatNumber('speed', 'yawSpeed', 4)
+      validateAndFormat('speed', 'pitchSpeed', 4)
+      validateAndFormat('speed', 'yawSpeed', 4)
+      if (!isSpeedValid.value) {
+        showToast({ message: '请填写正确的速度参数', position: 'bottom' })
+        return
+      }
+      break
+    case 'scan':
+      validateScanTime()
+      if (!isScanValid.value) {
+        showToast({ message: '请填写正确的扫描时间', position: 'bottom' })
+        return
+      }
       break
     case 'pitchLimit':
-      formatNumber('pitchLimit', 'upperLimitRad', 2)
-      formatNumber('pitchLimit', 'lowerLimitRad', 2)
+      validateAndFormat('pitchLimit', 'upperLimitRad', 2)
+      validateAndFormat('pitchLimit', 'lowerLimitRad', 2)
+      if (!isPitchLimitValid.value) {
+        if (hasPitchLimitEmptyError.value) {
+          showToast({ message: '请填写完整的俯仰角限位', position: 'bottom' })
+        } else {
+          showToast({ message: '俯仰角上限必须大于下限', position: 'bottom' })
+        }
+        return
+      }
       break
-  }
-
-  // 俯仰角限位特殊校验
-  if (type === 'pitchLimit' && !isPitchLimitValid.value) {
-    showToast('俯仰角上限必须大于下限')
-    return
   }
 
   try {
     savingState[type] = true
-    // MODIFIED: 只有在非静默模式时才设置标记，这样就不会触发响应中的提示
+    // 只有在非静默模式时才设置标记，这样就不会触发响应中的提示
     if (!silent) {
       isFromSaveAction.value = true
     }
@@ -824,8 +1049,8 @@ const saveParam = async (type, silent = false) => {
     }
   } catch (error) {
     console.error(`保存${type}失败:`, error)
-    showToast('保存失败')
-    // MODIFIED: 只有在非静默模式时才重置标记
+    showToast({ message: '保存失败', position: 'bottom' })
+    // 只有在非静默模式时才重置标记
     if (!silent) {
       isFromSaveAction.value = false
     }
@@ -835,10 +1060,10 @@ const saveParam = async (type, silent = false) => {
 }
 
 // 处理输出格式开关变化
-// MODIFIED: 添加 silent 参数，保持与 saveParam 一致
+// 添加 silent 参数，保持与 saveParam 一致
 const handleOutputChange = async (type, value, silent = false) => {
   if (deviceDisconnected.value) {
-    showToast('请先连接设备')
+    showToast({ message: '请先连接设备', position: 'bottom' })
     // 如果设备未连接，恢复开关状态
     outputFormat[type] = !value
     return
@@ -846,7 +1071,7 @@ const handleOutputChange = async (type, value, silent = false) => {
 
   try {
     savingState.outputFormat = true
-    // MODIFIED: 只有在非静默模式时才设置标记
+    // 只有在非静默模式时才设置标记
     if (!silent) {
       isFromSaveAction.value = true
     }
@@ -858,10 +1083,10 @@ const handleOutputChange = async (type, value, silent = false) => {
     }
   } catch (error) {
     console.error(`设置输出格式${type}失败:`, error)
-    showToast('设置失败')
+    showToast({ message: '设置失败', position: 'bottom' })
     // 发生错误时恢复开关状态
     outputFormat[type] = !value
-    // MODIFIED: 只有在非静默模式时才重置标记
+    // 只有在非静默模式时才重置标记
     if (!silent) {
       isFromSaveAction.value = false
     }
@@ -873,7 +1098,7 @@ const handleOutputChange = async (type, value, silent = false) => {
 // 恢复默认值函数 - 修改为只显示一个提示
 const resetToDefault = async () => {
   if (deviceDisconnected.value) {
-    showToast('请先连接设备')
+    showToast({ message: '请先连接设备', position: 'bottom' })
     return
   }
 
@@ -886,6 +1111,16 @@ const resetToDefault = async () => {
 
     if (!confirmed) return
     console.log('开始恢复默认值...')
+
+    // 先清除所有错误
+    calibErrors.x = ''
+    calibErrors.y = ''
+    calibErrors.z = ''
+    speedErrors.pitchSpeed = ''
+    speedErrors.yawSpeed = ''
+    scanErrors.seconds = ''
+    pitchLimitErrors.upper = ''
+    pitchLimitErrors.lower = ''
 
     // 先更新UI显示为默认值并格式化
     calibParams.x = SETTING_DEFAULT_VALUES.CALIB.x.toFixed(2)
@@ -904,7 +1139,7 @@ const resetToDefault = async () => {
     outputFormat.xyz = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.xyz
     outputFormat.polar = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar
 
-    // MODIFIED: 使用 silent 模式调用保存函数，不触发单个提示
+    // 使用 silent 模式调用保存函数，不触发单个提示
     await saveParam('calib', true)
     await saveParam('speed', true)
     await saveParam('scan', true)
@@ -914,17 +1149,18 @@ const resetToDefault = async () => {
     await handleOutputChange('xyz', outputFormat.xyz, true)
     await handleOutputChange('polar', outputFormat.polar, true)
 
-    showToast('所有参数已恢复默认值') // 只保留这一个提示
+    // 只保留这一个提示
+    showToast({ message: '所有参数已恢复默认值', position: 'bottom' })
   } catch (error) {
     console.error('恢复默认值失败:', error)
-    showToast('恢复默认值失败')
+    showToast({ message: '恢复默认值失败', position: 'bottom' })
   }
 }
 
 // 读取所有参数函数
 const readAllParams = async () => {
   if (deviceDisconnected.value) {
-    showToast('设备未连接')
+    showToast({ message: '设备未连接', position: 'bottom' })
     return
   }
 
@@ -941,10 +1177,12 @@ const readAllParams = async () => {
       bluetoothStore.handleReadOutputXYZ(),
       bluetoothStore.handleReadOutputPolar(),
     ])
-    showToast('参数已刷新') // 只有一个提示
+    // 只有一个提示
+    showToast({ message: '参数已刷新', position: 'bottom' })
   } catch (error) {
     console.error('读取参数失败:', error)
-    showToast('读取参数失败')
+
+    showToast({ message: '读取参数失败', position: 'bottom' })
   } finally {
     refreshing.value = false
   }
@@ -1055,6 +1293,29 @@ const handleManualRefresh = async () => {
 :deep(.van-field__control) {
   color: #2c3e50;
   font-size: 14px;
+}
+
+/* 错误状态下的输入框样式 */
+:deep(.van-field--error) {
+  border-color: #f56c6c;
+  background-color: #fef0f0;
+}
+
+/* 字段错误提示 */
+.field-error-hint {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background-color: #fef0f0;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field-error-hint :deep(.van-icon) {
+  font-size: 12px;
 }
 
 /* 双列布局 */

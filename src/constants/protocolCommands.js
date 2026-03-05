@@ -60,6 +60,8 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
 
 export const TEMP_PREFIX = 'a7f3c9d1-'
 
+
+// 控制下位机参数默认值
 export const SETTING_DEFAULT_VALUES = {
   CALIB: { x: -52.52, y: 10, z: 1 },
   SPEED: { pitch: 0.002, yaw: 0.00005 },
@@ -70,3 +72,10 @@ export const SETTING_DEFAULT_VALUES = {
     polar: false,
   },
 }
+
+/**
+ * 顶层点云数据目录的路径
+ */
+//文件夹路径
+export const POINTCLOUD_ROOT = 'pointcloud'
+
