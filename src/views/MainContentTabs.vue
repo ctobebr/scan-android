@@ -128,7 +128,7 @@ onMounted(async () => {
   await StatusBar.setBackgroundColor({ color: '#e6f7ff' })
   bluetoothStore.autoScanOnEnter()
 
-  // 使用 store 加载项目文件夹列表
+  // 使用 store 加载项目文件夹列表，maincontenttabs作为容器，负责整体数据管理和初始化，逻辑上看不放在其下的动态组件中去做会更好一点
   await folderStore.loadProjectFolders()
 
   // 如果显示已连接，但实际可能已断开，做个状态校验
@@ -151,7 +151,7 @@ onActivated(async () => {
   }
 
   // 页面激活时刷新项目列表，确保获取最新数据
-  await folderStore.refreshFolders()
+  // await folderStore.refreshFolders()
 })
 
 onBeforeUnmount(() => {

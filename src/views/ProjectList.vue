@@ -2,11 +2,7 @@
   <div class="project-list-container">
     <!-- 项目列表内容区域 (可滚动) -->
     <div class="content-area">
-      <div v-if="folderStore.loading && projectListItems.length === 0" class="loading-state">
-        <p>加载项目中...</p>
-      </div>
-
-      <div v-else-if="projectListItems.length === 0" class="empty-state">
+      <div v-if="projectListItems.length === 0 && !folderStore.loading" class="empty-state">
         <p>暂无项目</p>
       </div>
 
@@ -44,17 +40,39 @@ import noImg from '@/assets/img/noImg.png'
 const folderStore = useFoldersStore()
 // 直接从 store 获取项目列表数据
 const projectListItems = computed(() => {
-  return folderStore.projectListItems
+  if (folderStore.loading) {
+    return [
+      {
+        name: '加载中...',
+        thumbnail: noImg,
+        date: '项目1',
+        source: '云台',
+      },
+      {
+        name: '加载中...',
+        thumbnail: noImg,
+        date: '项目2',
+        source: '云台',
+      },
+      {
+        name: '加载中...',
+        thumbnail: noImg,
+        date: '项目3',
+        source: '云台',
+      },
+    ]
+  }
+  return folderStore.projectListItems.map((item) => ({ ...item, isSkeleton: false }))
 })
 
+// 初始化时，onMounted和onActivated都会执行
 onMounted(() => {
   // 组件挂载时，如果 store 还没有数据，则加载
   if (folderStore.projectFolders.length === 0) {
-    folderStore.loadProjectFolders()
+    //  folderStore.loadProjectFolders()   //maincontenttabs中在挂载时会加载文件夹，而projectlist作为maincontenttabs的默认动态组件，此处应该可以暂时不再去重新加载文件夹
   }
 })
 onActivated(() => {
-  console.log('激活projectlist')
   // folderStore.loadProjectFolders()
 })
 // 响应 props.projects 的变化
@@ -200,9 +218,9 @@ onActivated(() => {
 
 .title {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
+  color: #2c3e50;
   margin-bottom: 4px;
-  color: #333;
 }
 
 .date {

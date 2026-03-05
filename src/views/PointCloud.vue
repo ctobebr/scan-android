@@ -8,8 +8,8 @@
         <button class="back-btn" @click="goBack" aria-label="Back">
           <img src="@/assets/img/back.png" alt="返回" />
         </button>
-        <button @click="openSaveDialog" class="save-btn" :disabled="saving ">
-        <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave"> -->
+        <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
+        <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
         <button class="capture-btn" @click="startDataStream"></button>
@@ -17,12 +17,6 @@
           <div class="stat-item">
             <span>点云数量</span>
             <span id="point-count">{{ pointCount }}</span>
-          </div>
-          <div class="stat-item">
-            <span>点云速率</span>
-            <span id="data-rate">
-              {{ !hasStarted ? '0 点/秒' : isCollecting ? ` ${pointsPerSecond} 点/秒` : '已暂停' }}
-            </span>
           </div>
           <div class="stat-item">
             <span>帧率</span>
@@ -77,6 +71,7 @@
 import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
+import { useFoldersStore } from '@/stores/folders'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
 // import { showToast } from '@/utils/toast'
 import { StatusBar } from '@capacitor/status-bar'
@@ -98,6 +93,7 @@ import * as filePathUtils from '@/utils/filePathUtils'
 import { showLoadingToast, closeToast, showToast } from 'vant'
 
 const bluetoothStore = useBluetoothStore()
+const folderStore = useFoldersStore()
 const router = useRouter()
 
 const container = ref(null)
@@ -130,6 +126,7 @@ const ACCUMULATION_INTERVAL = 33
 const MIN_BATCH_SIZE = 3
 let pauseListener = null
 let resumeListener = null
+let hasStarted = false
 
 // 设备断开相关状态
 const deviceDisconnected = ref(false)
@@ -154,16 +151,16 @@ const goBack = async () => {
 
   // 将清理操作延迟到下一个事件循环，避免阻塞路由返回
   setTimeout(() => {
-    cleanupResourcesForExit().catch(err => {
+    cleanupResourcesForExit().catch((err) => {
       console.error('[Pointcloud] 清理时发生错误', err)
     })
   }, 50)
 
   // 先判断是否需要删除
-  if (!savedDuringDialog.value && currentSessionId) {
-    setTimeout(async () => {
-      await delSessionDir()
-    }, 200)
+  if (!savedDuringDialog.value && currentSessionId && hasStarted) {
+    await delSessionDir()
+    // setTimeout(async () => {
+    // }, 200)
   }
 
   return navigationPromise
@@ -223,14 +220,16 @@ onUnmounted(async () => {
 })
 
 onBeforeRouteLeave(async (to, from, next) => {
-  if (isLeavingSession(to)) {
-   await delSessionDir()
+  if (isLeavingSession(to) && hasStarted) { // 如果是返回主页并且开始过采集，则删除多余文件夹
+    await delSessionDir()
   }
   await cleanupResourcesForExit()
   next()
 })
 
 async function init() {
+  // 每次初始化重置清理标志
+  _hasCleaned = false
   if (isRendererReady.value) return
   await lockToLandscape()
   await enableScreenKeepAwake()
@@ -284,7 +283,7 @@ function goToBatch(idx) {
 // 加载现有批次按钮（如果存在）
 async function loadBatchButtons() {
   if (!currentSessionId) return
-    // 如果未保存，尝试从临时文件夹加载
+  // 如果未保存，尝试从临时文件夹加载
   let folderToLoad = currentSessionId
   if (!savedDuringDialog.value) {
     folderToLoad = filePathUtils.getTempSessionName(currentSessionId)
@@ -385,7 +384,6 @@ function registerDisconnectListener() {
       // 意外断开：显示UI提示，停止采集
       deviceDisconnected.value = true
       isCollecting.value = false
-      // hasStarted.value = false
 
       // 停止订阅和清空累加器
       try {
@@ -412,7 +410,6 @@ watch(
         console.log('[PointCloudPage] 检测到全局连接状态变为未连接')
         deviceDisconnected.value = true
         isCollecting.value = false
-        // hasStarted.value = false
         try {
           bluetoothStore.setCleanupStatus(true) // 清理中
           await stopSessionParser() // 这里会取消订阅
@@ -454,9 +451,15 @@ async function cleanupResourcesForPause() {
 }
 
 // 路由切换时彻底清理资源
+let _hasCleaned = false
 async function cleanupResourcesForExit() {
+  if (_hasCleaned) {
+    console.log('[PointCloud] cleanupResourcesForExit 已执行过，忽略')
+    return
+  }
+  _hasCleaned = true
+
   try {
-    // await StatusBar.setOverlaysWebView({ overlay: false })
     // 延迟执行状态栏恢复，让页面先退出
     setTimeout(async () => {
       try {
@@ -471,7 +474,6 @@ async function cleanupResourcesForExit() {
     setTimeout(() => {
       setImmersive(false)
     }, 250)
-
   } catch (err) {
     console.warn('StatusBar restore overlays failed', err)
   }
@@ -508,7 +510,7 @@ async function cleanupResourcesForExit() {
 
   bluetoothStore.handleSendEnd()
   isCollecting.value = false
-  // hasStarted.value = false
+  hasStarted = false
   pointCount.value = 0
   dataBatchCounter.value = 0
   deviceDisconnected.value = false
@@ -651,6 +653,8 @@ function startSessionParser() {
       }
     }
   }, ACCUMULATION_INTERVAL)
+
+  hasStarted = true   // 表示是否开始过采集，如果没有则不用删除文件夹
 }
 
 async function startDataStream() {
@@ -694,10 +698,10 @@ const openSaveDialog = async () => {
   }
 
   // 检查整个项目是否有数据（所有点位）
-  // if (dataBatchCounter.value === 0) {
-  //   showToast('暂无数据可保存')
-  //   return
-  // }
+  if (dataBatchCounter.value === 0) {
+    showToast('暂无数据可保存')
+    return
+  }
 
   // await unlockOrientation()
   showSaveDialog.value = true
@@ -799,7 +803,6 @@ async function performSave(folderName) {
       if (tempName !== targetName) {
         await filePathUtils.renameSession(tempName, targetName)
         currentSessionId = targetName
-        // await folderStore.refreshFolders()
         console.log('[PointCloud] 开始刷新项目列表...')
         await folderStore.refreshFolders()
         console.log('[PointCloud] 刷新完成')
@@ -927,6 +930,9 @@ async function performSave(folderName) {
 // }
 
 async function stopSessionParser() {
+  if (!parser) {
+    return
+  }
   console.log('[stopSessionParser] Stopping parser and subscription...')
   if (accumulationTimer) {
     clearInterval(accumulationTimer)

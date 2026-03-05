@@ -91,13 +91,14 @@ export const useFoldersStore = defineStore('folders', () => {
   // 方法：加载项目文件夹
   async function loadProjectFolders(forceRefresh = false) {
     if (fetchPromise.value && !forceRefresh) {
+      // console.log('fetchPromise不为空')
       return fetchPromise.value
     }
 
     if (!forceRefresh && projectFolders.value.length > 0 && lastFetched.value) {
-      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
-      if (lastFetched.value > fiveMinutesAgo) {
-        console.log('[FoldersStore] 使用缓存的数据')
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000 // 计算5分钟前的时间戳
+      if (lastFetched.value > fiveMinutesAgo) {// 如果上次获取时间 > 5分钟前
+        // console.log('[FoldersStore] 使用缓存的数据')
         return projectFolders.value
       }
     }

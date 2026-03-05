@@ -260,9 +260,9 @@ onActivated(() => {
 }
 
 .title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: #2c3e50;
   line-height: 1.2;
   margin: 0 0 6px 0;
   display: block;
