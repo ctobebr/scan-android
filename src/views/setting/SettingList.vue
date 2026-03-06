@@ -494,8 +494,14 @@ const validateAndFormat = (category, field, decimals) => {
       errorMsg = validateNumber(value, field === 'pitchSpeed' ? 'Pitch速度' : 'Yaw速度')
       if (!errorMsg) {
         const num = parseFloat(value)
-        speedParams[field] = num.toFixed(decimals)
-        speedErrors[field] = ''
+        // 添加负数校验
+        if (num < 0) {
+          errorMsg = field === 'pitchSpeed' ? 'Pitch速度不能为负数' : 'Yaw速度不能为负数'
+          speedErrors[field] = errorMsg
+        } else {
+          speedParams[field] = num.toFixed(decimals)
+          speedErrors[field] = ''
+        }
       } else {
         speedErrors[field] = errorMsg
       }
