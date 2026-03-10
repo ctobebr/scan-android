@@ -8,11 +8,30 @@
         <button class="back-btn" @click="goBack" aria-label="Back">
           <img src="@/assets/img/back.png" alt="返回" />
         </button>
+
         <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
+
+        <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">预览</button>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
+
+        <div class="right-button-group">
+          <!-- <van-button
+            class="circle-btn edit-btn"
+            type="primary"
+            @click="handleEdit"
+          >
+        </van-button> -->
+
+        <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick"  alt="编辑" />
         <button class="capture-btn" @click="startDataStream"></button>
+        <img src="@/assets/img/setting.png" class="setIcon" @click="handleSettingClick" alt="设置" />
+
+        </div>
+        <!-- <van-button icon="edit" type="primary" />
+        <button class="capture-btn" @click="startDataStream"></button>
+        <van-button icon="setting" type="primary" /> -->
         <!-- <div class="data-stats top-center-stat">
           <div class="stat-item">
             <span>点云数量</span>
@@ -25,7 +44,7 @@
         </div> -->
 
         <!-- 注释点位，下周的进度搞这个 -->
-        <!-- <div class="batch-buttons-row">
+        <div class="batch-buttons-row">
           <button
             v-for="(b, idx) in batchButtons"
             :key="idx"
@@ -34,7 +53,7 @@
           >
             点位{{ idx + 1 }}
           </button>
-        </div> -->
+        </div>
         <div class="bottom-left-stat">
           <span>采集点位数：{{ dataBatchCounter }} / 50</span>
         </div>
@@ -228,6 +247,14 @@ onBeforeRouteLeave(async (to, from, next) => {
   await cleanupResourcesForExit()
   next()
 })
+
+const handleEditClick = () => {
+  console.log('handleEditClick')
+}
+
+const handleSettingClick = () => {
+  console.log('handleSettingClick')
+}
 
 async function init() {
   // 每次初始化重置清理标志
@@ -1040,6 +1067,7 @@ function isLeavingSession(to) {
 
 /* ========== 通用按钮样式 ========== */
 .back-btn,
+.preview-btn,
 .save-btn,
 .capture-btn,
 .batch-btn,
@@ -1146,12 +1174,80 @@ function isLeavingSession(to) {
   color: rgba(255, 255, 255, 0.6);
 }
 
-/* ========== 采集按钮 ========== */
-.capture-btn {
+/* ========== 预览按钮 ========== */
+.preview-btn {
+  position: absolute;
+  top: 16px;
+  right: calc(44px + 16px + 32px); /* 保存按钮宽度 + 保存按钮右侧间距 + 16px间隔 */
+  padding: 0 10px;
+  height: 28px;
+  min-width: 44px;
+  width: auto;
+  background: var(--brand-gradient);
+  border: none;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 12px var(--brand-glow);
+  pointer-events: auto;
+  z-index: 11;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  line-height: 1;
+}
+
+.preview-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #4d9eff, #2a7aff);
+  box-shadow: 0 6px 16px var(--brand-glow);
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.preview-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px var(--brand-glow);
+}
+
+.preview-btn:disabled {
+  background: rgba(42, 122, 255, 0.5);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ========== 右侧圆形按钮组 ========== */
+.right-button-group {
   position: absolute;
   right: 16px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 48px; /* 按钮之间的间距 */
+  pointer-events: none;
+  z-index: 11;
+}
+
+.editIcon,
+.setIcon {
+  width: 24px;
+  height: 24px;
+  pointer-events: auto;
+}
+
+/* ========== 采集按钮 ========== */
+.capture-btn {
+  position: relative;
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -1160,13 +1256,14 @@ function isLeavingSession(to) {
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.1), transparent 80%),
     var(--brand-gradient);
   pointer-events: auto;
-  z-index: 11;
   cursor: pointer;
   box-shadow: 0 6px 16px var(--brand-glow);
   border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
-.capture-btn::after {
+/* .capture-btn::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -1199,7 +1296,7 @@ function isLeavingSession(to) {
 
 .capture-btn:active:not(:disabled)::after {
   transform: translate(-50%, -50%) scale(0.9);
-}
+} */
 
 /* ========== 批次按钮行 ========== */
 .batch-buttons-row {
@@ -1548,6 +1645,7 @@ function isLeavingSession(to) {
 /* 禁用状态 */
 .save-actions button:disabled,
 .save-btn:disabled,
+.preview-btn:disabled,
 .disconnect-back-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1569,13 +1667,21 @@ function isLeavingSession(to) {
     top: 16px;
   }
 
-  .save-btn {
+  .save-btn,
+  .preview-btn {
     height: 26px;
     padding: 0 8px;
     min-width: 40px;
     font-size: 11px;
     top: 16px;
+  }
+
+  .save-btn {
     right: 16px;
+  }
+
+  .preview-btn {
+    right: calc(40px + 16px + 16px); /* 保存按钮宽度(40px) + 保存按钮右侧间距 + 16px间隔 */
   }
 
   .capture-btn {

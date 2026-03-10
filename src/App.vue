@@ -27,9 +27,10 @@ async function cleanupOrphanedSessions() {
       // 只删除临时文件夹（isTemp为true的）
       if (info.isTemp) {
         console.log('[App] 删除未保存的临时会话:', folderName)
-        await filePathUtils.deleteSession(folderName).catch(e => {
-          console.warn('[App] 删除失败', folderName, e)
-        })
+        // await filePathUtils.deleteSession(folderName).catch(e => {
+        //   console.warn('[App] 删除失败', folderName, e)
+        // })
+        // 暂时不删除临时文件夹，后期使用临时文件夹这个TEMP_PREFIX，去区分是已经保存的项目还是未保存的临时项目，以便临时项目继续编辑
       }
       // 纯会话ID（已保存）和项目名_会话ID都保留
     }

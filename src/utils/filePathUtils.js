@@ -77,7 +77,7 @@ export function parseFolderName(folderName) {
     result.sessionId = extractSessionIdFromTemp(folderName)
     result.displayName = '未保存项目'
     result.isTemp = true
-    result.shouldShow = false
+    // result.shouldShow = false  // 临时也暂时可见，后续可以继续编辑
     return result
   }
 
