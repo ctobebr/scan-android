@@ -14,7 +14,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
 import * as filePathUtils from '@/utils/filePathUtils'
-import { showToast } from '@/utils/toast'
+import { showLoadingToast, closeToast, showToast, showConfirmDialog } from 'vant'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,11 +42,11 @@ function reload() {
 async function removeBatch() {
   try {
     await filePathUtils.deleteBatch(sessionId, batchNum)
-    showToast('点位已删除')
+    showToast({ message: '点位已删除', position: 'bottom' })
     router.back()
   } catch (e) {
     console.error('删除批次失败', e)
-    showToast('删除失败')
+    showToast({ message: '删除失败', position: 'bottom' })
   }
 }
 

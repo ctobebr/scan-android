@@ -3,14 +3,12 @@ import { Filesystem, Directory } from '@capacitor/filesystem'
 import { parseSessionIdToFormattedTime } from './sessionIdUtils'
 import { Share } from '@capacitor/share'
 import { TEMP_PREFIX } from '@/constants/protocolCommands'
+import { POINTCLOUD_ROOT } from '@/constants/protocolCommands'
 
 // 所有文件操作都相对于 Directory.Documents 目录
 // 我们集中管理 pointcloud/session/batch 结构的路径构建
 
-/**
- * 顶层点云数据目录的路径
- */
-export const POINTCLOUD_ROOT = 'pointcloud'
+
 // ========== ：文件夹分类相关函数 ==========
 
 /**
@@ -79,7 +77,7 @@ export function parseFolderName(folderName) {
     result.sessionId = extractSessionIdFromTemp(folderName)
     result.displayName = '未保存项目'
     result.isTemp = true
-    result.shouldShow = false
+    // result.shouldShow = false  // 临时也暂时可见，后续可以继续编辑
     return result
   }
 

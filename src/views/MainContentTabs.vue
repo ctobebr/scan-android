@@ -159,12 +159,18 @@ onBeforeUnmount(() => {
 
 const handleStartRecord = () => {
   if (connectingStatus.value != 2) {
-    showToast('请先连接设备')
+    showToast({
+      message: '请先连接设备',
+      position: 'bottom',
+    })
     return
   }
   closeConnectionDialog()
   router.push('/pointCloud')
-  showToast('请旋转手机，并放置在云台上')
+  showToast({
+    message: '请旋转手机，并放置在云台上',
+    position: 'bottom',
+  })
 }
 
 const handleConnect = (device) => {
@@ -173,7 +179,10 @@ const handleConnect = (device) => {
 
 const handleDisconnect = (device) => {
   bluetoothStore.handleDisconnect(device)
-  showToast('已断开连接')
+  showToast({
+    message: '已断开连接',
+    position: 'bottom',
+  })
 }
 
 const baseTabs = [
@@ -237,7 +246,11 @@ const handleTabClick = (tab) => {
     // 检查是否触发彩蛋
     if (clickCount >= REQUIRED_CLICKS) {
       isSettingUnlocked.value = true
-      showToast('设置页面已解锁')  // 只提示一次
+      // 只提示一次
+      showToast({
+        message: '设置页面已解锁',
+        position: 'bottom',
+      })
       clickCount = 0
     }
   }

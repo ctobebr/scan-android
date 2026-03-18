@@ -2,7 +2,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
-import { showToast } from '@/utils/toast'
+import { showLoadingToast, closeToast, showToast, showConfirmDialog } from 'vant'
 
 export function usePointCloudRenderer(container) {
   // 定义场景，相机，渲染器
@@ -159,10 +159,9 @@ export function usePointCloudRenderer(container) {
 
     // 不能超出最大上限
     if (needed > MAX_POINTS) {
-      showToast(`点云数量已达上限 ${MAX_POINTS} 点`)
+      showToast({ message: `点云数量已达上限 ${MAX_POINTS} 点`, position: 'bottom' })
       throw new Error('capacity exceed')
     }
-
     // 扩容到至少 needed，通常按倍数增长
     let newCap = capacity
     while (newCap < needed) {
@@ -209,7 +208,7 @@ export function usePointCloudRenderer(container) {
         console.warn(
           `[Renderer] Point limit reached: current=${currentPointCount}, incoming=${newPoints.length}, max=${MAX_POINTS}`,
         )
-        showToast(`点云数量已达上限 ${MAX_POINTS} 点`)
+        showToast({ message: `点云数量已达上限 ${MAX_POINTS} 点`, position: 'bottom' })
         return
       }
 
@@ -250,7 +249,7 @@ export function usePointCloudRenderer(container) {
       pointsGeometry.setDrawRange(0, currentPointCount)
     } catch (err) {
       console.error('[Renderer] addPoints failed:', err)
-      showToast('点云数据异常，请重试')
+      showToast({ message: '点云数据异常，请重试', position: 'bottom' })
     }
   }
 
@@ -291,7 +290,7 @@ export function usePointCloudRenderer(container) {
         }
       } catch (err) {
         console.error('渲染循环崩溃:', err)
-        showToast('3D 渲染异常，请重启应用')
+        showToast({ message: '3D 渲染异常，请重启应用', position: 'bottom' })
         return // 停止循环
       }
       animate()

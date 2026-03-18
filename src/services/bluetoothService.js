@@ -117,7 +117,7 @@ export class BluetoothService {
               rawAdvertisement: result.rawAdvertisement,
             }
             this.devices.set(device.deviceId, device)
-            console.log('发现设备:', device.name, device.deviceId)
+            // console.log('发现设备:', device.name, device.deviceId)
           }
         })
       } catch (error) {

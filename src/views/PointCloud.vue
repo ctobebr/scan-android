@@ -8,11 +8,30 @@
         <button class="back-btn" @click="goBack" aria-label="Back">
           <img src="@/assets/img/back.png" alt="返回" />
         </button>
+
         <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
+
+        <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">预览</button>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
+
+        <div class="right-button-group">
+          <!-- <van-button
+            class="circle-btn edit-btn"
+            type="primary"
+            @click="handleEdit"
+          >
+        </van-button> -->
+
+        <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick"  alt="编辑" />
         <button class="capture-btn" @click="startDataStream"></button>
+        <img src="@/assets/img/setting.png" class="setIcon" @click="handleSettingClick" alt="设置" />
+
+        </div>
+        <!-- <van-button icon="edit" type="primary" />
+        <button class="capture-btn" @click="startDataStream"></button>
+        <van-button icon="setting" type="primary" /> -->
         <!-- <div class="data-stats top-center-stat">
           <div class="stat-item">
             <span>点云数量</span>
@@ -23,6 +42,8 @@
             <span id="storage-status">{{ frameRate }}</span>
           </div>
         </div> -->
+
+        <!-- 注释点位，下周的进度搞这个 -->
         <div class="batch-buttons-row">
           <button
             v-for="(b, idx) in batchButtons"
@@ -73,7 +94,6 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
-// import { showToast } from '@/utils/toast'
 import { StatusBar } from '@capacitor/status-bar'
 import { setImmersive } from '@/utils/immersive'
 import { bluetoothService } from '@/services/bluetoothService'
@@ -104,7 +124,7 @@ let pointCount = ref(0)
 let frameRate = ref(0)
 const isCollecting = ref(false)
 const saving = ref(false)
-let enableSave = false
+let enableSave = ref(false)
 const showSaveDialog = ref(false)
 const projectName = ref('')
 const saveInput = ref(null)
@@ -141,6 +161,7 @@ const batchButtons = ref([]) // 存储已经生成的点位序号
 
 // 删除事件监听器
 let batchDeletedListener = null
+let _hasCleaned = false
 const goBack = async () => {
   if (isNavigating.value) return
   isNavigating.value = true
@@ -228,6 +249,14 @@ onBeforeRouteLeave(async (to, from, next) => {
   next()
 })
 
+const handleEditClick = () => {
+  console.log('handleEditClick')
+}
+
+const handleSettingClick = () => {
+  console.log('handleSettingClick')
+}
+
 async function init() {
   // 每次初始化重置清理标志
   _hasCleaned = false
@@ -307,7 +336,7 @@ function resetForNewProject() {
   dataBatchCounter.value = 0
   batchButtons.value = []
   currentBatchData = { rawLines: [], photos: [] }
-  enableSave = false
+  enableSave.value = false
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
     pointCount.value = 0
@@ -396,7 +425,7 @@ function registerDisconnectListener() {
         bluetoothStore.setCleanupStatus(false) // 清理结束
       }
       // 显示提示
-      showToast('设备已断开连接', 3000)
+      showToast({ message: '设备已断开连接', position: 'bottom' })
     },
   )
 }
@@ -452,7 +481,7 @@ async function cleanupResourcesForPause() {
 }
 
 // 路由切换时彻底清理资源
-let _hasCleaned = false
+
 async function cleanupResourcesForExit() {
   if (_hasCleaned) {
     console.log('[PointCloud] cleanupResourcesForExit 已执行过，忽略')
@@ -536,17 +565,17 @@ async function handleAppResume() {
   // --- 结束：恢复前检查设备是否仍然连接 ---
 
   // 2. 如果之前正在采集，则尝试恢复订阅
-  if (wasCollectingBeforePause) {
-    // 确保渲染器和会话ID都存在
-    if (isRendererReady.value && currentSessionId) {
-      // 重新启动会话解析器（重新订阅、启动相机）
-      startSessionParser()
-    } else {
-      console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
-    }
-  } else {
-    console.log('[App] 上次未在采集状态，无需恢复')
-  }
+  // if (wasCollectingBeforePause) {
+  //   // 确保渲染器和会话ID都存在
+  //   if (isRendererReady.value && currentSessionId) {
+  //     // 重新启动会话解析器（重新订阅、启动相机）
+  //     startSessionParser()
+  //   } else {
+  //     console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
+  //   }
+  // } else {
+  //   console.log('[App] 上次未在采集状态，无需恢复')
+  // }
 }
 
 // 启动解析器并订阅蓝牙通知
@@ -609,11 +638,11 @@ function startSessionParser() {
 
       // 更新点位计数器
       dataBatchCounter.value++
-      enableSave = true
+      enableSave.value = true
 
       // 添加按钮表示新生成的点位
       batchButtons.value.push(dataBatchCounter.value)
-
+      isCollecting.value = false
       console.log('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
     },
   })
@@ -660,6 +689,10 @@ function startSessionParser() {
 }
 
 async function startDataStream() {
+  if (isCollecting.value) {
+    showToast({ message: '正在采集中...', position: 'bottom' })
+    return
+  }
   // 开始新点位采集前，清空渲染器中的点云
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
@@ -667,19 +700,19 @@ async function startDataStream() {
   }
 
   if (deviceDisconnected.value) {
-    showToast('设备已断开连接，请返回重连')
+    showToast({ message: '设备已断开连接，请返回重连', position: 'bottom' })
     return
   }
   if (bluetoothStore.connectingStatus !== 2) {
-    showToast('设备未连接')
+    showToast({ message: '设备未连接', position: 'bottom' })
     return
   }
   if (!isRendererReady.value) {
-    showToast('渲染器未准备好')
+    showToast({ message: '渲染器未准备好', position: 'bottom' })
     return
   }
   if (!currentSessionId) {
-    showToast('会话ID未生成')
+    showToast({ message: '会话ID未生成', position: 'bottom' })
     return
   }
 
@@ -695,13 +728,13 @@ async function startDataStream() {
 
 const openSaveDialog = async () => {
   if (!currentSessionId) {
-    showToast('会话ID未生成，无法保存')
+    showToast({ message: '会话ID未生成，无法保存', position: 'bottom' })
     return
   }
 
   // 检查整个项目是否有数据（所有点位）
   if (dataBatchCounter.value === 0) {
-    showToast('暂无数据可保存')
+    showToast({ message: '暂无数据可保存', position: 'bottom' })
     return
   }
 
@@ -726,13 +759,13 @@ const confirmSave = async () => {
   const name = (projectName.value || '').trim()
 
   if (name && name.length > 10) {
-    showToast('项目名称不能超过10个字符')
+    showToast({ message: '项目名称不能超过10个字符', position: 'bottom' })
     return
   }
 
   const validRe = /^[\u4e00-\u9fa5A-Za-z0-9 _-]*$/
   if (name && !validRe.test(name)) {
-    showToast('项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线')
+    showToast({ message: '项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线', position: 'bottom' })
     return
   }
 
@@ -818,7 +851,6 @@ async function performSave(folderName) {
     //   currentSessionId = folderName
     // }
 
-    // showToast('保存成功')
     showToast({
       message: '保存成功',
       position: 'bottom',
@@ -827,7 +859,10 @@ async function performSave(folderName) {
     lastSavedFolder.value = targetName
   } catch (error) {
     console.error('保存失败:', error)
-    showToast('保存失败：' + (error.message || '未知错误'))
+    showToast({
+      message: `保存失败：${error.message || '未知错误'}`,
+      position: 'bottom'
+    })
     throw error // 重新抛出错误以便上层捕获
   } finally {
     saving.value = false
@@ -930,6 +965,31 @@ async function performSave(folderName) {
 //     saving.value = false
 //   }
 // }
+
+async function stopSessionParser() {
+  if (!parser) {
+    return
+  }
+  console.log('[stopSessionParser] Stopping parser and subscription...')
+  if (accumulationTimer) {
+    clearInterval(accumulationTimer)
+    accumulationTimer = null
+  }
+  try {
+    const deviceId = bluetoothStore.connectingDeviceId
+    if (deviceId) {
+      await bluetoothService.unsubscribeFromNotifications(
+        deviceId,
+        NUS_SERVICE_UUID,
+        NUS_NOTIFY_CHAR_UUID,
+      )
+    }
+  } catch (e) {
+    console.warn('unsubscribe failed', e)
+  }
+  await cameraHelper.stopPreview().catch(() => {})
+  parser = null
+}
 // 判断是否真的是离开会话页面（返回主页）
 function isLeavingSession(to) {
   // 如果跳转到 BatchDetail，不是离开
@@ -1007,6 +1067,7 @@ function isLeavingSession(to) {
 
 /* ========== 通用按钮样式 ========== */
 .back-btn,
+.preview-btn,
 .save-btn,
 .capture-btn,
 .batch-btn,
@@ -1113,12 +1174,80 @@ function isLeavingSession(to) {
   color: rgba(255, 255, 255, 0.6);
 }
 
-/* ========== 采集按钮 ========== */
-.capture-btn {
+/* ========== 预览按钮 ========== */
+.preview-btn {
+  position: absolute;
+  top: 16px;
+  right: calc(44px + 16px + 32px); /* 保存按钮宽度 + 保存按钮右侧间距 + 16px间隔 */
+  padding: 0 10px;
+  height: 28px;
+  min-width: 44px;
+  width: auto;
+  background: var(--brand-gradient);
+  border: none;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 12px var(--brand-glow);
+  pointer-events: auto;
+  z-index: 11;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  line-height: 1;
+}
+
+.preview-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #4d9eff, #2a7aff);
+  box-shadow: 0 6px 16px var(--brand-glow);
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.preview-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px var(--brand-glow);
+}
+
+.preview-btn:disabled {
+  background: rgba(42, 122, 255, 0.5);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ========== 右侧圆形按钮组 ========== */
+.right-button-group {
   position: absolute;
   right: 16px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 48px; /* 按钮之间的间距 */
+  pointer-events: none;
+  z-index: 11;
+}
+
+.editIcon,
+.setIcon {
+  width: 24px;
+  height: 24px;
+  pointer-events: auto;
+}
+
+/* ========== 采集按钮 ========== */
+.capture-btn {
+  position: relative;
   width: 56px;
   height: 56px;
   border-radius: 50%;
@@ -1127,13 +1256,14 @@ function isLeavingSession(to) {
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.1), transparent 80%),
     var(--brand-gradient);
   pointer-events: auto;
-  z-index: 11;
   cursor: pointer;
   box-shadow: 0 6px 16px var(--brand-glow);
   border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
-.capture-btn::after {
+/* .capture-btn::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -1166,7 +1296,7 @@ function isLeavingSession(to) {
 
 .capture-btn:active:not(:disabled)::after {
   transform: translate(-50%, -50%) scale(0.9);
-}
+} */
 
 /* ========== 批次按钮行 ========== */
 .batch-buttons-row {
@@ -1515,6 +1645,7 @@ function isLeavingSession(to) {
 /* 禁用状态 */
 .save-actions button:disabled,
 .save-btn:disabled,
+.preview-btn:disabled,
 .disconnect-back-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -1536,13 +1667,21 @@ function isLeavingSession(to) {
     top: 16px;
   }
 
-  .save-btn {
+  .save-btn,
+  .preview-btn {
     height: 26px;
     padding: 0 8px;
     min-width: 40px;
     font-size: 11px;
     top: 16px;
+  }
+
+  .save-btn {
     right: 16px;
+  }
+
+  .preview-btn {
+    right: calc(40px + 16px + 16px); /* 保存按钮宽度(40px) + 保存按钮右侧间距 + 16px间隔 */
   }
 
   .capture-btn {

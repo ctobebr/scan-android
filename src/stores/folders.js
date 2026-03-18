@@ -1,6 +1,6 @@
 // stores/folders.js
 import { defineStore } from 'pinia'
-import { ref, computed, onScopeDispose } from 'vue'
+import { ref, computed, onScopeDispose, watch } from 'vue'
 import * as filePathUtils from '@/utils/filePathUtils'
 import { Capacitor } from '@capacitor/core'
 import noImg from '@/assets/img/noImg.png'
@@ -232,6 +232,39 @@ export const useFoldersStore = defineStore('folders', () => {
     projectFolders.value = projectFolders.value.filter((f) => f.name !== folderName)
   }
 
+  // 抛出给业务去判断当前刷新是否完毕
+  // function waitForRefresh(timeout = 10000) {
+  //   return new Promise((resolve, reject) => {
+  //     let stopWatch
+  //     let timer
+
+  //     const cleanup = () => {
+  //       if (timer) clearTimeout(timer)
+  //       if (stopWatch) stopWatch()
+  //     }
+
+  //     timer = setTimeout(() => {
+  //       cleanup()
+  //       reject(new Error('等待刷新超时'))
+  //     }, timeout)
+
+  //     // 监听 loading 变化
+  //     stopWatch = watch(loading, (newVal) => {
+  //       if (!newVal) {
+  //         // loading 结束
+  //         cleanup()
+  //         resolve()
+  //       }
+  //     })
+
+  //     // 如果已经不在 loading，立即 resolve
+  //     if (!loading.value) {
+  //       cleanup()
+  //       resolve()
+  //     }
+  //   })
+  // }
+
   function addFolder(folderData) {
     projectFolders.value.unshift(folderData)
   }
@@ -260,6 +293,7 @@ export const useFoldersStore = defineStore('folders', () => {
     refreshFolders,
     updateFolder,
     removeFolder,
+    // waitForRefresh,
     addFolder,
     clearFolders,
     cleanupEventListeners,
