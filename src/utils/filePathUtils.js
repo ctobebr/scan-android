@@ -467,7 +467,7 @@ export function dispatchFolderUpdate(type, data) {
  * @param {string} sessionID - 会话ID
  * @param {number|string} batchId - 批次计数器（如 1,2,3... 或补零后的字符串）
  * @param {string[]} dataLines - 要保存的数据行数组
- * @param {Array<{path?:string,base64?:string,name:string}>} photos - 照片信息数组
+ * @param {Array<{filePath?:string,base64?:string,name:string}>} photos - 照片信息数组，支持filePath（已保存）或base64（需保存）
  * @returns {Promise<{folder:string,batchFolder:string,filePath:string,photoPaths:string[],lineCount:number}>} 保存结果
  */
 export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
@@ -510,7 +510,17 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
   for (let i = 0; i < photos.length; i++) {
     const photo = photos[i]
     if (photo && typeof photo === 'object' && !Array.isArray(photo)) {
-      if (photo.base64 && typeof photo.base64 === 'string') {
+      // 情况1：照片已经保存在正确的位置（通过filePath指定）
+      if (photo.filePath && typeof photo.filePath === 'string') {
+        try {
+          const uri = await getUri(photo.filePath)
+          savedPhotoUris.push(uri.uri)
+        } catch (e) {
+          console.warn('获取照片URI失败', e)
+        }
+      }
+      // 情况2：照片通过base64数据提供（旧方式，兼容处理）
+      else if (photo.base64 && typeof photo.base64 === 'string') {
         const target = photo.name || `photo_${i}.jpg`
         const photoPath = `${sessionPath}/${batchFolderName}/${target}`
         try {

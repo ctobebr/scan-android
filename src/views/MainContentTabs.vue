@@ -158,13 +158,13 @@ onBeforeUnmount(() => {
 })
 
 const handleStartRecord = () => {
-  if (connectingStatus.value != 2) {
-    showToast({
-      message: '请先连接设备',
-      position: 'bottom',
-    })
-    return
-  }
+  // if (connectingStatus.value != 2) {
+  //   showToast({
+  //     message: '请先连接设备',
+  //     position: 'bottom',
+  //   })
+  //   return
+  // }
   closeConnectionDialog()
   router.push('/pointCloud')
   showToast({

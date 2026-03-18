@@ -279,6 +279,101 @@
         </div>
       </div> -->
 
+      <!-- PID参数设置卡片 -->
+      <div class="param-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="title-text">PID参数</span>
+          </div>
+          <van-button
+            size="small"
+            type="primary"
+            plain
+            @click="saveParam('pid')"
+            :loading="savingState.pid"
+            :disabled="deviceDisconnected || savingState.pid || !isPIDValid"
+            style="width: 64px;"
+            >保存</van-button
+          >
+        </div>
+
+        <div class="pid-selectors">
+          <div class="pid-selector-item">
+            <label>环类型</label>
+            <van-dropdown-menu>
+              <van-dropdown-item
+                v-model="pidSettings.loopType"
+                :options="loopTypeOptions"
+                @change="handlePIDSelectorChange"
+                :disabled="deviceDisconnected"
+              />
+            </van-dropdown-menu>
+          </div>
+          <div class="pid-selector-item">
+            <label>轴</label>
+            <van-dropdown-menu>
+              <van-dropdown-item
+                v-model="pidSettings.axis"
+                :options="axisOptions"
+                @change="handlePIDSelectorChange"
+                :disabled="deviceDisconnected"
+              />
+            </van-dropdown-menu>
+          </div>
+        </div>
+
+        <div class="pid-params">
+          <div class="pid-param-item">
+            <label>P</label>
+            <van-field
+              v-model="pidSettings.p"
+              type="text"
+              placeholder="0.00"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pid', 'p', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pidErrors.p"
+            />
+            <div v-if="pidErrors.p" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pidErrors.p }}
+            </div>
+          </div>
+          <div class="pid-param-item">
+            <label>I</label>
+            <van-field
+              v-model="pidSettings.i"
+              type="text"
+              placeholder="0.00"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pid', 'i', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pidErrors.i"
+            />
+            <div v-if="pidErrors.i" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pidErrors.i }}
+            </div>
+          </div>
+          <div class="pid-param-item">
+            <label>D</label>
+            <van-field
+              v-model="pidSettings.d"
+              type="text"
+              placeholder="0.00"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pid', 'd', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pidErrors.d"
+            />
+            <div v-if="pidErrors.d" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pidErrors.d }}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 底部双按钮行：刷新和恢复默认值 -->
       <div class="bottom-actions">
         <van-button
@@ -350,33 +445,53 @@ const isFromSaveAction = ref(false)
 
 // 参数数据  保留 2位小数
 const calibParams = reactive({
-  x: -52.52,
-  y: 10,
-  z: 1,
+  x: SETTING_DEFAULT_VALUES.CALIB.x,
+  y: SETTING_DEFAULT_VALUES.CALIB.y,
+  z: SETTING_DEFAULT_VALUES.CALIB.z,
   // pitch: 0.12,
   // roll: -0.05,
   // yaw: 1.47
 })
 // 保留 4位小数
 const speedParams = reactive({
-  pitchSpeed: 0.02,
-  yawSpeed: 0.00005,
+  pitchSpeed: SETTING_DEFAULT_VALUES.SPEED.pitch,
+  yawSpeed: SETTING_DEFAULT_VALUES.SPEED.yaw,
 })
 // 保留 0位小数
 const scanTime = ref({
-  seconds: 250,
+  seconds: SETTING_DEFAULT_VALUES.SCAN_TIME,
 })
 // 保留 2位小数 - 初始化时就格式化，修改 key 名以匹配返回的字段
 const pitchLimit = reactive({
-  upperLimitRad: (0.8 * 3.14).toFixed(2),
-  lowerLimitRad: (0.1 * 3.14).toFixed(2),
+  upperLimitRad: SETTING_DEFAULT_VALUES.PITCH_LIMIT.upper.toFixed(2),
+  lowerLimitRad: SETTING_DEFAULT_VALUES.PITCH_LIMIT.lower.toFixed(2),
 })
 
 // 输出格式设置
 const outputFormat = reactive({
-  xyz: true,
-  polar: false,
+  xyz: SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.xyz,
+  polar: SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar,
 })
+
+// PID参数设置
+const pidSettings = reactive({
+  loopType: SETTING_DEFAULT_VALUES.PID.loopType, // V: 速度环, A: 角度环
+  axis: SETTING_DEFAULT_VALUES.PID.axis, // X: X轴, Y: Y轴
+  p: SETTING_DEFAULT_VALUES.PID.p.toFixed(2),
+  i: SETTING_DEFAULT_VALUES.PID.i.toFixed(2),
+  d: SETTING_DEFAULT_VALUES.PID.d.toFixed(2)
+})
+
+// PID选项
+const loopTypeOptions = [
+  { text: '速度环(V)', value: 'V' },
+  { text: '角度环(A)', value: 'A' }
+]
+
+const axisOptions = [
+  { text: 'X轴', value: 'X' },
+  { text: 'Y轴', value: 'Y' }
+]
 
 // 保存状态
 const savingState = reactive({
@@ -385,6 +500,7 @@ const savingState = reactive({
   scan: false,
   pitchLimit: false,
   outputFormat: false, // 输出格式保存状态
+  pid: false // PID保存状态
 })
 
 // ========== 错误状态管理 ==========
@@ -406,6 +522,13 @@ const scanErrors = reactive({
 const pitchLimitErrors = reactive({
   upper: '',
   lower: '',
+})
+
+// PID错误状态
+const pidErrors = reactive({
+  p: '',
+  i: '',
+  d: ''
 })
 
 // ========== 计算属性 - 校验状态 ==========
@@ -436,6 +559,11 @@ const isPitchLimitValid = computed(() => {
 // 俯仰角限位是否有空值错误
 const hasPitchLimitEmptyError = computed(() => {
   return pitchLimitErrors.upper || pitchLimitErrors.lower
+})
+
+// PID参数是否有效
+const isPIDValid = computed(() => {
+  return !pidErrors.p && !pidErrors.i && !pidErrors.d
 })
 
 // ========== 校验函数 ==========
@@ -519,6 +647,19 @@ const validateAndFormat = (category, field, decimals) => {
       } else {
         if (field === 'upperLimitRad') pitchLimitErrors.upper = errorMsg
         if (field === 'lowerLimitRad') pitchLimitErrors.lower = errorMsg
+      }
+      break
+
+    case 'pid':
+      value = pidSettings[field]
+      const pidLabel = field.toUpperCase()
+      errorMsg = validateNumber(value, pidLabel)
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        pidSettings[field] = num.toFixed(decimals)
+        pidErrors[field] = ''
+      } else {
+        pidErrors[field] = errorMsg
       }
       break
   }
@@ -741,6 +882,12 @@ const init = async () => {
       },
       onOutputPolarResponse: (data) => {
         handleOutputPolarResponse(data)
+      },
+      onVPIDResponse: (data) => {
+        handleVPIDResponse(data)
+      },
+      onAPIDResponse: (data) => {
+        handleAPIDResponse(data)
       },
     })
 
@@ -970,6 +1117,42 @@ function handleOutputPolarResponse(data) {
   }
 }
 
+// 处理速度环PID响应
+function handleVPIDResponse(data) {
+  console.log('设置速度环PID成功', JSON.stringify(data))
+  if (data && typeof data === 'object') {
+    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(2)
+    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(2)
+    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(2)
+  }
+  // 清除对应字段的错误
+  pidErrors.p = ''
+  pidErrors.i = ''
+  pidErrors.d = ''
+  if (isFromSaveAction.value) {
+    showToast({ message: '速度环PID参数保存成功', position: 'bottom' })
+    isFromSaveAction.value = false // 重置标记
+  }
+}
+
+// 处理角度环PID响应
+function handleAPIDResponse(data) {
+  console.log('设置角度环PID成功', JSON.stringify(data))
+  if (data && typeof data === 'object') {
+    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(2)
+    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(2)
+    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(2)
+  }
+  // 清除对应字段的错误
+  pidErrors.p = ''
+  pidErrors.i = ''
+  pidErrors.d = ''
+  if (isFromSaveAction.value) {
+    showToast({ message: '角度环PID参数保存成功', position: 'bottom' })
+    isFromSaveAction.value = false // 重置标记
+  }
+}
+
 // 保存单个参数 - 移除 showToast 参数，不在发送后提示
 // 设置标记，表示这是来自保存操作的响应
 // 添加 silent 参数，用于控制是否显示提示（恢复默认值时使用）
@@ -1017,6 +1200,16 @@ const saveParam = async (type, silent = false) => {
         return
       }
       break
+
+    case 'pid':
+      validateAndFormat('pid', 'p', 2)
+      validateAndFormat('pid', 'i', 2)
+      validateAndFormat('pid', 'd', 2)
+      if (!isPIDValid.value) {
+        showToast({ message: '请填写正确的PID参数', position: 'bottom' })
+        return
+      }
+      break
   }
 
   try {
@@ -1052,6 +1245,24 @@ const saveParam = async (type, silent = false) => {
           parseFloat(pitchLimit.lowerLimitRad),
         )
         break
+
+      case 'pid':
+        if (pidSettings.loopType === 'V') {
+          await bluetoothStore.handleSendVPID(
+            pidSettings.axis,
+            parseFloat(pidSettings.p),
+            parseFloat(pidSettings.i),
+            parseFloat(pidSettings.d),
+          )
+        } else {
+          await bluetoothStore.handleSendAPID(
+            pidSettings.axis,
+            parseFloat(pidSettings.p),
+            parseFloat(pidSettings.i),
+            parseFloat(pidSettings.d),
+          )
+        }
+        break
     }
   } catch (error) {
     console.error(`保存${type}失败:`, error)
@@ -1062,6 +1273,22 @@ const saveParam = async (type, silent = false) => {
     }
   } finally {
     savingState[type] = false
+  }
+}
+
+// 处理PID选择器变更
+const handlePIDSelectorChange = async () => {
+  if (deviceDisconnected.value) return
+
+  try {
+    if (pidSettings.loopType === 'V') {
+      await bluetoothStore.handleReadVPID(pidSettings.axis)
+    } else {
+      await bluetoothStore.handleReadAPID(pidSettings.axis)
+    }
+  } catch (error) {
+    console.error('读取PID参数失败:', error)
+    showToast({ message: '读取PID参数失败', position: 'bottom' })
   }
 }
 
@@ -1127,6 +1354,10 @@ const resetToDefault = async () => {
     scanErrors.seconds = ''
     pitchLimitErrors.upper = ''
     pitchLimitErrors.lower = ''
+    // 清除PID错误
+    pidErrors.p = ''
+    pidErrors.i = ''
+    pidErrors.d = ''
 
     // 先更新UI显示为默认值并格式化
     calibParams.x = SETTING_DEFAULT_VALUES.CALIB.x.toFixed(2)
@@ -1145,15 +1376,24 @@ const resetToDefault = async () => {
     outputFormat.xyz = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.xyz
     outputFormat.polar = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar
 
+    // PID参数默认值
+    pidSettings.loopType = SETTING_DEFAULT_VALUES.PID.loopType
+    pidSettings.axis = SETTING_DEFAULT_VALUES.PID.axis
+    pidSettings.p = SETTING_DEFAULT_VALUES.PID.p.toFixed(2)
+    pidSettings.i = SETTING_DEFAULT_VALUES.PID.i.toFixed(2)
+    pidSettings.d = SETTING_DEFAULT_VALUES.PID.d.toFixed(2)
+
+
     // 使用 silent 模式调用保存函数，不触发单个提示
     await saveParam('calib', true)
     await saveParam('speed', true)
     await saveParam('scan', true)
     await saveParam('pitchLimit', true)
+    await saveParam('pid', true)
 
-    // 输出格式需要单独发送，也使用 silent 模式
-    await handleOutputChange('xyz', outputFormat.xyz, true)
-    await handleOutputChange('polar', outputFormat.polar, true)
+    // 输出格式需要单独发送，也使用 silent 模式----暂时不启用
+    // await handleOutputChange('xyz', outputFormat.xyz, true)
+    // await handleOutputChange('polar', outputFormat.polar, true)
 
     // 只保留这一个提示
     showToast({ message: '所有参数已恢复默认值', position: 'bottom' })
@@ -1180,8 +1420,12 @@ const readAllParams = async () => {
       bluetoothStore.handleReadRotateSpeed(),
       bluetoothStore.handleReadScanTime(),
       bluetoothStore.handleReadPitchLimit(),
-      bluetoothStore.handleReadOutputXYZ(),
+      // bluetoothStore.handleReadOutputXYZ(),
       bluetoothStore.handleReadOutputPolar(),
+      // 读取当前选中的PID参数
+      pidSettings.loopType === 'V' ?
+        bluetoothStore.handleReadVPID(pidSettings.axis) :
+        bluetoothStore.handleReadAPID(pidSettings.axis)
     ])
     // 只有一个提示
     showToast({ message: '参数已刷新', position: 'bottom' })
@@ -1413,6 +1657,120 @@ const handleManualRefresh = async () => {
   font-size: 11px;
   color: #999;
   margin-top: 2px;
+}
+
+/* PID参数设置样式 */
+.pid-selectors {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.pid-selector-item {
+  flex: 1;
+}
+
+.pid-selector-item label {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+  margin-left: 4px;
+}
+
+/* 下拉框样式 */
+:deep(.van-dropdown-menu) {
+  width: 100%;
+}
+
+:deep(.van-dropdown-menu__item) {
+  background-color: #f5f9ff;
+  border-radius: 12px;
+  padding: 8px 12px;
+  border: 1px solid #e6f0fa;
+  transition: all 0.2s;
+  font-size: 14px;
+  color: #2c3e50;
+  overflow: hidden;
+}
+
+:deep(.van-dropdown-menu__bar) {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+:deep(.van-dropdown-menu__item:focus) {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+:deep(.van-dropdown-menu__item:active) {
+  background-color: #e6f7ff;
+}
+
+:deep(.van-dropdown-menu__title) {
+  background-color: transparent;
+}
+
+:deep(.van-dropdown-menu__option) {
+  font-size: 14px;
+  color: #2c3e50;
+}
+
+:deep(.van-dropdown-menu__option--active) {
+  color: #1890ff;
+}
+
+/* 下拉框弹出层样式 - 使用van-popup类 */
+:deep(.van-dropdown-item .van-popup) {
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 40, 80, 0.12);
+  border: 1px solid rgba(24, 144, 255, 0.1);
+  background-color: white;
+  width: calc(50% - 30px) !important;
+  min-width: 120px;
+  max-width: 200px;
+  overflow: hidden;
+}
+
+/* 环类型下拉框位置 - 左侧 */
+:deep(.pid-selector-item:first-child .van-dropdown-item .van-popup) {
+  left: 16px !important;
+  right: auto !important;
+}
+
+/* 轴下拉框位置 - 右侧 */
+:deep(.pid-selector-item:last-child .van-dropdown-item .van-popup) {
+  left: auto !important;
+  right: 16px !important;
+}
+
+/* 下拉框内容区域 */
+:deep(.van-dropdown-item__content) {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* 下拉框遮罩层样式 - 透明背景 */
+:deep(.van-dropdown-item .van-overlay) {
+  background-color: transparent;
+}
+
+.pid-params {
+  display: flex;
+  gap: 12px;
+}
+
+.pid-param-item {
+  flex: 1;
+}
+
+.pid-param-item label {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+  margin-left: 4px;
 }
 
 /* 底部双按钮行 */

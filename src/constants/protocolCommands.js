@@ -40,6 +40,8 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_PITCH_LIMIT: 0x14, // 设置俯仰角上下限 (单位: 弧度 rad) data位长度8字节
   CMD_SET_OUTPUT_XYZ: 0x15, // 设置输出xyz data{bool:on/off}
   CMD_SET_OUTPUT_POLAR: 0x16, // 设置输出极坐标 data{bool:on/off}
+  CMD_SET_V_PID: 0x1E,        // 设置速度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节
+  CMD_SET_A_PID: 0x1F,        // 设置角度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节
 })
 // 设备 -> 上位机 的指令
 export const DEVICE_DATA_COMMANDS = Object.freeze({
@@ -52,6 +54,8 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_READ_PITCH_LIMIT: 0x34, // 读取俯仰角上下限 data位长度8字节
   CMD_READ_OUTPUT_XYZ: 0x35, // 是否是输出XYZ值 data{bool:on/off}
   CMD_READ_OUTPUT_POLAR: 0x36, // 是否是输出极坐标值 data{bool:on/off}
+  CMD_READ_V_PID: 0x3E,        // 读取速度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节
+  CMD_READ_A_PID: 0x3F,        // 读取角度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节
 
   CMD_CTRL_CAMERA: 0x81, // 控制上位机拍照（附带角度值回传）data{int:yaw,int:pitch}单位：弧度
   CMD_CTRL_CAMERA_COMPLETE: 0x82, // 自动拍摄任务完成
@@ -71,6 +75,13 @@ export const SETTING_DEFAULT_VALUES = {
     xyz: true,
     polar: false,
   },
+  PID: {
+    loopType: 'V', // 速度环
+    axis: 'X', // X轴
+    p: 0,
+    i: 0,
+    d: 0
+  }
 }
 
 /**

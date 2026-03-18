@@ -428,6 +428,94 @@ export const useBluetoothStore = defineStore('bluetooth', {
         throw err
       }
     },
+
+    /**
+     * 发送设置速度环PID指令
+     * @param {string} axis - 轴，'X'或'Y'
+     * @param {number} p - P参数
+     * @param {number} i - I参数
+     * @param {number} d - D参数
+     */
+    async handleSendVPID(axis, p, i, d) {
+      try {
+        await bluetoothService.sendSetVPID(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          axis,
+          p,
+          i,
+          d,
+        )
+        console.log('发送设置速度环PID指令成功')
+      } catch (err) {
+        console.log('发送设置速度环PID指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 发送设置角度环PID指令
+     * @param {string} axis - 轴，'X'或'Y'
+     * @param {number} p - P参数
+     * @param {number} i - I参数
+     * @param {number} d - D参数
+     */
+    async handleSendAPID(axis, p, i, d) {
+      try {
+        await bluetoothService.sendSetAPID(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          axis,
+          p,
+          i,
+          d,
+        )
+        console.log('发送设置角度环PID指令成功')
+      } catch (err) {
+        console.log('发送设置角度环PID指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 发送读取速度环PID指令
+     * @param {string} axis - 轴，'X'或'Y'
+     */
+    async handleReadVPID(axis) {
+      try {
+        await bluetoothService.sendReadVPID(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          axis,
+        )
+        console.log('发送读取速度环PID指令成功')
+      } catch (err) {
+        console.log('发送读取速度环PID指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 发送读取角度环PID指令
+     * @param {string} axis - 轴，'X'或'Y'
+     */
+    async handleReadAPID(axis) {
+      try {
+        await bluetoothService.sendReadAPID(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          axis,
+        )
+        console.log('发送读取角度环PID指令成功')
+      } catch (err) {
+        console.log('发送读取角度环PID指令失败：', err)
+        throw err
+      }
+    },
     // ==========结束： 读取参数方法 ==========
     setCleanupStatus(status) {
       this.isCleanupInProgress = status

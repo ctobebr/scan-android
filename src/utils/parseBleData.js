@@ -100,6 +100,8 @@ export class parseBleData {
 
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ]: this._handleReadOutputXYZ,
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR]: this._handleReadOutputPolar,
+      [DEVICE_DATA_COMMANDS.CMD_READ_V_PID]: this._handleReadVPID,
+      [DEVICE_DATA_COMMANDS.CMD_READ_A_PID]: this._handleReadAPID,
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
       // [CONTROL_COMMANDS.CMD_GET_POS]: this._handleGetPos,
       // [CONTROL_COMMANDS.CMD_SET_HOME]: this._handleSetHome,
@@ -203,7 +205,8 @@ export class parseBleData {
 
       // 转换为实际值（弧度 = int16_t / 1000.0）
       const yaw_rad = yaw_int16 / 1000.0 // 弧度
-      const pitch_rad = -pitch_int16 / 1000.0 + (68 / 180) * 3.1415926 // 弧度
+      // const pitch_rad = -pitch_int16 / 1000.0 + (68 / 180) * 3.1415926 // 弧度 目前每个结构的偏移角度都不一致，打算后期在下位机上去做这个角度偏移校准，上位机这边不再处理角度偏移------对于parseBinaryPointDataXYZ这部分也是直接收到的下位机已经处理过后，已经添加偏移的值
+      const pitch_rad = -pitch_int16 / 1000.0
       const distance_m = distance_u16 / 100.0 // 分米
       // const pitch_rad1 = -pitch_int16 / 1000.0  //
 
@@ -737,7 +740,6 @@ export class parseBleData {
    * @param {Uint8Array} data - 从蓝牙接收到的原始数据
    */
   _handleReadScanTime(data) {
-    console.log('_handleReadScanTime===', data.byteLength)
     if (data.byteLength !== 2) {
       console.warn('扫描时间数据长度错误，期望 2 字节，实际:', data.byteLength)
       return
@@ -808,6 +810,48 @@ export class parseBleData {
     console.log('✅ 收到下位机查询输出极坐标状态响应: status=' + status)
     if (this.options.onOutputPolarResponse) {
       this.options.onOutputPolarResponse({ status: status === 1 })
+    }
+  }
+
+  /**
+   * 处理读取速度环PID的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadVPID(data) {
+    if (data.byteLength !== 16) {
+      console.warn('速度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const axis = view.getUint32(0, true) // 0:X, 1:Y，小端序
+    const p = view.getFloat32(4, true)
+    const i = view.getFloat32(8, true)
+    const d = view.getFloat32(12, true)
+
+    console.log('✅ 收到下位机速度环PID响应: 轴=' + (axis === 0 ? 'X' : 'Y') + ', P=' + p + ', I=' + i + ', D=' + d)
+    if (this.options.onVPIDResponse) {
+      this.options.onVPIDResponse({ axis: axis === 0 ? 'X' : 'Y', p, i, d })
+    }
+  }
+
+  /**
+   * 处理读取角度环PID的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadAPID(data) {
+    if (data.byteLength !== 16) {
+      console.warn('角度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const axis = view.getUint32(0, true) // 0:X, 1:Y，小端序
+    const p = view.getFloat32(4, true)
+    const i = view.getFloat32(8, true)
+    const d = view.getFloat32(12, true)
+
+    console.log('✅ 收到下位机角度环PID响应: 轴=' + (axis === 0 ? 'X' : 'Y') + ', P=' + p + ', I=' + i + ', D=' + d)
+    if (this.options.onAPIDResponse) {
+      this.options.onAPIDResponse({ axis: axis === 0 ? 'X' : 'Y', p, i, d })
     }
   }
 

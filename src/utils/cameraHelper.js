@@ -1,6 +1,5 @@
 import { CameraPreview } from '@capacitor-community/camera-preview'
-// import { Filesystem, Directory } from '@capacitor/filesystem' // 不再需要直接写入
-import { bluetoothService } from '@/services/bluetoothService'
+import { Filesystem, Directory } from '@capacitor/filesystem'
 
 let isPreviewRunning = false
 
@@ -31,7 +30,7 @@ const cameraHelper = {
   async stopPreview() {
     if (!isPreviewRunning) {
       console.log('[CameraHelper] 相机未运行，无需停止')
-      return true // 视为成功
+      return true
     }
     try {
       await CameraPreview.stop()
@@ -46,21 +45,24 @@ const cameraHelper = {
   },
 
   /**
-   * 拍照并返回 base64 数据，fileBaseName 不带扩展名
-   * 返回 { fileName, base64Data }
-   * 照片不会立即写入磁盘，而是由保存函数统一处理
+   * 拍照并返回结果，文件保存在后台执行
+   * 确保拍照操作的实时性，避免文件写入阻塞主线程
+   * @param {string} fileBaseName - 文件名（不含扩展名）
+   * @param {string} targetDir - 目标目录路径（相对于Documents）
+   * @returns {Promise<{fileName: string, filePath: string}>} 照片信息
    */
-  async captureAndSave(fileBaseName) {
+  async captureAndSave(fileBaseName, targetDir) {
     if (!isPreviewRunning) {
       throw new Error('无法拍照：相机预览未启动')
     }
 
     const fileName = `${fileBaseName}.jpg`
+    const filePath = `${targetDir}/${fileName}`
 
-    // 优先使用 CameraPreview.capture
     try {
       console.log('====CameraPreview.capture')
       if (CameraPreview && typeof CameraPreview.capture === 'function') {
+        // 1. 立即捕获照片（实时性关键）
         const res = await CameraPreview.capture({ quality: 90 })
         let base64 = res?.value || res?.data || ''
         if (!base64) {
@@ -69,26 +71,44 @@ const cameraHelper = {
         if (base64.indexOf(',') !== -1) {
           base64 = base64.split(',')[1]
         }
-        // 不再写入 CameraPhotos 目录，直接返回 base64
-        return { fileName, base64Data: base64 }
+
+      // 2. 后台异步保存文件（不阻塞主线程）
+      setTimeout(async () => {
+        try {
+          // 确保目录存在（忽略已存在错误）
+          try {
+            await Filesystem.mkdir({
+              path: targetDir,
+              directory: Directory.Documents,
+              recursive: true,
+            })
+          } catch (mkdirErr) {
+            // 忽略目录已存在的错误，更宽松的错误处理
+            const errorMessage = String(mkdirErr.message || mkdirErr)
+            if (!errorMessage.toLowerCase().includes('exist')) {
+              throw mkdirErr
+            }
+          }
+
+          // 写入文件
+          await Filesystem.writeFile({
+            path: filePath,
+            data: base64,
+            directory: Directory.Documents,
+          })
+          console.log('[CameraHelper] 照片已后台保存:', filePath)
+        } catch (err) {
+          console.error('[CameraHelper] 后台保存照片失败:', err)
+        }
+      }, 0)
+        // 3. 立即返回结果，确保拍照实时性
+        console.log('[CameraHelper] 照片已捕获，正在后台保存')
+        return { fileName, filePath }
       }
     } catch (err) {
-      console.warn('使用 CameraPreview.capture 拍照失败，尝试回退到 Camera.getPhoto：', err)
+      console.warn('使用 CameraPreview.capture 拍照失败:', err)
+      throw err
     }
-
-    // 回退方案
-    // try {
-    //   console.log('====回退方案')
-    //   const dataUrl = await bluetoothService.takePhotoConfirmed()
-    //   if (!dataUrl) throw new Error('takePhotoConfirmed 未返回数据')
-    //   let base64 = dataUrl
-    //   if (base64.indexOf(',') !== -1) base64 = base64.split(',')[1]
-    //   // 不再写入 CameraPhotos 目录，直接返回 base64
-    //   return { fileName, base64Data: base64 }
-    // } catch (err) {
-    //   console.error('captureAndSave 回退方案也失败:', err)
-    //   throw err
-    // }
   },
 
   isRunning() {

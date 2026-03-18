@@ -586,6 +586,59 @@ export class BluetoothService {
       buffer,
     )
   }
+
+  /**
+   * 发送“设置速度环PID”指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {string} axis - 轴，'X'或'Y'
+   * @param {number} p - P参数 (float)
+   * @param {number} i - I参数 (float)
+   * @param {number} d - D参数 (float)
+   */
+  async sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
+    const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
+    const view = new DataView(buffer)
+    view.setUint32(0, axis === 'X' ? 0 : 1, true) // 轴值：X=0, Y=1，小端序
+    view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
+    view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
+    view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_V_PID,
+      buffer,
+    )
+  }
+
+  /**
+   * 发送“设置角度环PID”指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {string} axis - 轴，'X'或'Y'
+   * @param {number} p - P参数 (float)
+   * @param {number} i - I参数 (float)
+   * @param {number} d - D参数 (float)
+   */
+  async sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
+    const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
+    const view = new DataView(buffer)
+    view.setUint32(0, axis === 'X' ? 0 : 1, true) // 轴值：X=0, Y=1，小端序
+    view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
+    view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
+    view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_A_PID,
+      buffer,
+    )
+  }
+
   /**
    * 发送“控制上位机拍照”指令
    * @param {number} yaw - 偏航角 (弧度)
@@ -702,6 +755,46 @@ export class BluetoothService {
       characteristicUUID,
       DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR,
       null,
+    )
+  }
+
+  /**
+   * 发送“读取速度环PID”指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {string} axis - 轴，'X'或'Y'
+   */
+  async sendReadVPID(deviceId, serviceUUID, characteristicUUID, axis) {
+    const buffer = new ArrayBuffer(1) // 1 byte axis
+    const view = new Uint8Array(buffer)
+    view[0] = axis === 'X' ? 0 : 1 // 轴值：X=0, Y=1
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_V_PID,
+      buffer,
+    )
+  }
+
+  /**
+   * 发送“读取角度环PID”指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {string} axis - 轴，'X'或'Y'
+   */
+  async sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis) {
+    const buffer = new ArrayBuffer(1) // 1 byte axis
+    const view = new Uint8Array(buffer)
+    view[0] = axis === 'X' ? 0 : 1 // 轴值：X=0, Y=1
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_A_PID,
+      buffer,
     )
   }
 }

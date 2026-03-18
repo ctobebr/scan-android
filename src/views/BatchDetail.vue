@@ -12,7 +12,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
+import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'
 import * as filePathUtils from '@/utils/filePathUtils'
 import { showLoadingToast, closeToast, showToast, showConfirmDialog } from 'vant'
 

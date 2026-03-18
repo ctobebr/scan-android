@@ -11,7 +11,9 @@
 
         <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
 
-        <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">预览</button>
+        <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
+          预览
+        </button>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
@@ -24,10 +26,14 @@
           >
         </van-button> -->
 
-        <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick"  alt="编辑" />
-        <button class="capture-btn" @click="startDataStream"></button>
-        <img src="@/assets/img/setting.png" class="setIcon" @click="handleSettingClick" alt="设置" />
-
+          <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick" alt="编辑" />
+          <button class="capture-btn" @click="startDataStream"></button>
+          <img
+            src="@/assets/img/setting.png"
+            class="setIcon"
+            @click="handleSettingClick"
+            alt="设置"
+          />
         </div>
         <!-- <van-button icon="edit" type="primary" />
         <button class="capture-btn" @click="startDataStream"></button>
@@ -57,13 +63,15 @@
         <div class="bottom-left-stat">
           <span>采集点位数：{{ dataBatchCounter }} / 50</span>
         </div>
+        <!-- 内存调试按钮（仅开发环境显示） -->
+        <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button>
         <!-- 设备断开提示层 -->
-        <div v-if="deviceDisconnected" class="disconnect-overlay">
+        <!-- <div v-if="deviceDisconnected" class="disconnect-overlay">
           <div class="disconnect-message">
             <span>设备已断开连接</span>
             <button class="disconnect-back-btn" @click="goBack">返回</button>
           </div>
-        </div>
+        </div> -->
         <!-- 保存对话框 -->
         <div v-if="showSaveDialog" class="save-dialog-overlay">
           <div class="save-dialog-content">
@@ -93,7 +101,7 @@ import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'v
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
-import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer'
+import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'
 import { StatusBar } from '@capacitor/status-bar'
 import { setImmersive } from '@/utils/immersive'
 import { bluetoothService } from '@/services/bluetoothService'
@@ -137,14 +145,17 @@ let currentBatchData = {
   // 当前点位的数据
   rawLines: [],
   photos: [],
+  pointCount: 0, // 当前点位点云计数
 }
 let dataBatchCounter = ref(0) // 当前点位编号
 
 let parser = null
 const accumulationBuffer = []
+const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
+const MAX_POINTS_PER_BATCH = 500000 // 单个点位最大点云数
 let accumulationTimer = null
 const ACCUMULATION_INTERVAL = 33
-const MIN_BATCH_SIZE = 3
+const MIN_BATCH_SIZE = 3  //  进行渲染一次最少需要点数
 let pauseListener = null
 let resumeListener = null
 let hasStarted = false
@@ -162,6 +173,31 @@ const batchButtons = ref([]) // 存储已经生成的点位序号
 // 删除事件监听器
 let batchDeletedListener = null
 let _hasCleaned = false
+
+// 开发环境标志
+// const isDev = ref(import.meta.env.DEV)
+const isDev = true
+
+/**
+ * 显示内存统计信息
+ */
+const showMemoryStats = () => {
+  if (!renderer) {
+    showToast({ message: '渲染器未初始化', position: 'bottom' })
+    return
+  }
+
+  const stats = renderer.getMemoryStats()
+  const totalMB = (stats.totalActualSize / 1024 / 1024).toFixed(2)
+
+  console.log('[PointCloud Memory Stats]', JSON.stringify(stats))
+
+  showToast({
+    message: `点数: ${stats.currentPointCount}\n内存: ${totalMB}MB\n使用率: ${stats.utilizationRate}%`,
+    position: 'bottom',
+    duration: 3000,
+  })
+}
 const goBack = async () => {
   if (isNavigating.value) return
   isNavigating.value = true
@@ -242,7 +278,8 @@ onUnmounted(async () => {
 })
 
 onBeforeRouteLeave(async (to, from, next) => {
-  if (isLeavingSession(to) && hasStarted) { // 如果是返回主页并且开始过采集，则删除多余文件夹
+  if (isLeavingSession(to) && hasStarted) {
+    // 如果是返回主页并且开始过采集，则删除多余文件夹
     await delSessionDir()
   }
   await cleanupResourcesForExit()
@@ -287,7 +324,14 @@ async function init() {
 
   setTimeout(() => {
     if (container.value) {
-      renderer = usePointCloudRenderer(container.value)
+      // 可以传入自定义配置覆盖默认值，不传则使用默认配置
+      const customConfig = {
+        // maxPoints: 300000,        // 降低点云上限
+        // initialCapacity: 30000,   // 降低初始容量
+        // targetFps: 60,            // 提高帧率
+        // pointSize: 0.5,           // 增大点的大小
+      }
+      renderer = usePointCloudRenderer(container.value, customConfig)
       renderer.init()
       frameRate.value = 30
       isRendererReady.value = true
@@ -345,7 +389,7 @@ function resetForNewProject() {
 
 // 重置为新点位
 function resetForNewBatch() {
-  currentBatchData = { rawLines: [], photos: [] }
+  currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   accumulationBuffer.length = 0
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
@@ -382,7 +426,7 @@ async function saveCurrentBatch() {
     )
 
     // 清空当前点位数据（为下一个点位做准备）
-    currentBatchData = { rawLines: [], photos: [] }
+    currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   } catch (e) {
     console.error('[PointCloud] saveCurrentBatch error', e)
     throw e
@@ -488,6 +532,12 @@ async function cleanupResourcesForExit() {
     return
   }
   _hasCleaned = true
+
+  // 同步清理定时器，确保立即生效
+  if (accumulationTimer) {
+    clearInterval(accumulationTimer)
+    accumulationTimer = null
+  }
 
   try {
     // 延迟执行状态栏恢复，让页面先退出
@@ -612,11 +662,22 @@ function startSessionParser() {
         throw new Error('Device disconnected before taking photo.')
       }
       try {
-        const photoData = await cameraHelper.captureAndSave(fileBaseName + '====' + ++reNameFlag) // 修改照片命名，不影响缩略图选择
-        if (photoData && photoData.base64Data && photoData.fileName) {
+        // 构建目标目录路径：pointcloud/a7f3c9d1-{sessionId}/Batch_XXX
+        const tempFolderName = filePathUtils.getTempSessionName(currentSessionId)
+        const bid = dataBatchCounter.value
+        const targetDir = `pointcloud/${tempFolderName}/Batch_${String(bid).padStart(3, '0')}`
+
+        // 拍照并在后台保存（不阻塞主线程）
+        const photoData = await cameraHelper.captureAndSave(
+          fileBaseName + '====' + ++reNameFlag,
+          targetDir,
+        )
+
+        if (photoData && photoData.filePath && photoData.fileName) {
+          // 只保存文件路径，不保存base64数据
           currentBatchData.photos.push({
             name: photoData.fileName,
-            base64: photoData.base64Data,
+            filePath: photoData.filePath,
           })
           console.log(
             '[PointCloud] 照片已添加到当前点位，当前照片数:',
@@ -656,15 +717,37 @@ function startSessionParser() {
   bluetoothService
     .subscribeToNotifications(deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, (uint8) => {
       try {
+        // 检查单个点位点云数量上限
+        if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
+          return
+        }
+
         const { points, errors } = parser.parse(uint8)
         if (errors && errors.length > 0) {
           console.warn('parse errors', errors)
         }
         if (points && points.length > 0) {
+          // 检查缓冲区上限  超出上限时丢弃同等数量旧点位
+          if (accumulationBuffer.length > MAX_BUFFER_SIZE) {
+            const overflow = accumulationBuffer.length - MAX_BUFFER_SIZE + points.length
+            accumulationBuffer.splice(0, overflow)
+          }
+
           accumulationBuffer.push(...points)
           points.forEach((p) => {
+            // 保存所有接收到的点云坐标信息 ---- 渲染时可能会丢弃部分超过缓冲区上限的数据
             currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
           })
+          currentBatchData.pointCount += points.length
+
+          // 达到上限时停止采集并提示
+          if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
+            console.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
+            showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
+            stopSessionParser()
+            isCollecting.value = false
+            bluetoothStore.handleSendEnd()
+          }
         }
       } catch (e) {
         console.error('notification handler error', e)
@@ -683,9 +766,7 @@ function startSessionParser() {
     }
   }, ACCUMULATION_INTERVAL)
 
-  hasStarted = true   // 表示是否开始过采集，如果没有则不用删除文件夹
-  sessionService.setParser(parser)
-  sessionService.setAccumulationTimer(accumulationTimer)
+  hasStarted = true // 表示是否开始过采集，如果没有则不用删除文件夹
 }
 
 async function startDataStream() {
@@ -765,7 +846,10 @@ const confirmSave = async () => {
 
   const validRe = /^[\u4e00-\u9fa5A-Za-z0-9 _-]*$/
   if (name && !validRe.test(name)) {
-    showToast({ message: '项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线', position: 'bottom' })
+    showToast({
+      message: '项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线',
+      position: 'bottom',
+    })
     return
   }
 
@@ -861,7 +945,7 @@ async function performSave(folderName) {
     console.error('保存失败:', error)
     showToast({
       message: `保存失败：${error.message || '未知错误'}`,
-      position: 'bottom'
+      position: 'bottom',
     })
     throw error // 重新抛出错误以便上层捕获
   } finally {
@@ -1044,7 +1128,7 @@ function isLeavingSession(to) {
   flex: 1;
   width: 100%;
   position: relative;
-  background: transparent;
+  background: radial-gradient(#223344, #001122);
   overflow: hidden;
 }
 
@@ -1356,6 +1440,29 @@ function isLeavingSession(to) {
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
+}
+
+/* ========== 内存调试按钮 ========== */
+.debug-memory-btn {
+  position: absolute;
+  left: 16px;
+  bottom: 48px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.debug-memory-btn:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-active);
 }
 
 .top-center-stat {

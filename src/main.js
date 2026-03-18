@@ -7,7 +7,7 @@ import '@/styles/base.css'
 import * as filePathUtils from '@/utils/filePathUtils'
 
 // 按需引入
-import { Button, Cell, Field, Toast, Dialog, Switch } from 'vant'
+import { Button, Cell, Field, Toast, Dialog, Switch, DropdownMenu, DropdownItem } from 'vant'
 import 'vant/lib/index.css'
 // 防止系统扫描 Documents 目录中的媒体文件
 filePathUtils.ensureNoMedia('')
@@ -21,4 +21,6 @@ createApp(App)
   .use(Toast)
   .use(Dialog)
   .use(Switch)
+  .use(DropdownMenu)
+  .use(DropdownItem)
   .mount('#app')
