@@ -13,21 +13,21 @@
 
 <script setup>
 import { onMounted } from 'vue'
-import * as filePathUtils from '@/utils/filePathUtils'
+import * as storage from '@/api/pointCloudStorage'
 
 async function cleanupOrphanedSessions() {
   try {
     console.log('[App] 启动时清理孤儿会话...')
-    const folders = await filePathUtils.listPointCloudFolders(true)
+    const folders = await storage.session.listFolders(true)
 
     for (const folder of folders) {
       const folderName = folder.name
-      const info = filePathUtils.parseFolderName(folderName)
+      const info = storage.path.parseFolderName(folderName)
 
       // 只删除临时文件夹（isTemp为true的）
       if (info.isTemp) {
         console.log('[App] 删除未保存的临时会话:', folderName)
-        // await filePathUtils.deleteSession(folderName).catch(e => {
+        // await storage.session.delete(folderName).catch(e => {
         //   console.warn('[App] 删除失败', folderName, e)
         // })
         // 暂时不删除临时文件夹，后期使用临时文件夹这个TEMP_PREFIX，去区分是已经保存的项目还是未保存的临时项目，以便临时项目继续编辑

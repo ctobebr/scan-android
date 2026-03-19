@@ -328,9 +328,9 @@
             <van-field
               v-model="pidSettings.p"
               type="text"
-              placeholder="0.00"
+              placeholder="0.0000"
               inputmode="decimal"
-              @blur="() => validateAndFormat('pid', 'p', 2)"
+              @blur="() => validateAndFormat('pid', 'p', 4)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!pidErrors.p"
@@ -344,9 +344,9 @@
             <van-field
               v-model="pidSettings.i"
               type="text"
-              placeholder="0.00"
+              placeholder="0.0000"
               inputmode="decimal"
-              @blur="() => validateAndFormat('pid', 'i', 2)"
+              @blur="() => validateAndFormat('pid', 'i', 4)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!pidErrors.i"
@@ -360,9 +360,9 @@
             <van-field
               v-model="pidSettings.d"
               type="text"
-              placeholder="0.00"
+              placeholder="0.0000"
               inputmode="decimal"
-              @blur="() => validateAndFormat('pid', 'd', 2)"
+              @blur="() => validateAndFormat('pid', 'd', 4)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!pidErrors.d"
@@ -473,13 +473,13 @@ const outputFormat = reactive({
   polar: SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar,
 })
 
-// PID参数设置
+// PID参数设置 - 保留4位小数
 const pidSettings = reactive({
   loopType: SETTING_DEFAULT_VALUES.PID.loopType, // V: 速度环, A: 角度环
   axis: SETTING_DEFAULT_VALUES.PID.axis, // X: X轴, Y: Y轴
-  p: SETTING_DEFAULT_VALUES.PID.p.toFixed(2),
-  i: SETTING_DEFAULT_VALUES.PID.i.toFixed(2),
-  d: SETTING_DEFAULT_VALUES.PID.d.toFixed(2)
+  p: SETTING_DEFAULT_VALUES.PID.p.toFixed(4),
+  i: SETTING_DEFAULT_VALUES.PID.i.toFixed(4),
+  d: SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
 })
 
 // PID选项
@@ -1121,9 +1121,9 @@ function handleOutputPolarResponse(data) {
 function handleVPIDResponse(data) {
   console.log('设置速度环PID成功', JSON.stringify(data))
   if (data && typeof data === 'object') {
-    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(2)
-    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(2)
-    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(2)
+    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(4)
+    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(4)
+    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(4)
   }
   // 清除对应字段的错误
   pidErrors.p = ''
@@ -1139,9 +1139,9 @@ function handleVPIDResponse(data) {
 function handleAPIDResponse(data) {
   console.log('设置角度环PID成功', JSON.stringify(data))
   if (data && typeof data === 'object') {
-    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(2)
-    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(2)
-    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(2)
+    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(4)
+    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(4)
+    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(4)
   }
   // 清除对应字段的错误
   pidErrors.p = ''
@@ -1202,9 +1202,9 @@ const saveParam = async (type, silent = false) => {
       break
 
     case 'pid':
-      validateAndFormat('pid', 'p', 2)
-      validateAndFormat('pid', 'i', 2)
-      validateAndFormat('pid', 'd', 2)
+      validateAndFormat('pid', 'p', 4)
+      validateAndFormat('pid', 'i', 4)
+      validateAndFormat('pid', 'd', 4)
       if (!isPIDValid.value) {
         showToast({ message: '请填写正确的PID参数', position: 'bottom' })
         return
@@ -1376,12 +1376,12 @@ const resetToDefault = async () => {
     outputFormat.xyz = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.xyz
     outputFormat.polar = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar
 
-    // PID参数默认值
+    // PID参数默认值 - 保留4位小数
     pidSettings.loopType = SETTING_DEFAULT_VALUES.PID.loopType
     pidSettings.axis = SETTING_DEFAULT_VALUES.PID.axis
-    pidSettings.p = SETTING_DEFAULT_VALUES.PID.p.toFixed(2)
-    pidSettings.i = SETTING_DEFAULT_VALUES.PID.i.toFixed(2)
-    pidSettings.d = SETTING_DEFAULT_VALUES.PID.d.toFixed(2)
+    pidSettings.p = SETTING_DEFAULT_VALUES.PID.p.toFixed(4)
+    pidSettings.i = SETTING_DEFAULT_VALUES.PID.i.toFixed(4)
+    pidSettings.d = SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
 
 
     // 使用 silent 模式调用保存函数，不触发单个提示

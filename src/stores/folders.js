@@ -1,7 +1,7 @@
 // stores/folders.js
 import { defineStore } from 'pinia'
 import { ref, computed, onScopeDispose, watch } from 'vue'
-import * as filePathUtils from '@/utils/filePathUtils'
+import * as storage from '@/api/pointCloudStorage'
 import { Capacitor } from '@capacitor/core'
 import noImg from '@/assets/img/noImg.png'
 
@@ -108,7 +108,7 @@ export const useFoldersStore = defineStore('folders', () => {
     fetchPromise.value = (async () => {
       try {
         console.log('[FoldersStore] 开始加载项目文件夹')
-        const folders = await filePathUtils.listPointCloudFolders()
+        const folders = await storage.session.listFolders()
 
         const withDetails = await Promise.all(
           folders.map(async (folder) => {
@@ -123,7 +123,7 @@ export const useFoldersStore = defineStore('folders', () => {
 
             try {
               // 使用新的缩略图选择函数
-              const thumbResult = await filePathUtils.getProjectThumbnail(folder.name)
+              const thumbResult = await storage.exportData.getThumbnail(folder.name)
               hasPhoto = thumbResult.hasPhoto
               batchInfo = thumbResult.batchInfo
 
@@ -133,7 +133,7 @@ export const useFoldersStore = defineStore('folders', () => {
               }
 
               // 获取批次统计信息
-              batchStats = await filePathUtils.getProjectBatchInfo(folder.name)
+              batchStats = await storage.exportData.getBatchInfo(folder.name)
               totalPhotoCount = batchStats.reduce((sum, batch) => sum + batch.photoCount, 0)
             } catch (e) {
               console.warn(`[FoldersStore] 获取文件夹 ${folder.name} 缩略图失败:`, e)
@@ -151,7 +151,7 @@ export const useFoldersStore = defineStore('folders', () => {
             let fileCount = 0
 
             try {
-              const allPaths = await filePathUtils.listFilesRecursive(`pointcloud/${folder.name}`)
+              const allPaths = await storage.file.listRecursive(`pointcloud/${folder.name}`)
               hasFiles = allPaths && allPaths.length > 0
               fileCount = allPaths.length
 
@@ -159,7 +159,7 @@ export const useFoldersStore = defineStore('folders', () => {
                 const stats = []
                 for (const p of allPaths) {
                   try {
-                    const st = await filePathUtils.stat(p)
+                    const st = await storage.file.stat(p)
                     stats.push({ path: p, mtime: st.mtime || 0 })
                   } catch (e) {
                     // 忽略单个文件的失败

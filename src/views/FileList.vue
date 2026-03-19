@@ -42,7 +42,7 @@ import { showLoadingToast, closeToast, showToast, showConfirmDialog  } from 'van
 import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
 import { Share } from '@capacitor/share'
 import { useFoldersStore } from '@/stores/folders'
-import * as filePathUtils from '@/utils/filePathUtils'
+import * as storage from '@/api/pointCloudStorage'
 
 const folderStore = useFoldersStore()
 
@@ -150,12 +150,12 @@ const onShareClick = async (folderName, projectName, sessionId) => {
 
   try {
     // 递归检查项目文件夹是否为空（包括子文件夹）
-    const allFiles = await filePathUtils.listFilesRecursive(`pointcloud/${folderName}`)
+    const allFiles = await storage.file.listRecursive(`pointcloud/${folderName}`)
 
     // 空文件夹处理：询问是否删除
     if (!allFiles || allFiles.length === 0) {
       // 获取正确的显示名称用于确认对话框
-      const folderInfo = filePathUtils.parseFolderName(folderName)
+      const folderInfo = storage.path.parseFolderName(folderName)
       const displayName = folderInfo.displayName || folderName
 
       const confirmed = await showConfirmDialog({
@@ -172,7 +172,7 @@ const onShareClick = async (folderName, projectName, sessionId) => {
             forbidClick: true,
           })
 
-          await filePathUtils.deletePointCloudFolder(folderName)
+          await storage.session.deleteFolder(folderName)
 
           // 使用统一的等待刷新函数
           await waitForRefresh(10000)
@@ -211,10 +211,9 @@ const onShareClick = async (folderName, projectName, sessionId) => {
         allFiles.length,
     )
 
-    const res = await filePathUtils.zipSessionToFile(
+    const res = await storage.exportData.toZip(
       folderName,
-      zipBaseName,
-      allFiles  // 传入已获取的文件列表，避免二次递归
+      zipBaseName
     )
 
     console.log('[FileList] zipSessionToFile result', res)
@@ -277,7 +276,7 @@ const onDeleteClick = (fileNameOrFolder) => {
 
 const showMoreOptions = async (filename) => {
   const rel = (filename || '').replace('pointcloud/', '')
-  const folderInfo = filePathUtils.parseFolderName(rel)
+  const folderInfo = storage.path.parseFolderName(rel)
   const displayName = folderInfo.displayName || rel
 
   const confirmed = await showConfirmDialog({
@@ -328,7 +327,7 @@ const deleteFile = async (folderPath) => {
     })
 
     // 1. 执行删除
-    await filePathUtils.deletePointCloudFolder(relativePath)
+    await storage.session.deleteFolder(relativePath)
 
     // 2. 等待刷新完成 - 这里会等待 loading 变为 false
     // 但 refreshFolders() 内部调用 loadProjectFolders(true) 完成后才会把 loading 设为 false

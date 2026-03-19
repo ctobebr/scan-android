@@ -13,7 +13,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'
-import * as filePathUtils from '@/utils/filePathUtils'
+import * as storage from '@/api/pointCloudStorage'
 import { showLoadingToast, closeToast, showToast, showConfirmDialog } from 'vant'
 
 const router = useRouter()
@@ -28,7 +28,7 @@ let isRendererReady = ref(false)
 
 async function loadBatch() {
   if (!sessionId || !batchNum) return
-  const data = await filePathUtils.readBatch(sessionId, batchNum)
+  const data = await storage.batch.read(sessionId, batchNum)
   if (data && data.lines) {
     if (!renderer) return
     renderer.setData({ points: data.lines })
@@ -41,7 +41,7 @@ function reload() {
 
 async function removeBatch() {
   try {
-    await filePathUtils.deleteBatch(sessionId, batchNum)
+    await storage.batch.delete(sessionId, batchNum)
     showToast({ message: '点位已删除', position: 'bottom' })
     router.back()
   } catch (e) {

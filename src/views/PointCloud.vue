@@ -66,12 +66,12 @@
         <!-- 内存调试按钮（仅开发环境显示） -->
         <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button>
         <!-- 设备断开提示层 -->
-        <!-- <div v-if="deviceDisconnected" class="disconnect-overlay">
+        <div v-if="deviceDisconnected" class="disconnect-overlay">
           <div class="disconnect-message">
             <span>设备已断开连接</span>
             <button class="disconnect-back-btn" @click="goBack">返回</button>
           </div>
-        </div> -->
+        </div>
         <!-- 保存对话框 -->
         <div v-if="showSaveDialog" class="save-dialog-overlay">
           <div class="save-dialog-content">
@@ -117,9 +117,8 @@ import {
   disableScreenKeepAwake,
 } from '@/utils/screen'
 import { generateOptimizedSessionId } from '@/utils/sessionIdUtils'
-import * as filePathUtils from '@/utils/filePathUtils'
+import * as storage from '@/api/pointCloudStorage'
 import { showLoadingToast, closeToast, showToast } from 'vant'
-import sessionService from '@/services/sessionService'
 
 const bluetoothStore = useBluetoothStore()
 const folderStore = useFoldersStore()
@@ -216,7 +215,7 @@ const goBack = async () => {
 
   // 先判断是否需要删除
   if (!savedDuringDialog.value && currentSessionId && hasStarted) {
-    await delSessionDir()
+    // await delSessionDir()  // 没保存，先暂时不删除 3/19
     // setTimeout(async () => {
     // }, 200)
   }
@@ -280,7 +279,7 @@ onUnmounted(async () => {
 onBeforeRouteLeave(async (to, from, next) => {
   if (isLeavingSession(to) && hasStarted) {
     // 如果是返回主页并且开始过采集，则删除多余文件夹
-    await delSessionDir()
+    // await delSessionDir() // 没保存，暂时先不删除 3/19
   }
   await cleanupResourcesForExit()
   next()
@@ -332,6 +331,7 @@ async function init() {
         // pointSize: 0.5,           // 增大点的大小
       }
       renderer = usePointCloudRenderer(container.value, customConfig)
+
       renderer.init()
       frameRate.value = 30
       isRendererReady.value = true
@@ -360,13 +360,13 @@ async function loadBatchButtons() {
   // 如果未保存，尝试从临时文件夹加载
   let folderToLoad = currentSessionId
   if (!savedDuringDialog.value) {
-    folderToLoad = filePathUtils.getTempSessionName(currentSessionId)
+    folderToLoad = storage.path.getTempSessionName(currentSessionId)
   } else {
     // 已保存的会话，直接使用 currentSessionId
     folderToLoad = currentSessionId
   }
   try {
-    const list = await filePathUtils.listBatches(folderToLoad)
+    const list = await storage.batch.list(folderToLoad)
     batchButtons.value = list.map((_, idx) => idx + 1)
     dataBatchCounter.value = batchButtons.value.length
   } catch (e) {
@@ -379,7 +379,7 @@ async function loadBatchButtons() {
 function resetForNewProject() {
   dataBatchCounter.value = 0
   batchButtons.value = []
-  currentBatchData = { rawLines: [], photos: [] }
+  currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   enableSave.value = false
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
@@ -408,9 +408,9 @@ async function saveCurrentBatch() {
 
   try {
     // 使用临时文件夹名保存
-    const tempFolderName = filePathUtils.getTempSessionName(currentSessionId)
+    const tempFolderName = storage.path.getTempSessionName(currentSessionId)
     // 保存当前点位的数据到批次文件夹
-    await filePathUtils.saveBatch(
+    await storage.batch.save(
       tempFolderName,
       bid,
       currentBatchData.rawLines,
@@ -462,7 +462,7 @@ function registerDisconnectListener() {
       // 停止订阅和清空累加器
       try {
         bluetoothStore.setCleanupStatus(true) // 清理中
-        await sessionService.stopSessionParser() // 这里会取消订阅
+        await stopSessionParser() // 这里会取消订阅
       } catch (e) {
         console.warn('[PointCloudPage] 清理会话失败', e)
       } finally {
@@ -486,7 +486,7 @@ watch(
         isCollecting.value = false
         try {
           bluetoothStore.setCleanupStatus(true) // 清理中
-          await sessionService.stopSessionParser() // 这里会取消订阅
+          await stopSessionParser() // 这里会取消订阅
         } catch (e) {
           console.warn('[PointCloudPage] 清理会话失败', e)
         } finally {
@@ -507,7 +507,7 @@ async function cleanupResourcesForPause() {
   if (isCollecting.value) {
     try {
       bluetoothStore.setCleanupStatus(true) // 清理中
-      await sessionService.stopSessionParser() // 这里会取消订阅
+      await stopSessionParser() // 这里会取消订阅
     } catch (e) {
       console.warn('[PointCloudPage] 清理会话失败', e)
     } finally {
@@ -573,7 +573,7 @@ async function cleanupResourcesForExit() {
   await disableScreenKeepAwake()
   try {
     bluetoothStore.setCleanupStatus(true) // 清理中
-    await sessionService.stopSessionParser() // 这里会取消订阅
+    await stopSessionParser() // 这里会取消订阅
   } catch (e) {
     console.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
@@ -663,7 +663,7 @@ function startSessionParser() {
       }
       try {
         // 构建目标目录路径：pointcloud/a7f3c9d1-{sessionId}/Batch_XXX
-        const tempFolderName = filePathUtils.getTempSessionName(currentSessionId)
+        const tempFolderName = storage.path.getTempSessionName(currentSessionId)
         const bid = dataBatchCounter.value
         const targetDir = `pointcloud/${tempFolderName}/Batch_${String(bid).padStart(3, '0')}`
 
@@ -735,7 +735,7 @@ function startSessionParser() {
 
           accumulationBuffer.push(...points)
           points.forEach((p) => {
-            // 保存所有接收到的点云坐标信息 ---- 渲染时可能会丢弃部分超过缓冲区上限的数据
+            // 这里保存所有接收到的点云坐标信息 ---- 但是渲染时可能会丢弃部分超过缓冲区上限的数据
             currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
           })
           currentBatchData.pointCount += points.length
@@ -798,7 +798,7 @@ async function startDataStream() {
   }
 
   // 重置当前点位数据
-  currentBatchData = { rawLines: [], photos: [] }
+  currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   accumulationBuffer.length = 0
 
   isCollecting.value = true
@@ -891,8 +891,8 @@ const delSessionDir = async () => {
   if (!savedDuringDialog.value && currentSessionId && currentSessionId !== lastSavedFolder.value) {
     isDeletingSession = true
     try {
-      const folderToDelete = filePathUtils.getTempSessionName(currentSessionId)
-      await filePathUtils.deleteSession(folderToDelete)
+      const folderToDelete = storage.path.getTempSessionName(currentSessionId)
+      await storage.session.delete(folderToDelete)
       console.log('[Pointcloud] 未保存会话，已删除目录', folderToDelete)
     } catch (e) {
       console.warn('[Pointcloud] 删除未保存会话失败', e)
@@ -905,7 +905,7 @@ const delSessionDir = async () => {
 async function performSave(folderName) {
   saving.value = true
   try {
-    const tempName = filePathUtils.getTempSessionName(currentSessionId)
+    const tempName = storage.path.getTempSessionName(currentSessionId)
     // 确定目标文件夹名
     let targetName
     if (folderName && folderName !== currentSessionId) {
@@ -917,10 +917,10 @@ async function performSave(folderName) {
 
     // 检查临时文件夹是否存在，存在则重命名
     try {
-      await filePathUtils.stat(`pointcloud/${tempName}`)
+      await storage.file.stat(`pointcloud/${tempName}`)
 
       if (tempName !== targetName) {
-        await sessionService.renameSession(tempName, targetName)
+        await storage.session.rename(tempName, targetName)
         currentSessionId = targetName
         console.log('[PointCloud] 开始刷新项目列表...')
         await folderStore.refreshFolders()
@@ -931,7 +931,7 @@ async function performSave(folderName) {
     }
     // // 重命名会话文件夹
     // if (currentSessionId && folderName && folderName !== currentSessionId) {
-    //   await filePathUtils.renameSession(currentSessionId, folderName)
+    //   await storage.session.rename(currentSessionId, folderName)
     //   currentSessionId = folderName
     // }
 
@@ -945,110 +945,13 @@ async function performSave(folderName) {
     console.error('保存失败:', error)
     showToast({
       message: `保存失败：${error.message || '未知错误'}`,
-      position: 'bottom',
+      position: 'bottom'
     })
     throw error // 重新抛出错误以便上层捕获
   } finally {
     saving.value = false
   }
 }
-// async function performSave(folderName) {
-//   saving.value = true
-//   try {
-//     console.log(
-//       `[PointCloud] 开始保存，folderName: ${folderName}, currentSessionId: ${currentSessionId}`,
-//     )
-
-//     // 检查文件夹是否存在
-//     let folderExists = false
-//     try {
-//       await filePathUtils.stat(`pointcloud/${currentSessionId}`)
-//       folderExists = true
-//     } catch (e) {
-//       console.log('[PointCloud] 文件夹不存在:', currentSessionId)
-//     }
-
-//     // 如果用户输入了项目名称，才需要重命名
-//     const shouldRename =
-//       folderExists &&
-//       currentSessionId &&
-//       projectName.value && // 用户输入了项目名称
-//       folderName &&
-//       folderName !== currentSessionId
-
-//     if (shouldRename) {
-//       try {
-//         console.log(`[PointCloud] 尝试重命名: ${currentSessionId} -> ${folderName}`)
-//         if (!currentSessionId || !folderName) {
-//           console.warn(
-//             '[PointCloud] 重命名参数无效, currentSessionId or folderName 为空',
-//             currentSessionId,
-//             folderName,
-//           )
-//         }
-//         // 先检查目标文件夹是否已存在
-//         try {
-//           await filePathUtils.stat(`pointcloud/${folderName}`)
-//           console.error(`[PointCloud] 目标文件夹已存在: ${folderName}`)
-//           showToast(`项目名称 "${projectName.value}" 已存在，请使用其他名称`)
-//           throw new Error(`项目名称已存在`)
-//         } catch (e) {
-//           // 如果错误是"不存在"，这是期望的
-//           if (e.message?.includes('does not exist') || e.message?.includes('ENOENT')) {
-//             console.log(`[PointCloud] 目标文件夹不存在，可以重命名`)
-//           } else if (e.message?.includes('已存在')) {
-//             // 如果是我们主动抛出的错误，直接抛出
-//             throw e
-//           } else {
-//             // 其他错误，忽略（可能是文件夹不存在）
-//           }
-//         }
-
-//         await filePathUtils.renameSession(currentSessionId, folderName)
-//         currentSessionId = folderName
-//         console.log('[PointCloud] 重命名成功')
-//       } catch (renameError) {
-//         console.error('[PointCloud] 重命名失败:', renameError)
-//         showToast('重命名项目失败: ' + renameError.message)
-//         throw renameError
-//       }
-//     } else if (
-//       !folderExists &&
-//       (currentBatchData.rawLines.length > 0 || currentBatchData.photos.length > 0)
-//     ) {
-//       console.log('[PointCloud] 文件夹不存在，创建新会话')
-
-//       const newSessionId = generateOptimizedSessionId()
-//       const finalFolderName = projectName.value
-//         ? `${projectName.value}_${newSessionId}`
-//         : newSessionId
-
-//       console.log(`[PointCloud] 创建新会话: ${finalFolderName}`)
-
-//       await filePathUtils.saveBatch(
-//         finalFolderName,
-//         1,
-//         currentBatchData.rawLines,
-//         currentBatchData.photos,
-//       )
-
-//       currentSessionId = finalFolderName
-//     } else {
-//       console.log('[PointCloud] 无需重命名，直接使用现有文件夹')
-//     }
-
-//     showToast('保存成功')
-//     savedDuringDialog.value = true
-//     lastSavedFolder.value = folderName
-//     closeSaveDialog()
-//     router.back()
-//   } catch (error) {
-//     console.error('保存失败:', error)
-//     showToast('保存失败：' + (error.message || '未知错误'))
-//   } finally {
-//     saving.value = false
-//   }
-// }
 
 async function stopSessionParser() {
   if (!parser) {
@@ -1059,6 +962,7 @@ async function stopSessionParser() {
     clearInterval(accumulationTimer)
     accumulationTimer = null
   }
+  accumulationBuffer.length = 0
   try {
     const deviceId = bluetoothStore.connectingDeviceId
     if (deviceId) {
@@ -1073,6 +977,7 @@ async function stopSessionParser() {
   }
   await cameraHelper.stopPreview().catch(() => {})
   parser = null
+  isCollecting.value = false
 }
 // 判断是否真的是离开会话页面（返回主页）
 function isLeavingSession(to) {
