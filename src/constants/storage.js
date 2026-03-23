@@ -1,6 +1,8 @@
 /**
- * @fileoverview 文件系统相关常量配置
+ * @fileoverview 存储相关常量配置
  * 集中管理文件系统操作的所有配置参数
+ *
+ * @module @/constants/storage
  */
 
 // ========== 路径相关常量 ==========
@@ -84,18 +86,6 @@ export const MAX_RECURSION_DEPTH = 100
  */
 export const MAX_BATCH_SIZE = 1000
 
-/**
- * 最大文件列表缓存大小
- * @constant {number}
- */
-export const MAX_CACHE_SIZE = 100
-
-/**
- * 缓存存活时间（毫秒）
- * @constant {number}
- */
-export const CACHE_TTL = 60000
-
 // ========== 重试机制配置 ==========
 
 /**
@@ -155,21 +145,10 @@ export const FeatureFlags = {
   ENABLE_DETAILED_LOGGING: true
 }
 
-// ========== 日志相关常量 ==========
-
-/**
- * 日志级别
- * @constant {Object}
- */
-export const LogLevels = {
-  DEBUG: 'debug',
-  INFO: 'info',
-  WARN: 'warn',
-  ERROR: 'error'
-}
+// ========== 模块名称（用于日志前缀）==========
 
 /**
  * 模块名称（用于日志前缀）
  * @constant {string}
  */
-export const MODULE_NAME = 'filePathUtils'
+export const MODULE_NAME = 'storage'

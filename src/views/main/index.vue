@@ -84,23 +84,23 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, onActivated, defineOptions, onBeforeUnmount, watch } from 'vue'
+defineOptions({
+  name: 'MainView'
+})
+
+import { ref, onMounted, computed, onActivated, onBeforeUnmount, watch } from 'vue'
 import FileList from './FileList.vue'
 import ProjectList from './ProjectList.vue'
-import SettingList from './setting/SettingList.vue'
-import { bluetoothService } from '@/services/bluetoothService'
-// import { showToast } from '@/utils/toast'
+import SettingList from '@/views/settings/index.vue'
+import { bluetoothService } from '@/services/bluetooth'
+// import { showToast } from '@/utils/ui/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { lockToPortrait } from '@/utils/screen'
+import { lockToPortrait } from '@/utils/device/screen'
 import { StatusBar } from '@capacitor/status-bar'
 import { showLoadingToast, closeToast, showToast } from 'vant'
-
-defineOptions({
-  name: 'MainContentTabs',
-})
 
 const router = useRouter()
 const bluetoothStore = useBluetoothStore()
@@ -108,9 +108,9 @@ const folderStore = useFoldersStore()
 
 const { devices, scanning, connectingStatus, connectingDeviceId } = storeToRefs(bluetoothStore)
 
-// 计算属性：过滤掉 name 为 "N/A" 的设备
+// 计算属性：只显示 name 不为 "N/A" 且包含 "Luo" 的设备
 const filteredDevices = computed(() => {
-  return devices.value.filter((device) => device.name !== 'N/A')
+  return devices.value.filter((device) => device.name !== 'N/A' && device.name.includes('Luo'))
 })
 
 // ========== 监听连接状态变化，更新设备列表中的显示 ==========
@@ -128,7 +128,7 @@ onMounted(async () => {
   await StatusBar.setBackgroundColor({ color: '#e6f7ff' })
   bluetoothStore.autoScanOnEnter()
 
-  // 使用 store 加载项目文件夹列表，maincontenttabs作为容器，负责整体数据管理和初始化，逻辑上看不放在其下的动态组件中去做会更好一点
+  // 使用 store 加载项目文件夹列表，MainView作为容器，负责整体数据管理和初始化，逻辑上看不放在其下的动态组件中去做会更好一点
   await folderStore.loadProjectFolders()
 
   // 如果显示已连接，但实际可能已断开，做个状态校验
@@ -166,7 +166,7 @@ const handleStartRecord = () => {
     return
   }
   closeConnectionDialog()
-  router.push('/pointCloud')
+  router.push({ name: 'PointCloud' })
   showToast({
     message: '请旋转手机，并放置在云台上',
     position: 'bottom',

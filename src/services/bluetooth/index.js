@@ -1,12 +1,19 @@
-// src/services/bluetoothService.js
+/**
+ * @fileoverview 蓝牙服务
+ *
+ * 提供蓝牙设备的扫描、连接、通信等功能。
+ * 基于 @capacitor-community/bluetooth-le 插件。
+ *
+ * @module @/services/bluetooth
+ */
+
 import { BluetoothLe, BleClient } from '@capacitor-community/bluetooth-le'
-// ========== 协议常量 ==========
 import {
   PROTOCOL_HEADER_HIGH,
   PROTOCOL_HEADER_LOW,
   CONTROL_COMMANDS,
   DEVICE_DATA_COMMANDS,
-} from '@/constants/protocolCommands'
+} from '@/constants/bluetooth'
 
 /**
  * 构造符合协议的完整帧（含校验和）
@@ -34,6 +41,7 @@ function buildProtocolFrame(cmd, data = []) {
 
   return new Uint8Array(frame)
 }
+
 export class BluetoothService {
   constructor() {
     this.connectedDevice = null
@@ -417,7 +425,7 @@ export class BluetoothService {
     )
   }
   /**
-   * 发送“启动扫描”指令：AA55 01 00 [checksum]
+   * 发送"启动扫描"指令：AA55 01 00 [checksum]
    * 根据协议，CMD=0x01, LEN=0, DATA=[]
    */
   async sendStartScan(deviceId, serviceUUID, characteristicUUID) {
@@ -431,7 +439,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“停止扫描”指令：AA55 02 00 [checksum]
+   * 发送"停止扫描"指令：AA55 02 00 [checksum]
    */
   async sendStopScan(deviceId, serviceUUID, characteristicUUID) {
     await this.sendCommand(
@@ -443,25 +451,7 @@ export class BluetoothService {
     )
   }
   /**
-   * 发送“转动到目标点”指令
-   * @param {number} targetAngleRad - 目标角度 (弧度)
-   */
-  // async sendRotateToTarget(deviceId, serviceUUID, characteristicUUID, targetAngleRad) {
-  //   // 根据下位机代码中的 radiansToU16 函数，角度值需转换为 int16_t (弧度 * 1000)
-  //   const int16Angle = Math.round(targetAngleRad * 1000)
-  //   const buffer = new ArrayBuffer(2) // 1 int16_t * 2 bytes
-  //   const view = new DataView(buffer)
-  //   view.setInt16(0, int16Angle, true) // 小端序，使用 setInt16
-  //   await this.sendCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     CONTROL_COMMANDS.CMD_ROTATE_TO_TARGET,
-  //     buffer,
-  //   )
-  // }
-  /**
-   * 发送“设置标定参数”指令
+   * 发送"设置标定参数"指令
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -484,7 +474,7 @@ export class BluetoothService {
     )
   }
   /**
-   * 发送“设置转动速度”指令
+   * 发送"设置转动速度"指令
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -506,7 +496,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“设置扫描时间”指令
+   * 发送"设置扫描时间"指令
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -526,7 +516,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“设置俯仰角上下限”指令
+   * 发送"设置俯仰角上下限"指令
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -548,7 +538,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“设置输出XYZ值”指令
+   * 发送"设置输出XYZ值"指令
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -568,7 +558,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“设置输出极坐标值”指令
+   * 发送"设置输出极坐标值"指令
    * @param {number} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -588,7 +578,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“设置速度环PID”指令
+   * 发送"设置速度环PID"指令
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -614,7 +604,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“设置角度环PID”指令
+   * 发送"设置角度环PID"指令
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -638,26 +628,6 @@ export class BluetoothService {
       buffer,
     )
   }
-
-  /**
-   * 发送“控制上位机拍照”指令
-   * @param {number} yaw - 偏航角 (弧度)
-   * @param {number} pitch - 俯仰角 (弧度)
-   */
-  // async sendCtrlCamera(deviceId, serviceUUID, characteristicUUID, yaw, pitch) {
-  //   // 协议明确指出 data{float:yaw,float:pitch}
-  //   const buffer = new ArrayBuffer(8) // 2 float32 * 4 bytes
-  //   const view = new DataView(buffer)
-  //   view.setFloat32(0, yaw, true) // 小端序
-  //   view.setFloat32(4, pitch, true) // 小端序
-  //   await this.sendCommand(
-  //     deviceId,
-  //     serviceUUID,
-  //     characteristicUUID,
-  //     DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA,
-  //     buffer,
-  //   )
-  // }
 
   /**
    * 发送读取参数指令 (无数据)
@@ -759,7 +729,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“读取速度环PID”指令
+   * 发送"读取速度环PID"指令
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
@@ -779,7 +749,7 @@ export class BluetoothService {
   }
 
   /**
-   * 发送“读取角度环PID”指令
+   * 发送"读取角度环PID"指令
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID

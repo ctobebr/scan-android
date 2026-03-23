@@ -5,14 +5,14 @@
  */
 
 import { Share } from '@capacitor/share'
-import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
+import { parseSessionIdToFormattedTime } from '@/utils/format/sessionId'
 import {
   POINTCLOUD_ROOT,
   ErrorCodes,
   MODULE_NAME,
   FeatureFlags,
   IMAGE_EXTENSIONS
-} from '@/constants/fileSystem'
+} from '@/constants/storage'
 import {
   FilePathError,
   validateSessionId,
@@ -20,7 +20,7 @@ import {
   sanitizePath,
   validatePhotosArray,
   validateDataLines
-} from '@/utils/validators'
+} from '@/utils/storage/validate'
 import {
   sessionFolder,
   batchFolder,
@@ -32,7 +32,7 @@ import {
   normalizeBatchId,
   extractBatchNumber,
   isImageFile
-} from '@/utils/pathUtils'
+} from '@/utils/storage/path'
 import {
   readFile,
   writeFile,
@@ -46,7 +46,7 @@ import {
   ensureNoMedia,
   rename,
   exists
-} from './fileSystemService'
+} from './fileSystem'
 
 // ========== 日志工具 ==========
 const logger = {

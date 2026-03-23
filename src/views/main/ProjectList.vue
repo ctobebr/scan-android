@@ -69,7 +69,7 @@ const projectListItems = computed(() => {
 onMounted(() => {
   // 组件挂载时，如果 store 还没有数据，则加载
   if (folderStore.projectFolders.length === 0) {
-    //  folderStore.loadProjectFolders()   //maincontenttabs中在挂载时会加载文件夹，而projectlist作为maincontenttabs的默认动态组件，此处应该可以暂时不再去重新加载文件夹
+    //  folderStore.loadProjectFolders()   //MainView中在挂载时会加载文件夹，而projectlist作为MainView的默认动态组件，此处应该可以暂时不再去重新加载文件夹
   }
 })
 onActivated(() => {

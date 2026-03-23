@@ -14,8 +14,8 @@
  * 校验和计算：
  *   只对 CMD + Length + Data 三部分求和，取低 8 位
  */
-import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from '@/constants/protocolCommands'
-// import { bluetoothService } from '@/services/bluetoothService'
+import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from '@/constants/bluetooth'
+// import { bluetoothService } from '@/services/bluetooth'
 
 // helper to convert Uint8Array to hex string
 function uint8ArrayToHex(arr) {

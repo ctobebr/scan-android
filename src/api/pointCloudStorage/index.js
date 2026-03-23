@@ -21,13 +21,16 @@
  * │   ├── validate.js          # 验证工具命名空间
  * │   └── README.md            # API使用文档
  * ├── services/                # Service 层 - 业务逻辑
- * │   ├── fileSystemService.js
- * │   └── pointCloudService.js
+ * │   └── storage/
+ * │       ├── fileSystem.js
+ * │       └── pointCloud.js
  * ├── utils/                   # Util 层 - 纯工具函数
- * │   ├── pathUtils.js
- * │   └── validators.js
+ * │   └── storage/
+ * │       ├── path.js
+ * │       └── validate.js
  * └── constants/               # 常量层
- *     └── fileSystem.js
+ *     ├── storage.js
+ *     └── bluetooth.js
  * ```
  *
  * ## 使用方式
@@ -66,7 +69,7 @@ import {
   deleteSession as sessionDelete,
   deletePointCloudFolder as sessionDeleteFolder,
   ensureSessionDir as sessionEnsureDir,
-} from '@/services/pointCloudService'
+} from '@/services/storage/pointCloud'
 
 /**
  * 会话管理命名空间
@@ -100,7 +103,7 @@ import {
   deleteBatch as batchDelete,
   reindexBatches as batchReindex,
   ensureBatchDir as batchEnsureDir,
-} from '@/services/pointCloudService'
+} from '@/services/storage/pointCloud'
 
 /**
  * 批次管理命名空间
@@ -143,7 +146,7 @@ import {
   exists as fileExists,
   copyFile as fileCopy,
   move as fileMove,
-} from '@/services/fileSystemService'
+} from '@/services/storage/fileSystem'
 
 /**
  * 文件操作命名空间
@@ -195,7 +198,7 @@ import {
   getProjectThumbnail as exportGetThumbnail,
   getProjectBatchInfo as exportGetBatchInfo,
   getFirstPhotoUri as exportGetFirstPhotoUri,
-} from '@/services/pointCloudService'
+} from '@/services/storage/pointCloud'
 
 /**
  * 导出功能命名空间
@@ -237,7 +240,7 @@ import {
   isImageFile as pathIsImageFile,
   isDataFile as pathIsDataFile,
   buildPath as pathBuild,
-} from '@/utils/pathUtils'
+} from '@/utils/storage/path'
 
 /**
  * 路径工具命名空间
@@ -299,7 +302,7 @@ import {
   validatePhotosArray as validatePhotos,
   validateDataLines as validateData,
   validateParams as validateParameters,
-} from '@/utils/validators'
+} from '@/utils/storage/validate'
 
 /**
  * 验证工具命名空间
@@ -328,7 +331,7 @@ export const validate = {
 // 事件通知
 // ============================================
 
-export { dispatchFolderUpdate } from '@/services/pointCloudService'
+export { dispatchFolderUpdate } from '@/services/storage/pointCloud'
 
 // ============================================
 // 常量导出
@@ -350,9 +353,8 @@ export {
   RETRY_CONFIG,
   ErrorCodes,
   FeatureFlags,
-  LogLevels,
   MODULE_NAME,
-} from '@/constants/fileSystem'
+} from '@/constants/storage'
 
 // ============================================
 // 向后兼容的包装函数
@@ -362,7 +364,7 @@ export {
   saveBleDataToFileWithSessionStructure,
   listBleDataFiles,
   readBleDataFile,
-} from '@/services/pointCloudService'
+} from '@/services/storage/pointCloud'
 
 // ============================================
 // 版本信息
@@ -397,9 +399,9 @@ export function getModuleInfo() {
     namespaces: ['session', 'batch', 'file', 'exportData', 'path', 'validate'],
     layers: {
       api: ['@/api/pointCloudStorage'],
-      services: ['@/services/fileSystemService', '@/services/pointCloudService'],
-      utils: ['@/utils/pathUtils', '@/utils/validators'],
-      constants: ['@/constants/fileSystem']
+      services: ['@/services/storage/fileSystem', '@/services/storage/pointCloud'],
+      utils: ['@/utils/storage/path', '@/utils/storage/validate'],
+      constants: ['@/constants/storage']
     }
   }
 }

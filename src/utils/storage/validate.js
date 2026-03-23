@@ -9,7 +9,7 @@ import {
   SESSION_ID_MIN_LENGTH,
   SESSION_ID_MAX_LENGTH,
   POINTCLOUD_ROOT
-} from '@/constants/fileSystem'
+} from '@/constants/storage'
 
 /**
  * 文件路径工具错误类

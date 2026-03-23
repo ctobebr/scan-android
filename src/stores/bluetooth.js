@@ -1,11 +1,11 @@
 import { defineStore } from 'pinia'
 import { showLoadingToast, closeToast, showToast, showConfirmDialog } from 'vant'
-import { bluetoothService } from '@/services/bluetoothService'
+import { bluetoothService } from '@/services/bluetooth'
 import {
   NUS_SERVICE_UUID,
   NUS_WRITE_CHAR_UUID,
   NUS_NOTIFY_CHAR_UUID,
-} from '@/constants/protocolCommands'
+} from '@/constants/bluetooth'
 
 export const useBluetoothStore = defineStore('bluetooth', {
   state: () => ({

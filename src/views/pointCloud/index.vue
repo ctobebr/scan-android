@@ -50,7 +50,7 @@
         </div> -->
 
         <!-- 注释点位，下周的进度搞这个 -->
-        <div class="batch-buttons-row">
+        <!-- <div class="batch-buttons-row">
           <button
             v-for="(b, idx) in batchButtons"
             :key="idx"
@@ -59,12 +59,12 @@
           >
             点位{{ idx + 1 }}
           </button>
-        </div>
+        </div> -->
         <div class="bottom-left-stat">
           <span>采集点位数：{{ dataBatchCounter }} / 50</span>
         </div>
         <!-- 内存调试按钮（仅开发环境显示） -->
-        <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button>
+        <!-- <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button> -->
         <!-- 设备断开提示层 -->
         <div v-if="deviceDisconnected" class="disconnect-overlay">
           <div class="disconnect-message">
@@ -97,17 +97,21 @@
 </template>
 
 <script setup>
+defineOptions({
+  name: 'PointCloudView'
+})
+
 import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'
 import { StatusBar } from '@capacitor/status-bar'
-import { setImmersive } from '@/utils/immersive'
-import { bluetoothService } from '@/services/bluetoothService'
-import cameraHelper from '@/utils/cameraHelper'
-import { parseBleData } from '@/utils/parseBleData'
-import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/protocolCommands'
+import { setImmersive } from '@/utils/device/immersive'
+import { bluetoothService } from '@/services/bluetooth'
+import cameraHelper from '@/utils/device/camera'
+import { parseBleData } from '@/utils/format/bleProtocol'
+import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
 import {
   lockToLandscape,
@@ -115,8 +119,8 @@ import {
   unlockOrientation,
   enableScreenKeepAwake,
   disableScreenKeepAwake,
-} from '@/utils/screen'
-import { generateOptimizedSessionId } from '@/utils/sessionIdUtils'
+} from '@/utils/device/screen'
+import { generateOptimizedSessionId } from '@/utils/format/sessionId'
 import * as storage from '@/api/pointCloudStorage'
 import { showLoadingToast, closeToast, showToast } from 'vant'
 
@@ -985,12 +989,12 @@ function isLeavingSession(to) {
   if (to.name === 'BatchDetail') return false
 
   // 如果跳转到主页，是离开
-  if (to.name === 'MainContentTabs') return true
+  if (to.name === 'MainView') return true
 
   // 如果路由深度变小（返回上一级），且上一级是主页，也是离开
   const currentDepth = router.currentRoute.value.matched.length
   const targetDepth = to.matched.length
-  if (targetDepth < currentDepth && to.name === 'MainContentTabs') {
+  if (targetDepth < currentDepth && to.name === 'MainView') {
     return true
   }
 

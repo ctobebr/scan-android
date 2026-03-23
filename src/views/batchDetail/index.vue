@@ -10,6 +10,10 @@
 </template>
 
 <script setup>
+defineOptions({
+  name: 'BatchDetailView'
+})
+
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'

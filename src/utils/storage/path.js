@@ -10,7 +10,7 @@ import {
   BATCH_PREFIX,
   BATCH_NUMBER_LENGTH,
   SESSION_ID_PATTERN,
-} from '@/constants/fileSystem'
+} from '@/constants/storage'
 
 // ========== 会话ID相关函数 ==========
 

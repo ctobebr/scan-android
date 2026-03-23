@@ -3,7 +3,7 @@
     <!-- 全局页面包装器：为所有页面保留左右间距并在大屏上居中 -->
     <div class="page-wrapper">
     <router-view v-slot="{ Component }">
-      <keep-alive :include="['MainContentTabs']">
+      <keep-alive :include="['MainView']">
         <component :is="Component"/>
       </keep-alive>
     </router-view>

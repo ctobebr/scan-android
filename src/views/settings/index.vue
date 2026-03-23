@@ -200,7 +200,7 @@
 
         <div class="dual-row">
           <div class="axis-item">
-            <label>上限 <span class="unit">(rad)</span></label>
+            <label>上限 <span class="unit">(degrees)</span></label>
             <van-field
               v-model="pitchLimit.upperLimitRad"
               type="text"
@@ -216,7 +216,7 @@
             </div>
           </div>
           <div class="axis-item">
-            <label>下限 <span class="unit">(rad)</span></label>
+            <label>下限 <span class="unit">(degrees)</span></label>
             <van-field
               v-model="pitchLimit.lowerLimitRad"
               type="text"
@@ -406,6 +406,10 @@
 </template>
 
 <script setup>
+defineOptions({
+  name: 'SettingsView'
+})
+
 import {
   ref,
   reactive,
@@ -418,12 +422,12 @@ import {
 } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
-import { bluetoothService } from '@/services/bluetoothService'
+import { bluetoothService } from '@/services/bluetooth'
 import { App } from '@capacitor/app'
-import { parseBleData } from '@/utils/parseBleData'
-import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/protocolCommands'
+import { parseBleData } from '@/utils/format/bleProtocol'
+import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 import { showLoadingToast, closeToast, showToast } from 'vant'
-import { SETTING_DEFAULT_VALUES } from '@/constants/protocolCommands'
+import { SETTING_DEFAULT_VALUES } from '@/constants/bluetooth'
 import { showConfirmDialog } from 'vant'
 
 const bluetoothStore = useBluetoothStore()

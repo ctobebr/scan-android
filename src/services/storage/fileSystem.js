@@ -2,6 +2,8 @@
  * @fileoverview 文件系统服务模块
  * 封装 Capacitor Filesystem API，提供统一的文件操作接口
  * 包含错误处理、重试机制、日志记录等功能
+ *
+ * @module @/services/storage/fileSystem
  */
 
 import { Filesystem, Directory } from '@capacitor/filesystem'
@@ -11,8 +13,8 @@ import {
   RETRY_CONFIG,
   MODULE_NAME,
   FeatureFlags
-} from '@/constants/fileSystem'
-import { FilePathError, sanitizePath } from '@/utils/validators'
+} from '@/constants/storage'
+import { FilePathError, sanitizePath } from '@/utils/storage/validate'
 
 // ========== 日志工具 ==========
 const logger = {

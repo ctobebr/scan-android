@@ -39,7 +39,7 @@
 <script setup>
 import { ref, computed, onMounted, onActivated, onUnmounted, watch } from 'vue'
 import { showLoadingToast, closeToast, showToast, showConfirmDialog  } from 'vant'
-import { parseSessionIdToFormattedTime } from '@/utils/sessionIdUtils'
+import { parseSessionIdToFormattedTime } from '@/utils/format/sessionId'
 import { Share } from '@capacitor/share'
 import { useFoldersStore } from '@/stores/folders'
 import * as storage from '@/api/pointCloudStorage'
