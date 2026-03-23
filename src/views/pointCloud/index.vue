@@ -19,13 +19,6 @@
         </button>
 
         <div class="right-button-group">
-          <!-- <van-button
-            class="circle-btn edit-btn"
-            type="primary"
-            @click="handleEdit"
-          >
-        </van-button> -->
-
           <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick" alt="编辑" />
           <button class="capture-btn" @click="startDataStream"></button>
           <img
@@ -344,6 +337,19 @@ async function init() {
       if (!currentSessionId) {
         currentSessionId = generateOptimizedSessionId()
         resetForNewProject()
+
+        // 预创建会话根目录的.nomedia标记（异步执行，不阻塞初始化）
+        setTimeout(async () => {
+          try {
+            const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+            const rootDir = `pointcloud/${tempFolderName}`
+            await storage.file.ensureDir(rootDir)
+            await storage.file.ensureNoMedia(rootDir)
+            console.log('[PointCloud] 会话根目录.nomedia标记已预创建:', rootDir)
+          } catch (e) {
+            console.warn('[PointCloud] 预创建.nomedia标记失败（可忽略）:', e)
+          }
+        }, 0)
       } else {
         // 若已有会话ID则加载已存在批次，用于返回时恢复
         loadBatchButtons()
@@ -413,18 +419,23 @@ async function saveCurrentBatch() {
   try {
     // 使用临时文件夹名保存
     const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+
+    // 添加文件头
+    const header = 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)'
+    const linesWithHeader = [header, ...currentBatchData.rawLines]
+
     // 保存当前点位的数据到批次文件夹
     await storage.batch.save(
       tempFolderName,
       bid,
-      currentBatchData.rawLines,
+      linesWithHeader,
       currentBatchData.photos,
     )
     console.log(
       '[PointCloud] 点位保存成功到临时文件夹',
       bid,
       '点云行数:',
-      currentBatchData.rawLines.length,
+      linesWithHeader.length - 1, // 减去文件头
       '照片数:',
       currentBatchData.photos.length,
     )
@@ -739,8 +750,15 @@ function startSessionParser() {
 
           accumulationBuffer.push(...points)
           points.forEach((p) => {
-            // 这里保存所有接收到的点云坐标信息 ---- 但是渲染时可能会丢弃部分超过缓冲区上限的数据
-            currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
+            // 根据数据类型决定保存格式
+            if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
+              // 完整数据：合并后的数据或单独的极坐标数据
+              // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
+              currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`)
+            } else {
+              // 只有XYZ数据（单格式模式）
+              currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
+            }
           })
           currentBatchData.pointCount += points.length
 
@@ -804,6 +822,8 @@ async function startDataStream() {
   // 重置当前点位数据
   currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   accumulationBuffer.length = 0
+
+
 
   isCollecting.value = true
   bluetoothStore.handleSendStart()

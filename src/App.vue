@@ -26,7 +26,7 @@ async function cleanupOrphanedSessions() {
 
       // 只删除临时文件夹（isTemp为true的）
       if (info.isTemp) {
-        console.log('[App] 删除未保存的临时会话:', folderName)
+        // console.log('[App] 删除未保存的临时会话:', folderName)
         // await storage.session.delete(folderName).catch(e => {
         //   console.warn('[App] 删除失败', folderName, e)
         // })

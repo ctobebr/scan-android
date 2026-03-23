@@ -42,6 +42,12 @@ export class parseBleData {
         active: false,
         previewStarted: false,
       },
+      // 用于合并XYZ和极坐标数据的暂存区
+      pendingMergeData: {
+        xyz: null, // 暂存的XYZ数据
+        polar: null, // 暂存的极坐标数据
+        timeoutId: null, // 超时定时器ID
+      },
     }
     this.cameraReadyPromise = null
 
@@ -52,6 +58,10 @@ export class parseBleData {
     this.cameraCmdCount = 0
     this.cameraCallbackCount = 0
     this.enableDebugLogging = !!options.enableDebug
+    this.MERGE_TIMEOUT_MS = 150 // 合并等待超时时间（毫秒），平衡合并成功率和渲染延迟
+
+    // 用于区分单格式和双格式模式
+    this.receivedFormat = null // null | 'xyz' | 'polar' | 'both'
   }
   // 验证数据包
   validateBinaryPacket(receivedChecksum) {
@@ -100,6 +110,7 @@ export class parseBleData {
 
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ]: this._handleReadOutputXYZ,
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR]: this._handleReadOutputPolar,
+      [DEVICE_DATA_COMMANDS.CMD_READ_PITCH_OFFSET]: this._handleReadPitchOffset,
       [DEVICE_DATA_COMMANDS.CMD_READ_V_PID]: this._handleReadVPID,
       [DEVICE_DATA_COMMANDS.CMD_READ_A_PID]: this._handleReadAPID,
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
@@ -233,25 +244,29 @@ export class parseBleData {
   // intensity: 强度
   sphericalToCartesian(pitch, yaw, r, intensity) {
     // 计算笛卡尔坐标
-    const x1 = (r * Math.cos(pitch) * Math.cos(yaw))
-    const y1 = (r * Math.sin(pitch)) // 高度
-    const z1 = (r * Math.cos(pitch) * Math.sin(yaw))
+    const x1 = r * Math.cos(pitch) * Math.cos(yaw)
+    const y1 = r * Math.sin(pitch) // 高度
+    const z1 = r * Math.cos(pitch) * Math.sin(yaw)
     const x = r * Math.cos(pitch) * Math.cos(yaw)
     const y = r * Math.sin(pitch) // 高度
     const z = r * Math.cos(pitch) * Math.sin(yaw)
     // 返回点对象，包含原始数据方便调试
     return {
-        x1, y1, z1,       // 分米
-        x,y,z,
-        pitch: pitch,     // 弧度
-        yaw: yaw,         // 弧度
-        distance: r * 1000,
-        intensity: intensity,
+      x1,
+      y1,
+      z1, // 分米
+      x,
+      y,
+      z,
+      pitch: pitch, // 弧度
+      yaw: yaw, // 弧度
+      distance: r * 1000,
+      intensity: intensity,
 
-        // 角度版本（方便查看） => 弧度转角度  (degree * 180 / π)
-        pitchDeg: pitch * 180 / Math.PI,  // 角度
-        yawDeg: yaw * 180 / Math.PI,  // 角度
-        distanceM: r     // 这里是分米，这里如果转成米，点云显示会很密集
+      // 角度版本（方便查看） => 弧度转角度  (degree * 180 / π)
+      pitchDeg: (pitch * 180) / Math.PI, // 角度
+      yawDeg: (yaw * 180) / Math.PI, // 角度
+      distanceM: r, // 这里是分米，这里如果转成米，点云显示会很密集
     }
   }
 
@@ -336,7 +351,7 @@ export class parseBleData {
         case 'READING_CHECKSUM':
           if (this.validateBinaryPacket(byte)) {
             try {
-              // 校验成功，处理协议数据包
+              // 校验成功，处理协议数据包。只输出拍照阶段的数据
               if (
                 this.enableDebugLogging &&
                 this.protocolState.cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA
@@ -348,6 +363,11 @@ export class parseBleData {
                   )}`,
                 )
               }
+              //  console.log(
+              //    `[Parser][${new Date().toISOString()}] , data=${uint8ArrayToHex(
+              //      this.protocolState.packetData,
+              //    )}`,
+              //  )
               this.handleProtocolPacket(this.protocolState.cmd, this.protocolState.packetData)
             } catch (err) {
               let cmdStr =
@@ -650,45 +670,164 @@ export class parseBleData {
       console.log('处于拍照会话，忽略点云数据')
       return
     }
-    if (data && data.length > 0) {
-      // 数据长度必须是 6 的倍数（每个点占 6 字节）
-      if (data.length % 6 === 0) {
-        // 解析笛卡尔坐标 (XYZ) 数据
-        const points = this.parseBinaryPointDataXYZ(data)
-        if (points && points.length > 0) {
-          this.protocolState.accumulatedPoints.push(...points)
-          // if (process.env.NODE_ENV === 'development') {
-          // console.log(` Parsed ${points.length} points from CMD_POINT_DATA`)
-        } else {
-          console.warn(
-            ` CMD_POINT_DATA (0x ${DEVICE_DATA_COMMANDS.CMD_OUTPUT_XYZ.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
-          )
-        }
-      }
+
+    if (!data || data.length === 0 || data.length % 6 !== 0) {
+      console.warn(`CMD_POINT_DATA has invalid data length: ${data?.length}`)
+      return
+    }
+
+    // 记录接收到的格式
+    if (this.receivedFormat === null) {
+      this.receivedFormat = 'xyz'
+    } else if (this.receivedFormat === 'polar') {
+      this.receivedFormat = 'both'
+    }
+
+    // 解析XYZ数据
+    const points = this.parseBinaryPointDataXYZ(data)
+    if (!points || points.length === 0) return
+
+    // 检查是否有待处理的极坐标数据
+    if (this.protocolState.pendingMergeData.polar) {
+      // 有极坐标数据等待合并，执行合并
+      // 合并后使用XYZ的坐标，避免重复渲染
+      this._mergeAndOutputPoints(points, this.protocolState.pendingMergeData.polar)
+      this._clearPendingMergeData()
+    } else {
+      // 没有待处理的极坐标数据，暂存XYZ数据等待合并
+      this._storePendingXYZ(points)
     }
   }
+
   _handleRawPointData(data) {
     // 如果处于拍照会话，忽略点云数据
     if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
       console.log('处于拍照会话，忽略点云数据')
       return
     }
-    if (data && data.length > 0) {
-      // 数据长度必须是 6 的倍数（每个点占 6 字节）
-      if (data.length % 6 === 0) {
-        // 解析笛卡尔坐标 (XYZ) 数据
-        const points = this.parseBinaryPointData(data)
-        if (points && points.length > 0) {
-          this.protocolState.accumulatedPoints.push(...points)
-          // if (process.env.NODE_ENV === 'development') {
-          // console.log(` Parsed ${points.length} points from CMD_POINT_DATA`)
-        } else {
-          console.warn(
-            ` CMD_POINT_DATA (0x ${DEVICE_DATA_COMMANDS.CMD_OUTPUT_POLAR.toString(16)}) has invalid data length:  ${data.length}. Expected multiple of 6.`,
-          )
-        }
-      }
+
+    if (!data || data.length === 0 || data.length % 6 !== 0) {
+      console.warn(`CMD_OUTPUT_POLAR has invalid data length: ${data?.length}`)
+      return
     }
+
+    // 记录接收到的格式
+    if (this.receivedFormat === null) {
+      this.receivedFormat = 'polar'
+    } else if (this.receivedFormat === 'xyz') {
+      this.receivedFormat = 'both'
+    }
+
+    // 解析极坐标数据
+    const points = this.parseBinaryPointData(data)
+    if (!points || points.length === 0) return
+
+    // 检查是否有待处理的XYZ数据
+    if (this.protocolState.pendingMergeData.xyz) {
+      // 有XYZ数据等待合并，执行合并
+      // 合并后使用XYZ的坐标，避免重复渲染
+      this._mergeAndOutputPoints(this.protocolState.pendingMergeData.xyz, points)
+      this._clearPendingMergeData()
+    } else {
+      // 没有待处理的XYZ数据，暂存极坐标数据等待合并
+      this._storePendingPolar(points)
+    }
+  }
+
+  // 暂存XYZ数据，启动超时定时器
+  _storePendingXYZ(points) {
+    // 清除之前的超时
+    if (this.protocolState.pendingMergeData.timeoutId) {
+      clearTimeout(this.protocolState.pendingMergeData.timeoutId)
+    }
+
+    this.protocolState.pendingMergeData.xyz = points
+
+    // 启动超时定时器
+    this.protocolState.pendingMergeData.timeoutId = setTimeout(() => {
+      this._handleMergeTimeout()
+    }, this.MERGE_TIMEOUT_MS)
+  }
+
+  // 暂存极坐标数据，启动超时定时器
+  _storePendingPolar(points) {
+    // 清除之前的超时
+    if (this.protocolState.pendingMergeData.timeoutId) {
+      clearTimeout(this.protocolState.pendingMergeData.timeoutId)
+    }
+
+    this.protocolState.pendingMergeData.polar = points
+
+    // 启动超时定时器
+    this.protocolState.pendingMergeData.timeoutId = setTimeout(() => {
+      this._handleMergeTimeout()
+    }, this.MERGE_TIMEOUT_MS)
+  }
+
+  // 合并并输出数据
+  // 关键：合并后的点只使用一套XYZ坐标（来自XYZ数据），避免重复渲染
+  // 注意：每帧蓝牙数据包只包含一个点数据，因此两个数组长度都为1
+  _mergeAndOutputPoints(xyzPoints, polarPoints) {
+    // 单帧单点场景，直接取第一个元素合并
+    const xyz = xyzPoints[0]
+    const polar = polarPoints[0]
+
+    // console.log('[MergeSuccess] XYZ和极坐标数据合并成功')
+
+    // 合并后的点：使用XYZ的坐标（更精确，避免重复渲染）
+    // 加上极坐标的原始数据用于保存到文件
+    const mergedPoint = {
+      x: xyz.x, // 来自XYZ数据（更精确）
+      y: xyz.y,
+      z: xyz.z,
+      pitch: polar.pitch, // 来自极坐标数据
+      yaw: polar.yaw,
+      distanceM: polar.distanceM,
+      // 保留其他可能需要的数据
+      intensity: polar.intensity,
+      pitchDeg: polar.pitchDeg,
+      yawDeg: polar.yawDeg,
+    }
+
+    // 将合并后的点添加到累积缓冲区
+    // 注意：这里只添加了一套XYZ坐标，不会导致重复渲染
+    this.protocolState.accumulatedPoints.push(mergedPoint)
+  }
+
+  // 超时处理：根据接收到的格式判断是单格式还是双格式模式
+  _handleMergeTimeout() {
+    const pending = this.protocolState.pendingMergeData
+
+    if (this.receivedFormat === 'both') {
+      // 双格式模式，但合并超时，丢弃数据（不保存到txt）
+      console.log('[MergeTimeout] 双格式模式，数据超时未合并，丢弃')
+    } else if (pending.xyz) {
+      // 单格式模式（XYZ），正常输出
+      console.log('[SingleMode] XYZ单独输出')
+      this.protocolState.accumulatedPoints.push(...pending.xyz)
+    } else if (pending.polar) {
+      // 单格式模式（极坐标），正常输出
+      console.log('[SingleMode] 极坐标单独输出')
+      this.protocolState.accumulatedPoints.push(...pending.polar)
+    }
+
+    this._clearPendingMergeData()
+  }
+
+  // 清空暂存区
+  _clearPendingMergeData() {
+    if (this.protocolState.pendingMergeData.timeoutId) {
+      clearTimeout(this.protocolState.pendingMergeData.timeoutId)
+    }
+
+    this.protocolState.pendingMergeData = {
+      xyz: null,
+      polar: null,
+      timeoutId: null,
+    }
+
+    // 注意：receivedFormat 不清空，保持为 'both' 以便后续帧知道是双格式模式
+    // 如果是单格式模式（'xyz' 或 'polar'），也可以不清空，保持一致性
   }
   /**
    * 处理读取标定参数的响应
@@ -828,7 +967,16 @@ export class parseBleData {
     const i = view.getFloat32(8, true)
     const d = view.getFloat32(12, true)
 
-    console.log('✅ 收到下位机速度环PID响应: 轴=' + (axis === 0 ? 'X' : 'Y') + ', P=' + p + ', I=' + i + ', D=' + d)
+    console.log(
+      '✅ 收到下位机速度环PID响应: 轴=' +
+        (axis === 0 ? 'X' : 'Y') +
+        ', P=' +
+        p +
+        ', I=' +
+        i +
+        ', D=' +
+        d,
+    )
     if (this.options.onVPIDResponse) {
       this.options.onVPIDResponse({ axis: axis === 0 ? 'X' : 'Y', p, i, d })
     }
@@ -849,9 +997,36 @@ export class parseBleData {
     const i = view.getFloat32(8, true)
     const d = view.getFloat32(12, true)
 
-    console.log('✅ 收到下位机角度环PID响应: 轴=' + (axis === 0 ? 'X' : 'Y') + ', P=' + p + ', I=' + i + ', D=' + d)
+    console.log(
+      '✅ 收到下位机角度环PID响应: 轴=' +
+        (axis === 0 ? 'X' : 'Y') +
+        ', P=' +
+        p +
+        ', I=' +
+        i +
+        ', D=' +
+        d,
+    )
     if (this.options.onAPIDResponse) {
       this.options.onAPIDResponse({ axis: axis === 0 ? 'X' : 'Y', p, i, d })
+    }
+  }
+
+  /**
+   * 处理读取俯仰角零偏的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadPitchOffset(data) {
+    if (data.byteLength !== 4) {
+      console.warn('俯仰角零偏数据长度错误，期望 4 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const offset = view.getFloat32(0, true) // 零偏值，小端序，单位：度
+
+    console.log('✅ 收到下位机俯仰角零偏响应: 零偏值_deg=' + offset)
+    if (this.options.onPitchOffsetResponse) {
+      this.options.onPitchOffsetResponse({ value: offset })
     }
   }
 

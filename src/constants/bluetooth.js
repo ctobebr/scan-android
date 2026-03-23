@@ -84,6 +84,8 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_OUTPUT_XYZ: 0x15,
   /** 设置输出极坐标 data{bool:on/off} */
   CMD_SET_OUTPUT_POLAR: 0x16,
+  /** 设置俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
+  CMD_SET_PITCH_OFFSET: 0x17,
   /** 设置速度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
   CMD_SET_V_PID: 0x1E,
   /** 设置角度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
@@ -114,6 +116,8 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_READ_OUTPUT_XYZ: 0x35,
   /** 是否是输出极坐标值 data{bool:on/off} */
   CMD_READ_OUTPUT_POLAR: 0x36,
+  /** 读取俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
+  CMD_READ_PITCH_OFFSET: 0x37,
   /** 读取速度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
   CMD_READ_V_PID: 0x3E,
   /** 读取角度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
@@ -154,5 +158,7 @@ export const SETTING_DEFAULT_VALUES = {
     p: 0,
     i: 0,
     d: 0
-  }
+  },
+  /** 俯仰角零偏默认值（度） */
+  PITCH_OFFSET: 0.0
 }

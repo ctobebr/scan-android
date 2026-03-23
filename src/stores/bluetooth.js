@@ -480,6 +480,25 @@ export const useBluetoothStore = defineStore('bluetooth', {
     },
 
     /**
+     * 发送设置俯仰角零偏指令
+     * @param {number} offset - 俯仰角零偏值 (单位: 度)
+     */
+    async handleSendPitchOffset(offset) {
+      try {
+        await bluetoothService.sendSetPitchOffset(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+          offset,
+        )
+        console.log('发送设置俯仰角零偏指令成功')
+      } catch (err) {
+        console.log('发送设置俯仰角零偏指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
      * 发送读取速度环PID指令
      * @param {string} axis - 轴，'X'或'Y'
      */
@@ -513,6 +532,23 @@ export const useBluetoothStore = defineStore('bluetooth', {
         console.log('发送读取角度环PID指令成功')
       } catch (err) {
         console.log('发送读取角度环PID指令失败：', err)
+        throw err
+      }
+    },
+
+    /**
+     * 发送读取俯仰角零偏指令
+     */
+    async handleReadPitchOffset() {
+      try {
+        await bluetoothService.sendReadPitchOffset(
+          this.connectingDeviceId,
+          NUS_SERVICE_UUID,
+          NUS_WRITE_CHAR_UUID,
+        )
+        console.log('发送读取俯仰角零偏指令成功')
+      } catch (err) {
+        console.log('发送读取俯仰角零偏指令失败：', err)
         throw err
       }
     },

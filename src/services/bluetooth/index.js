@@ -630,6 +630,42 @@ export class BluetoothService {
   }
 
   /**
+   * 发送"设置俯仰角零偏"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} offset - 俯仰角零偏值 (float, 单位: 度)
+   */
+  async sendSetPitchOffset(deviceId, serviceUUID, characteristicUUID, offset) {
+    const buffer = new ArrayBuffer(4) // 1 * float = 4 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, offset, true) // 零偏值，小端序
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_SET_PITCH_OFFSET,
+      buffer,
+    )
+  }
+
+  /**
+   * 发送"读取俯仰角零偏"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadPitchOffset(deviceId, serviceUUID, characteristicUUID) {
+    await this.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      DEVICE_DATA_COMMANDS.CMD_READ_PITCH_OFFSET,
+      null,
+    )
+  }
+
+  /**
    * 发送读取参数指令 (无数据)
    * @param {number} readCommand - 读取命令字 (CONTROL_COMMANDS.CMD_READ_*)
    */

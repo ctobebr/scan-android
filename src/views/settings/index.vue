@@ -113,9 +113,9 @@
             <van-field
               v-model="speedParams.pitchSpeed"
               type="text"
-              placeholder="0.0000"
+              placeholder="0.00000"
               inputmode="decimal"
-              @blur="() => validateAndFormat('speed', 'pitchSpeed', 4)"
+              @blur="() => validateAndFormat('speed', 'pitchSpeed', 5)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!speedErrors.pitchSpeed"
@@ -129,9 +129,9 @@
             <van-field
               v-model="speedParams.yawSpeed"
               type="text"
-              placeholder="0.0000"
+              placeholder="0.00005"
               inputmode="decimal"
-              @blur="() => validateAndFormat('speed', 'yawSpeed', 4)"
+              @blur="() => validateAndFormat('speed', 'yawSpeed', 5)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!speedErrors.yawSpeed"
@@ -239,8 +239,46 @@
         </div>
       </div>
 
+      <!-- 俯仰角零偏卡片 -->
+      <div class="param-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="title-text">俯仰角零偏</span>
+          </div>
+          <van-button
+            size="small"
+            type="primary"
+            plain
+            @click="saveParam('pitchOffset')"
+            :loading="savingState.pitchOffset"
+            :disabled="deviceDisconnected || savingState.pitchOffset || !isPitchOffsetValid"
+            style="width: 64px;"
+            >保存</van-button
+          >
+        </div>
+
+        <div class="scan-row">
+          <div class="scan-input">
+            <van-field
+              v-model="pitchOffset.value"
+              type="text"
+              placeholder="0.00"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pitchOffset', 'value', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pitchOffsetErrors.value"
+            />
+          </div>
+          <span class="scan-unit">度</span>
+        </div>
+        <div v-if="pitchOffsetErrors.value" class="field-error-hint">
+          <van-icon name="warning-o" /> {{ pitchOffsetErrors.value }}
+        </div>
+      </div>
+
       <!-- 输出格式设置卡片  目前同时开启会渲染两套点云，一个是偏移校准前一个是偏移校准后。。保存的txt一个点位也会包含两行xyz数据-->
-      <!-- <div class="param-card output-format-card">
+      <div class="param-card output-format-card">
         <div class="card-header">
           <div class="card-title">
             <span class="title-text">输出格式</span>
@@ -277,7 +315,7 @@
             />
           </div>
         </div>
-      </div> -->
+      </div>
 
       <!-- PID参数设置卡片 -->
       <div class="param-card">
@@ -486,6 +524,11 @@ const pidSettings = reactive({
   d: SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
 })
 
+// 俯仰角零偏设置 - 保留2位小数
+const pitchOffset = reactive({
+  value: SETTING_DEFAULT_VALUES.PITCH_OFFSET.toFixed(2)
+})
+
 // PID选项
 const loopTypeOptions = [
   { text: '速度环(V)', value: 'V' },
@@ -503,6 +546,7 @@ const savingState = reactive({
   speed: false,
   scan: false,
   pitchLimit: false,
+  pitchOffset: false, // 俯仰角零偏保存状态
   outputFormat: false, // 输出格式保存状态
   pid: false // PID保存状态
 })
@@ -533,6 +577,11 @@ const pidErrors = reactive({
   p: '',
   i: '',
   d: ''
+})
+
+// 俯仰角零偏错误状态
+const pitchOffsetErrors = reactive({
+  value: ''
 })
 
 // ========== 计算属性 - 校验状态 ==========
@@ -568,6 +617,11 @@ const hasPitchLimitEmptyError = computed(() => {
 // PID参数是否有效
 const isPIDValid = computed(() => {
   return !pidErrors.p && !pidErrors.i && !pidErrors.d
+})
+
+// 俯仰角零偏是否有效
+const isPitchOffsetValid = computed(() => {
+  return !pitchOffsetErrors.value
 })
 
 // ========== 校验函数 ==========
@@ -664,6 +718,24 @@ const validateAndFormat = (category, field, decimals) => {
         pidErrors[field] = ''
       } else {
         pidErrors[field] = errorMsg
+      }
+      break
+
+    case 'pitchOffset':
+      value = pitchOffset[field]
+      errorMsg = validateNumber(value, '零偏值')
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        // 验证范围：-180.0 到 180.0 度
+        if (num < -180.0 || num > 180.0) {
+          errorMsg = '零偏值必须在-180.0~180.0之间'
+          pitchOffsetErrors[field] = errorMsg
+        } else {
+          pitchOffset[field] = num.toFixed(decimals)
+          pitchOffsetErrors[field] = ''
+        }
+      } else {
+        pitchOffsetErrors[field] = errorMsg
       }
       break
   }
@@ -893,6 +965,9 @@ const init = async () => {
       onAPIDResponse: (data) => {
         handleAPIDResponse(data)
       },
+      onPitchOffsetResponse: (data) => {
+        handlePitchOffsetResponse(data)
+      },
     })
 
     await bluetoothService.subscribeToNotifications(
@@ -1040,10 +1115,10 @@ function handleRotateSpeedResponse(data) {
   // 将收到的转动速度值更新到UI
   if (data && typeof data === 'object') {
     if (data.pitchSpeed !== undefined) {
-      speedParams.pitchSpeed = parseFloat(data.pitchSpeed).toFixed(4)
+      speedParams.pitchSpeed = parseFloat(data.pitchSpeed).toFixed(5)
     }
     if (data.yawSpeed !== undefined) {
-      speedParams.yawSpeed = parseFloat(data.yawSpeed).toFixed(4)
+      speedParams.yawSpeed = parseFloat(data.yawSpeed).toFixed(5)
     }
   }
   // 清除对应字段的错误
@@ -1157,6 +1232,22 @@ function handleAPIDResponse(data) {
   }
 }
 
+// 处理俯仰角零偏响应
+function handlePitchOffsetResponse(data) {
+  console.log('设置俯仰角零偏成功', JSON.stringify(data))
+  if (data && typeof data === 'object') {
+    if (data.value !== undefined) {
+      pitchOffset.value = parseFloat(data.value).toFixed(2)
+    }
+  }
+  // 清除对应字段的错误
+  pitchOffsetErrors.value = ''
+  if (isFromSaveAction.value) {
+    showToast({ message: '俯仰角零偏保存成功', position: 'bottom' })
+    isFromSaveAction.value = false // 重置标记
+  }
+}
+
 // 保存单个参数 - 移除 showToast 参数，不在发送后提示
 // 设置标记，表示这是来自保存操作的响应
 // 添加 silent 参数，用于控制是否显示提示（恢复默认值时使用）
@@ -1214,6 +1305,14 @@ const saveParam = async (type, silent = false) => {
         return
       }
       break
+
+    case 'pitchOffset':
+      validateAndFormat('pitchOffset', 'value', 2)
+      if (!isPitchOffsetValid.value) {
+        showToast({ message: '请填写正确的俯仰角零偏值', position: 'bottom' })
+        return
+      }
+      break
   }
 
   try {
@@ -1266,6 +1365,10 @@ const saveParam = async (type, silent = false) => {
             parseFloat(pidSettings.d),
           )
         }
+        break
+
+      case 'pitchOffset':
+        await bluetoothStore.handleSendPitchOffset(parseFloat(pitchOffset.value))
         break
     }
   } catch (error) {
@@ -1362,14 +1465,16 @@ const resetToDefault = async () => {
     pidErrors.p = ''
     pidErrors.i = ''
     pidErrors.d = ''
+    // 清除俯仰角零偏错误
+    pitchOffsetErrors.value = ''
 
     // 先更新UI显示为默认值并格式化
     calibParams.x = SETTING_DEFAULT_VALUES.CALIB.x.toFixed(2)
     calibParams.y = SETTING_DEFAULT_VALUES.CALIB.y.toFixed(2)
     calibParams.z = SETTING_DEFAULT_VALUES.CALIB.z.toFixed(2)
 
-    speedParams.pitchSpeed = SETTING_DEFAULT_VALUES.SPEED.pitch.toFixed(4)
-    speedParams.yawSpeed = SETTING_DEFAULT_VALUES.SPEED.yaw.toFixed(4)
+    speedParams.pitchSpeed = SETTING_DEFAULT_VALUES.SPEED.pitch.toFixed(5)
+    speedParams.yawSpeed = SETTING_DEFAULT_VALUES.SPEED.yaw.toFixed(5)
 
     scanTime.value.seconds = SETTING_DEFAULT_VALUES.SCAN_TIME // 数字，不转字符串
 
@@ -1387,12 +1492,16 @@ const resetToDefault = async () => {
     pidSettings.i = SETTING_DEFAULT_VALUES.PID.i.toFixed(4)
     pidSettings.d = SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
 
+    // 俯仰角零偏默认值 - 保留2位小数
+    pitchOffset.value = SETTING_DEFAULT_VALUES.PITCH_OFFSET.toFixed(2)
+
 
     // 使用 silent 模式调用保存函数，不触发单个提示
     await saveParam('calib', true)
     await saveParam('speed', true)
     await saveParam('scan', true)
     await saveParam('pitchLimit', true)
+    await saveParam('pitchOffset', true)
     await saveParam('pid', true)
 
     // 输出格式需要单独发送，也使用 silent 模式----暂时不启用
@@ -1424,6 +1533,7 @@ const readAllParams = async () => {
       bluetoothStore.handleReadRotateSpeed(),
       bluetoothStore.handleReadScanTime(),
       bluetoothStore.handleReadPitchLimit(),
+      bluetoothStore.handleReadPitchOffset(),
       // bluetoothStore.handleReadOutputXYZ(),
       bluetoothStore.handleReadOutputPolar(),
       // 读取当前选中的PID参数
