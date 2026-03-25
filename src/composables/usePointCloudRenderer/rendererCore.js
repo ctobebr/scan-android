@@ -6,6 +6,10 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { showToast } from 'vant'
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('RendererCore')
 
 /**
  * 创建渲染核心
@@ -112,7 +116,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
    */
   function addPoints(newPoints) {
     if (!Array.isArray(newPoints)) {
-      console.error('[Renderer] addPoints: expected array, got', typeof newPoints)
+      logger.error('addPoints: expected array, got', typeof newPoints)
       return
     }
 
@@ -128,9 +132,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
       }
 
       if (currentPointCount + newPoints.length > config.maxPoints) {
-        console.warn(
-          `[Renderer] Point limit reached: current=${currentPointCount}, incoming=${newPoints.length}, max=${config.maxPoints}`,
-        )
+        logger.warn('Point limit reached', { current: currentPointCount, incoming: newPoints.length, max: config.maxPoints })
         showToast({ message: `点云数量已达上限 ${config.maxPoints} 点`, position: 'bottom' })
         return
       }
@@ -164,7 +166,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
 
       markNeedsRender()
     } catch (err) {
-      console.error('[Renderer] addPoints failed:', err)
+      logger.error('addPoints failed', err)
       showToast({ message: '点云数据异常，请重试', position: 'bottom' })
     }
   }
@@ -181,7 +183,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
     colorCalculator.resetYRange()
     bufferManager.reset()
 
-    console.log('[Renderer] Point cloud reset and removed from scene')
+    logger.info('Point cloud reset and removed from scene')
   }
 
   /**
@@ -229,7 +231,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
 
     try {
       if (!isWebGLContextValid()) {
-        console.error('[Renderer] WebGL context lost')
+        logger.error('WebGL context lost')
         showToast({ message: '3D 渲染上下文丢失，请刷新页面', position: 'bottom' })
         if (animationId) {
           cancelAnimationFrame(animationId)
@@ -247,7 +249,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
 
       lastFrameTime = time
     } catch (err) {
-      console.error('渲染循环崩溃:', err)
+      logger.error('渲染循环崩溃', err)
       showToast({ message: '3D 渲染异常，请重启应用', position: 'bottom' })
       if (animationId) {
         cancelAnimationFrame(animationId)

@@ -47,35 +47,23 @@ import {
   rename,
   exists
 } from './fileSystem'
+// MODIFIED: 使用全局日志工具替换独立实现
+// 原因：统一日志管理，消除代码重复
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger, configureLogger } from '@/utils/logger'
 
 // ========== 日志工具 ==========
-const logger = {
-  debug: (msg, ...args) => {
-    if (FeatureFlags.ENABLE_DETAILED_LOGGING) {
-      const serializedArgs = args.map(arg =>
-        typeof arg === 'object' ? JSON.stringify(arg) : arg
-      )
-      console.debug(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
+// MODIFIED: 使用全局日志工具创建模块专用记录器
+const logger = createLogger('PointCloud')
+
+// MODIFIED: 根据 FeatureFlags 配置日志级别
+// 保持与原有行为兼容
+if (!FeatureFlags.ENABLE_DETAILED_LOGGING) {
+  configureLogger({
+    modules: {
+      PointCloud: false
     }
-  },
-  info: (msg, ...args) => {
-    const serializedArgs = args.map(arg =>
-      typeof arg === 'object' ? JSON.stringify(arg) : arg
-    )
-    console.info(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
-  },
-  warn: (msg, ...args) => {
-    const serializedArgs = args.map(arg =>
-      typeof arg === 'object' ? JSON.stringify(arg) : arg
-    )
-    console.warn(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
-  },
-  error: (msg, ...args) => {
-    const serializedArgs = args.map(arg =>
-      typeof arg === 'object' ? JSON.stringify(arg) : arg
-    )
-    console.error(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
-  }
+  })
 }
 
 // ========== 事件通知 ==========
@@ -347,7 +335,7 @@ async function prepareBatchPaths(sessionID, normalizedBatchId) {
   const sessionPath = await ensureSessionDir(sessionID)
   await ensureBatchDir(sessionID, normalizedBatchId)
   const batchFolderName = `Batch_${normalizedBatchId}`
-  
+
   return {
     sessionPath,
     batchFolderName,
@@ -394,7 +382,7 @@ async function saveExistingPhoto(filePath) {
 async function saveBase64Photo(sessionPath, batchFolderName, photo, index) {
   const target = photo.name || `photo_${index}.jpg`
   const photoPath = `${sessionPath}/${batchFolderName}/${target}`
-  
+
   try {
     await writeFile(photoPath, photo.base64)
     const uri = await getUri(photoPath)
@@ -423,7 +411,7 @@ async function savePhotos(sessionPath, batchFolderName, photos) {
     }
 
     let uri = null
-    
+
     // 情况1：照片已经保存在正确的位置
     if (photo.filePath && typeof photo.filePath === 'string') {
       uri = await saveExistingPhoto(photo.filePath)
@@ -432,7 +420,7 @@ async function savePhotos(sessionPath, batchFolderName, photos) {
     else if (photo.base64 && typeof photo.base64 === 'string') {
       uri = await saveBase64Photo(sessionPath, batchFolderName, photo, i)
     }
-    
+
     if (uri) {
       savedPhotoUris.push(uri)
     }
@@ -489,10 +477,10 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
   try {
     // 步骤2: 准备路径
     const paths = await prepareBatchPaths(sessionID, normalizedBatchId)
-    
+
     // 步骤3: 保存数据文件
     const dataResult = await saveBatchDataFile(paths.txtFilePath, dataLines)
-    
+
     // 步骤4: 保存照片
     const photoUris = await savePhotos(paths.sessionPath, paths.batchFolderName, photos)
 
@@ -888,7 +876,7 @@ async function checkExistingZip(zipPath) {
  */
 async function collectFilesToZip(zip, folderPath) {
   const allFiles = await listFilesRecursive(folderPath)
-  
+
   if (!allFiles || allFiles.length === 0) {
     throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '项目文件夹下无文件')
   }
@@ -953,7 +941,7 @@ async function generateAndSaveZip(zip, zipPath) {
 
   const uriRes = await getUri(zipPath)
   logger.info('zip写入完成', { uri: uriRes.uri })
-  
+
   return uriRes.uri
 }
 

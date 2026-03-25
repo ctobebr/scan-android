@@ -5,6 +5,10 @@
 
 import * as THREE from 'three'
 import { showToast } from 'vant'
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('BufferManager')
 
 /**
  * 创建缓冲区管理器
@@ -78,7 +82,7 @@ export function createBufferManager(config) {
       return true
     } catch (err) {
       // MODIFIED: 添加用户友好的错误提示
-      console.error('[Renderer] Memory allocation failed:', err)
+      logger.error('Memory allocation failed', err)
       showToast({ message: '内存不足，无法添加更多点云', position: 'bottom' })
       throw new Error(`无法分配 ${newCap} 个点的内存: ${err.message}`)
     }

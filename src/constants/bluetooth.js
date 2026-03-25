@@ -131,6 +131,20 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_CTRL_CAMERA_START: 0x83,
 })
 
+// ========== 协议限制常量 ==========
+
+/**
+ * 最大数据长度（字节）
+ * @constant {number}
+ */
+export const MAX_DATA_LENGTH = 128
+
+/**
+ * 最大数据包大小（字节）
+ * @constant {number}
+ */
+export const MAX_PACKET_SIZE = 512
+
 // ========== 控制参数默认值 ==========
 
 /**

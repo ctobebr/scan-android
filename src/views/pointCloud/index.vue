@@ -106,6 +106,13 @@ import cameraHelper from '@/utils/device/camera'
 import { parseBleData } from '@/utils/format/bleProtocol'
 import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
+// MODIFIED: 导入全局日志工具
+// 原因：统一日志管理，后续逐步替换 logger.debug
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+// MODIFIED: 创建点云页面专用日志记录器
+const logger = createLogger('PointCloudView')
 import {
   lockToLandscape,
   lockToPortrait,
@@ -186,7 +193,7 @@ const showMemoryStats = () => {
   const stats = renderer.getMemoryStats()
   const totalMB = (stats.totalActualSize / 1024 / 1024).toFixed(2)
 
-  console.log('[PointCloud Memory Stats]', JSON.stringify(stats))
+  logger.debug('Memory Stats', stats)
 
   showToast({
     message: `点数: ${stats.currentPointCount}\n内存: ${totalMB}MB\n使用率: ${stats.utilizationRate}%`,
@@ -198,7 +205,7 @@ const goBack = async () => {
   if (isNavigating.value) return
   isNavigating.value = true
 
-  console.log('[Pointcloud] 用户点击返回，开始执行清理...')
+  logger.info('用户点击返回，开始执行清理...')
 
   // 立即开始路由返回，不等待清理完成
   const navigationPromise = router.back()
@@ -206,7 +213,7 @@ const goBack = async () => {
   // 将清理操作延迟到下一个事件循环，避免阻塞路由返回
   setTimeout(() => {
     cleanupResourcesForExit().catch((err) => {
-      console.error('[Pointcloud] 清理时发生错误', err)
+      logger.error('清理时发生错误', err)
     })
   }, 50)
 
@@ -228,12 +235,12 @@ onMounted(async () => {
 
   // --- 页面加载时检查连接状态 ---
   if (bluetoothStore.connectingStatus !== 2) {
-    console.log('[PointCloudPage] 页面加载时检测到设备未连接')
+    logger.debug('[PointCloudPage] 页面加载时检测到设备未连接')
     deviceDisconnected.value = true
   } else {
     // 主动校验一次连接状态
     bluetoothService.checkConnectionStatus(bluetoothStore.connectingDeviceId).catch(() => {
-      console.log('[PointCloudPage] 页面加载时检测到连接已断开')
+      logger.debug('[PointCloudPage] 页面加载时检测到连接已断开')
       deviceDisconnected.value = true
     })
   }
@@ -283,11 +290,11 @@ onBeforeRouteLeave(async (to, from, next) => {
 })
 
 const handleEditClick = () => {
-  console.log('handleEditClick')
+  logger.debug('handleEditClick')
 }
 
 const handleSettingClick = () => {
-  console.log('handleSettingClick')
+  logger.debug('handleSettingClick')
 }
 
 async function init() {
@@ -301,7 +308,7 @@ async function init() {
     await StatusBar.setBackgroundColor({ color: '#0e1420' })
     await StatusBar.setStyle({ style: 'LIGHT' })
   } catch (err) {
-    console.warn('StatusBar overlay set failed', err)
+    logger.warn('StatusBar overlay set failed', err)
   }
   try {
     setImmersive(true)
@@ -311,11 +318,11 @@ async function init() {
     //   try {
     //     await StatusBar.setBackgroundColor({ color: '#0e1420' })
     //   } catch (e) {
-    //     console.log('沉浸式err: ', e)
+    //     // logger.warn('沉浸式设置失败', e)
     //   }
     // }, 900)
   } catch (err) {
-    console.warn('setImmersive initial calls failed', err)
+    logger.warn('setImmersive initial calls failed', err)
   }
 
   setTimeout(() => {
@@ -345,9 +352,9 @@ async function init() {
             const rootDir = `pointcloud/${tempFolderName}`
             await storage.file.ensureDir(rootDir)
             await storage.file.ensureNoMedia(rootDir)
-            console.log('[PointCloud] 会话根目录.nomedia标记已预创建:', rootDir)
+            logger.debug('[PointCloud] 会话根目录.nomedia标记已预创建:', rootDir)
           } catch (e) {
-            console.warn('[PointCloud] 预创建.nomedia标记失败（可忽略）:', e)
+            logger.warn('[PointCloud] 预创建.nomedia标记失败（可忽略）:', e)
           }
         }, 0)
       } else {
@@ -380,7 +387,7 @@ async function loadBatchButtons() {
     batchButtons.value = list.map((_, idx) => idx + 1)
     dataBatchCounter.value = batchButtons.value.length
   } catch (e) {
-    console.warn('[PointCloud] loadBatchButtons 失败', e)
+    logger.warn('[PointCloud] loadBatchButtons 失败', e)
     batchButtons.value = []
   }
 }
@@ -431,7 +438,7 @@ async function saveCurrentBatch() {
       linesWithHeader,
       currentBatchData.photos,
     )
-    console.log(
+    logger.debug(
       '[PointCloud] 点位保存成功到临时文件夹',
       bid,
       '点云行数:',
@@ -443,7 +450,7 @@ async function saveCurrentBatch() {
     // 清空当前点位数据（为下一个点位做准备）
     currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   } catch (e) {
-    console.error('[PointCloud] saveCurrentBatch error', e)
+    logger.error('[PointCloud] saveCurrentBatch error', e)
     throw e
   }
 }
@@ -462,7 +469,7 @@ function registerDisconnectListener() {
         return
       }
 
-      console.log('[PointCloudPage] 设备断开连接，手动断开:', isManualDisconnect)
+      logger.debug('[PointCloudPage] 设备断开连接，手动断开:', isManualDisconnect)
 
       // 如果是手动断开（主动调用handleDisconnect），直接返回上一页
       if (isManualDisconnect) {
@@ -479,7 +486,7 @@ function registerDisconnectListener() {
         bluetoothStore.setCleanupStatus(true) // 清理中
         await stopSessionParser() // 这里会取消订阅
       } catch (e) {
-        console.warn('[PointCloudPage] 清理会话失败', e)
+        logger.warn('[PointCloudPage] 清理会话失败', e)
       } finally {
         bluetoothStore.setCleanupStatus(false) // 清理结束
       }
@@ -496,14 +503,14 @@ watch(
     if (oldStatus === 2 && newStatus !== 2) {
       // 连接从已连接变为非已连接状态
       if (!deviceDisconnected.value) {
-        console.log('[PointCloudPage] 检测到全局连接状态变为未连接')
+        logger.debug('[PointCloudPage] 检测到全局连接状态变为未连接')
         deviceDisconnected.value = true
         isCollecting.value = false
         try {
           bluetoothStore.setCleanupStatus(true) // 清理中
           await stopSessionParser() // 这里会取消订阅
         } catch (e) {
-          console.warn('[PointCloudPage] 清理会话失败', e)
+          logger.warn('[PointCloudPage] 清理会话失败', e)
         } finally {
           bluetoothStore.setCleanupStatus(false) // 清理结束
         }
@@ -524,12 +531,12 @@ async function cleanupResourcesForPause() {
       bluetoothStore.setCleanupStatus(true) // 清理中
       await stopSessionParser() // 这里会取消订阅
     } catch (e) {
-      console.warn('[PointCloudPage] 清理会话失败', e)
+      logger.warn('[PointCloudPage] 清理会话失败', e)
     } finally {
       bluetoothStore.setCleanupStatus(false) // 清理结束
     }
   } else {
-    console.log('[PointCloudPage] 未在采集状态，无需停止会话解析器')
+    logger.debug('[PointCloudPage] 未在采集状态，无需停止会话解析器')
   }
 
   // 3. 发送蓝牙结束指令（可根据业务逻辑调整）
@@ -543,7 +550,7 @@ async function cleanupResourcesForPause() {
 
 async function cleanupResourcesForExit() {
   if (_hasCleaned) {
-    console.log('[PointCloud] cleanupResourcesForExit 已执行过，忽略')
+    logger.debug('[PointCloud] cleanupResourcesForExit 已执行过，忽略')
     return
   }
   _hasCleaned = true
@@ -561,7 +568,7 @@ async function cleanupResourcesForExit() {
         await StatusBar.setBackgroundColor({ color: '#0a0a1a' })
         await StatusBar.setStyle({ style: 'LIGHT' })
       } catch (err) {
-        console.warn('StatusBar restore overlays failed', err)
+        logger.warn('StatusBar restore overlays failed', err)
       }
     }, 200)
 
@@ -570,7 +577,7 @@ async function cleanupResourcesForExit() {
       setImmersive(false)
     }, 250)
   } catch (err) {
-    console.warn('StatusBar restore overlays failed', err)
+    logger.warn('StatusBar restore overlays failed', err)
   }
 
   if (renderer?.onResize) {
@@ -590,7 +597,7 @@ async function cleanupResourcesForExit() {
     bluetoothStore.setCleanupStatus(true) // 清理中
     await stopSessionParser() // 这里会取消订阅
   } catch (e) {
-    console.warn('[PointCloudPage] 清理会话失败', e)
+    logger.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
     bluetoothStore.setCleanupStatus(false) // 清理结束
   }
@@ -618,12 +625,12 @@ async function handleAppResume() {
 
   // --- 恢复前检查设备是否仍然连接 ---
   if (deviceDisconnected.value) {
-    console.log('[PointCloudPage] 设备已断开，不恢复采集')
+    logger.debug('[PointCloudPage] 设备已断开，不恢复采集')
     return
   }
 
   if (bluetoothStore.connectingStatus !== 2) {
-    console.log('[PointCloudPage] 设备未连接，不恢复采集')
+    logger.debug('[PointCloudPage] 设备未连接，不恢复采集')
     deviceDisconnected.value = true
     return
   }
@@ -636,10 +643,10 @@ async function handleAppResume() {
   //     // 重新启动会话解析器（重新订阅、启动相机）
   //     startSessionParser()
   //   } else {
-  //     console.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
+  //     logger.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
   //   }
   // } else {
-  //   console.log('[App] 上次未在采集状态，无需恢复')
+  //   logger.debug('[App] 上次未在采集状态，无需恢复')
   // }
 }
 
@@ -648,13 +655,13 @@ function startSessionParser() {
   let reNameFlag = 0
   // --- 检查设备是否已断开 ---
   if (deviceDisconnected.value) {
-    console.warn('[startSessionParser] 设备已断开，无法订阅')
+    logger.warn('[startSessionParser] 设备已断开，无法订阅')
     return
   }
   // --- 结束：检查设备是否已断开 ---
 
   if (parser) return
-  console.log('[startSessionParser] Starting parser and subscription...')
+  logger.debug('[startSessionParser] Starting parser and subscription...')
 
   parser = new parseBleData({
     enableDebug: true,
@@ -662,7 +669,7 @@ function startSessionParser() {
     onStartPreview: async () => {
       // 拍照前再次检查连接状态
       if (deviceDisconnected.value) {
-        console.warn(
+        logger.warn(
           '[startSessionParser] Device disconnected before starting camera preview. Aborting.',
         )
         throw new Error('Device disconnected before starting camera preview.')
@@ -671,7 +678,7 @@ function startSessionParser() {
     },
     onTakePhoto: async ({ fileBaseName, meta }) => {
       if (deviceDisconnected.value) {
-        console.warn(
+        logger.warn(
           '[startSessionParser] Device disconnected before taking photo. Aborting photo capture.',
         )
         throw new Error('Device disconnected before taking photo.')
@@ -694,14 +701,14 @@ function startSessionParser() {
             name: photoData.fileName,
             filePath: photoData.filePath,
           })
-          console.log(
+          logger.debug(
             '[PointCloud] 照片已添加到当前点位，当前照片数:',
             currentBatchData.photos.length,
           )
         }
         return photoData
       } catch (e) {
-        console.error('拍照获取失败', e)
+        logger.error('拍照获取失败', e)
         throw e
       }
     },
@@ -719,13 +726,13 @@ function startSessionParser() {
       // 添加按钮表示新生成的点位
       batchButtons.value.push(dataBatchCounter.value)
       isCollecting.value = false
-      console.log('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
+      logger.debug('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
     },
   })
 
   const deviceId = bluetoothStore.connectingDeviceId
   if (!deviceId) {
-    console.warn('未连接设备，无法订阅通知')
+    logger.warn('未连接设备，无法订阅通知')
     return
   }
 
@@ -739,7 +746,7 @@ function startSessionParser() {
 
         const { points, errors } = parser.parse(uint8)
         if (errors && errors.length > 0) {
-          console.warn('parse errors', errors)
+          logger.warn('parse errors', errors)
         }
         if (points && points.length > 0) {
           // 检查缓冲区上限  超出上限时丢弃同等数量旧点位
@@ -764,7 +771,7 @@ function startSessionParser() {
 
           // 达到上限时停止采集并提示
           if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
-            console.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
+            logger.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
             showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
             stopSessionParser()
             isCollecting.value = false
@@ -772,10 +779,10 @@ function startSessionParser() {
           }
         }
       } catch (e) {
-        console.error('notification handler error', e)
+        logger.error('notification handler error', e)
       }
     })
-    .catch((e) => console.warn('subscribeToNotifications failed', e))
+    .catch((e) => logger.warn('subscribeToNotifications failed', e))
 
   accumulationTimer = setInterval(() => {
     if (!isRendererReady.value || !isCollecting.value) return
@@ -827,7 +834,7 @@ async function startDataStream() {
 
   isCollecting.value = true
   bluetoothStore.handleSendStart()
-  console.log('startDataStream click', '开始新点位采集，点位编号:', dataBatchCounter.value + 1)
+  logger.debug('startDataStream click', '开始新点位采集，点位编号:', dataBatchCounter.value + 1)
   startSessionParser()
 }
 
@@ -851,7 +858,7 @@ const openSaveDialog = async () => {
         saveInput.value.focus()
       }
     } catch (e) {
-      console.warn('focus failed', e)
+      logger.warn('focus failed', e)
     }
   })
 }
@@ -917,9 +924,9 @@ const delSessionDir = async () => {
     try {
       const folderToDelete = storage.path.getTempSessionName(currentSessionId)
       await storage.session.delete(folderToDelete)
-      console.log('[Pointcloud] 未保存会话，已删除目录', folderToDelete)
+      logger.debug('[Pointcloud] 未保存会话，已删除目录', folderToDelete)
     } catch (e) {
-      console.warn('[Pointcloud] 删除未保存会话失败', e)
+      logger.warn('[Pointcloud] 删除未保存会话失败', e)
     } finally {
       isDeletingSession = false
     }
@@ -946,12 +953,12 @@ async function performSave(folderName) {
       if (tempName !== targetName) {
         await storage.session.rename(tempName, targetName)
         currentSessionId = targetName
-        console.log('[PointCloud] 开始刷新项目列表...')
+        logger.debug('[PointCloud] 开始刷新项目列表...')
         await folderStore.refreshFolders()
-        console.log('[PointCloud] 刷新完成')
+        logger.debug('[PointCloud] 刷新完成')
       }
     } catch (e) {
-      console.warn('[PointCloud] 临时文件夹不存在', tempName)
+      logger.warn('[PointCloud] 临时文件夹不存在', tempName)
     }
     // // 重命名会话文件夹
     // if (currentSessionId && folderName && folderName !== currentSessionId) {
@@ -966,7 +973,7 @@ async function performSave(folderName) {
     savedDuringDialog.value = true
     lastSavedFolder.value = targetName
   } catch (error) {
-    console.error('保存失败:', error)
+    logger.error('保存失败:', error)
     showToast({
       message: `保存失败：${error.message || '未知错误'}`,
       position: 'bottom'
@@ -981,7 +988,7 @@ async function stopSessionParser() {
   if (!parser) {
     return
   }
-  console.log('[stopSessionParser] Stopping parser and subscription...')
+  logger.debug('[stopSessionParser] Stopping parser and subscription...')
   if (accumulationTimer) {
     clearInterval(accumulationTimer)
     accumulationTimer = null
@@ -997,7 +1004,7 @@ async function stopSessionParser() {
       )
     }
   } catch (e) {
-    console.warn('unsubscribe failed', e)
+    logger.warn('unsubscribe failed', e)
   }
   await cameraHelper.stopPreview().catch(() => {})
   parser = null

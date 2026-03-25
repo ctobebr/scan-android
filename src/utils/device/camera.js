@@ -1,12 +1,19 @@
 import { CameraPreview } from '@capacitor-community/camera-preview'
 import { Filesystem, Directory } from '@capacitor/filesystem'
+// MODIFIED: 导入全局日志工具
+// 原因：统一日志管理，后续逐步替换 console.log
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+// MODIFIED: 创建相机辅助专用日志记录器
+const logger = createLogger('CameraHelper')
 
 let isPreviewRunning = false
 
 const cameraHelper = {
   async startPreview(parentId = 'cameraPreview') {
     if (isPreviewRunning) {
-      console.log('[CameraHelper] 预览已在运行，跳过启动')
+      logger.info('预览已在运行，跳过启动')
       return true
     }
     try {
@@ -21,7 +28,7 @@ const cameraHelper = {
       isPreviewRunning = true
       return true
     } catch (err) {
-      console.error('CameraPreview.start failed', err)
+      logger.error('CameraPreview.start failed', err)
       isPreviewRunning = false
       return false
     }
@@ -29,16 +36,16 @@ const cameraHelper = {
 
   async stopPreview() {
     if (!isPreviewRunning) {
-      console.log('[CameraHelper] 相机未运行，无需停止')
+      logger.info('相机未运行，无需停止')
       return true
     }
     try {
       await CameraPreview.stop()
       isPreviewRunning = false
-      console.log('[CameraHelper] 相机预览已停止')
+      logger.info('相机预览已停止')
       return true
     } catch (err) {
-      console.warn('CameraPreview.stop failed', err)
+      logger.warn('CameraPreview.stop failed', err)
       isPreviewRunning = false
       return false
     }
@@ -60,7 +67,7 @@ const cameraHelper = {
     const filePath = `${targetDir}/${fileName}`
 
     try {
-      console.log('====CameraPreview.capture')
+      logger.info('====CameraPreview.capture')
       if (CameraPreview && typeof CameraPreview.capture === 'function') {
         // 1. 立即捕获照片（实时性关键）
         const res = await CameraPreview.capture({ quality: 90 })
@@ -96,13 +103,13 @@ const cameraHelper = {
             data: '',
             directory: Directory.Documents,
           })
-          console.log('[CameraHelper] .nomedia标记已创建:', targetDir)
+          logger.info('.nomedia标记已创建', { targetDir })
         } catch (nomediaErr) {
           // .nomedia创建失败不是致命错误，继续保存照片
-          console.warn('[CameraHelper] .nomedia标记创建失败（可忽略）:', nomediaErr)
+          logger.warn('.nomedia标记创建失败（可忽略）', nomediaErr)
         }
       } catch (err) {
-        console.warn('[CameraHelper] 创建目录或.nomedia文件失败:', err)
+        logger.warn('创建目录或.nomedia文件失败', err)
       }
 
       // 2. 后台异步保存文件（不阻塞主线程）
@@ -114,17 +121,17 @@ const cameraHelper = {
             data: base64,
             directory: Directory.Documents,
           })
-          console.log('[CameraHelper] 照片已后台保存:', filePath)
+          logger.info('照片已后台保存', { filePath })
         } catch (err) {
-          console.error('[CameraHelper] 后台保存照片失败:', err)
+          logger.error('后台保存照片失败', err)
         }
       }, 0)
         // 3. 立即返回结果，确保拍照实时性
-        console.log('[CameraHelper] 照片已捕获，正在后台保存')
+        logger.info('照片已捕获，正在后台保存')
         return { fileName, filePath }
       }
     } catch (err) {
-      console.warn('使用 CameraPreview.capture 拍照失败:', err)
+      logger.warn('使用 CameraPreview.capture 拍照失败', err)
       throw err
     }
   },

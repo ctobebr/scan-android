@@ -14,8 +14,23 @@
  * 校验和计算：
  *   只对 CMD + Length + Data 三部分求和，取低 8 位
  */
-import { CONTROL_COMMANDS, DEVICE_DATA_COMMANDS } from '@/constants/bluetooth'
-// import { bluetoothService } from '@/services/bluetooth'
+// MODIFIED: 导入协议常量，避免硬编码
+// 原因：统一常量管理，消除重复定义
+import {
+  CONTROL_COMMANDS,
+  DEVICE_DATA_COMMANDS,
+  PROTOCOL_HEADER_HIGH,
+  PROTOCOL_HEADER_LOW,
+  MAX_DATA_LENGTH,
+  MAX_PACKET_SIZE,
+} from '@/constants/bluetooth'
+// MODIFIED: 导入全局日志工具
+// 原因：统一日志管理，后续逐步替换 logger.debug
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+// MODIFIED: 创建协议解析专用日志记录器
+const logger = createLogger('BleProtocol')
 
 // helper to convert Uint8Array to hex string
 function uint8ArrayToHex(arr) {
@@ -29,7 +44,8 @@ export class parseBleData {
   constructor(options = {}) {
     this.options = options || {}
     this.protocolState = {
-      buffer: new Uint8Array(512), // 增大缓冲区
+      // MODIFIED: 使用导入的常量定义缓冲区大小
+      buffer: new Uint8Array(MAX_PACKET_SIZE), // 增大缓冲区
       bufferIndex: 0,
       frameState: 'WAITING_HEADER', // 状态：WAITING_HEADER, READING_CMD, READING_LEN, READING_DATA, READING_CHECKSUM
       cmd: 0,
@@ -88,9 +104,9 @@ export class parseBleData {
    */
   handleProtocolPacket(cmd, data) {
     // if (typeof cmd === 'number') {
-    //   console.log('cmd::', cmd.toString(16).padStart(2, '0'))
+    //   logger.debug('cmd::', cmd.toString(16).padStart(2, '0'))
     // } else {
-    //   console.log('cmd::', cmd)
+    //   logger.debug('cmd::', cmd)
     // }
     // 使用对象映射查找处理器
     const commandHandlers = {
@@ -124,7 +140,7 @@ export class parseBleData {
       // 调用对应的处理器
       handler.call(this, data)
     } else {
-      console.log(` Received unknown command: 0x ${cmd.toString(16).padStart(2, '0')}`)
+      logger.warn('Received unknown command', { cmd: `0x${cmd.toString(16).padStart(2, '0')}` })
     }
   }
 
@@ -145,14 +161,14 @@ export class parseBleData {
     const dataLength = packetData.length
 
     if (dataLength === 0) {
-      console.warn('[Parser] Empty packet data for XYZ parsing')
+      logger.warn('Empty packet data for XYZ parsing')
       return null
     }
 
     const pointCount = Math.floor(dataLength / 6)
 
     if (pointCount * 6 !== dataLength) {
-      console.warn(`[Parser] Data length ${dataLength} is not a multiple of 6 for XYZ parsing`)
+      logger.warn('Data length is not a multiple of 6 for XYZ parsing', { dataLength })
       return null
     }
 
@@ -176,15 +192,15 @@ export class parseBleData {
 
         const point = { x, y, z }
         points.push(point)
-        // console.log('parseBinaryPointDataXYZ', '处理直角系坐标结束')
+        // logger.debug('parseBinaryPointDataXYZ', '处理直角系坐标结束')
       } catch (err) {
-        console.error(`[Parser] Failed to parse point ${i}:`, err)
+        logger.error('Failed to parse point', { index: i, err })
         return null
       }
     }
 
     // if (process.env.NODE_ENV === 'development') {
-    //   console.log(
+    //   logger.debug(
     //     `[Parser] Parsed ${points.length} XYZ points. Sample: {x: ${points[0]?.x}, y: ${points[0]?.y}, z: ${points[0]?.z}}`,
     //   )
     // }
@@ -198,7 +214,7 @@ export class parseBleData {
     const pointCount = Math.floor(dataLength / 6)
 
     if (pointCount * 6 !== dataLength) {
-      console.warn(`Data length  ${dataLength} is not a multiple of 6 for spherical parsing.`)
+      logger.warn('Data length is not a multiple of 6 for spherical parsing', { dataLength })
       return null
     }
 
@@ -291,7 +307,8 @@ export class parseBleData {
         case 'WAITING_HEADER':
           this.protocolState.buffer[this.protocolState.bufferIndex++] = byte
           if (this.protocolState.bufferIndex >= 2) {
-            if (this.protocolState.buffer[0] === 0xaa && this.protocolState.buffer[1] === 0x55) {
+            // MODIFIED: 使用导入的常量替代硬编码
+            if (this.protocolState.buffer[0] === PROTOCOL_HEADER_HIGH && this.protocolState.buffer[1] === PROTOCOL_HEADER_LOW) {
               this.protocolState.frameState = 'READING_CMD'
               this.protocolState.bufferIndex = 0
               this.protocolState.checksum = 0 // 校验和从 CMD 开始计算
@@ -316,18 +333,20 @@ export class parseBleData {
           if (this.protocolState.dataLength === 0) {
             // 无数据区，直接跳转到校验和
             this.protocolState.frameState = 'READING_CHECKSUM'
-          } else if (this.protocolState.dataLength <= 128) {
-            // 限制单帧最大数据长度为 128 字节（防止异常）
+          // MODIFIED: 使用导入的常量替代硬编码
+          } else if (this.protocolState.dataLength <= MAX_DATA_LENGTH) {
+            // 限制单帧最大数据长度为 MAX_DATA_LENGTH 字节（防止异常）
             this.protocolState.packetData = new Uint8Array(this.protocolState.dataLength)
             this.protocolState.dataIndex = 0
             this.protocolState.frameState = 'READING_DATA'
           } else {
             // 数据长度超过限制，重置状态机
             errors.push(
-              `[Parser] Data length exceeded limit: ${this.protocolState.dataLength} > 128. Resetting state.`,
+              // MODIFIED: 使用导入的常量替代硬编码
+            `[Parser] Data length exceeded limit: ${this.protocolState.dataLength} > ${MAX_DATA_LENGTH}. Resetting state.`,
             )
-            console.warn(
-              `[Parser] Data length exceeded limit: ${this.protocolState.dataLength}. Resetting state.`,
+            logger.warn(
+              'Data length exceeded limit, resetting state', { dataLength: this.protocolState.dataLength }
             )
             this.resetProtocolState()
           }
@@ -357,13 +376,11 @@ export class parseBleData {
                 this.protocolState.cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA
               ) {
                 this.cameraCmdCount++
-                console.log(
-                  `[Parser][${new Date().toISOString()}] camera cmd #${this.cameraCmdCount}, data=${uint8ArrayToHex(
-                    this.protocolState.packetData,
-                  )}`,
+                logger.debug(
+                  'Camera cmd received', { count: this.cameraCmdCount, data: uint8ArrayToHex(this.protocolState.packetData) }
                 )
               }
-              //  console.log(
+              //  logger.debug(
               //    `[Parser][${new Date().toISOString()}] , data=${uint8ArrayToHex(
               //      this.protocolState.packetData,
               //    )}`,
@@ -376,7 +393,7 @@ export class parseBleData {
                   : String(this.protocolState.cmd)
               const errMsg = `[Parser] Failed to handle packet (cmd=${cmdStr}): ${err && err.message ? err.message : err}`
               errors.push(errMsg)
-              console.error(errMsg, err)
+              logger.error('Failed to handle packet', { cmd: cmdStr, err })
             }
           } else {
             let calcStr =
@@ -386,7 +403,7 @@ export class parseBleData {
             let byteStr = typeof byte === 'number' ? byte.toString(16) : String(byte)
             const errMsg = `[Parser] Checksum mismatch: calculated=0x${calcStr}, received=0x${byteStr}`
             errors.push(errMsg)
-            console.warn(errMsg)
+            logger.warn('Checksum mismatch', { calculated: calcStr, received: byteStr })
           }
           // 无论校验成功与否，都重置状态机
           this.resetProtocolState()
@@ -404,13 +421,13 @@ export class parseBleData {
 
   // _handleStart(data) {
   //   // TODO: 实现启动扫描逻辑
-  //   console.log('_handleStart成功')
-  //   console.log(' CMD_START (0x' + CONTROL_COMMANDS.CMD_START.toString(16) + ') received')
+  //   logger.debug('_handleStart成功')
+  //   logger.debug(' CMD_START (0x' + CONTROL_COMMANDS.CMD_START.toString(16) + ') received')
   // }
 
   // _handleStop(data) {
   //   // TODO: 实现停止扫描逻辑
-  //   console.log(' CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
+  //   logger.debug(' CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
   // }
 
   _handleStartTakePhoto() {
@@ -427,36 +444,36 @@ export class parseBleData {
         .then((ok) => {
           if (this.protocolState.photoSession.active) {
             this.protocolState.photoSession.previewStarted = !!ok
-            if (ok) console.log('相机预览已通过回调启动')
+            if (ok) logger.info('相机预览已通过回调启动')
           }
           return ok
         })
         .catch((err) => {
-          console.error('onStartPreview 回调抛错:', err)
+          logger.error('onStartPreview 回调抛错', err)
           this.protocolState.photoSession.previewStarted = false
           throw err
         })
     } else {
       this.cameraReadyPromise = Promise.resolve(false)
     }
-    console.log('_handleStartTakePhoto  over')
+    logger.info('_handleStartTakePhoto over')
   }
 
   async _handleTakePhoto(data) {
     if (this.enableDebugLogging) {
-      console.log(
-        `[Camera][${new Date().toISOString()}] _handleTakePhoto start data=${uint8ArrayToHex(data)}`,
+      logger.debug(
+        '_handleTakePhoto start', { data: uint8ArrayToHex(data) }
       )
     }
-    console.log('CMD_CTRL_CAMERA received')
+    logger.info('CMD_CTRL_CAMERA received')
 
     // --- 将拍照请求加入处理流程 ---
     return new Promise((resolve, reject) => {
       // if already processing, enqueue for later
       if (this.isProcessingPhoto) {
         if (this.enableDebugLogging) {
-          console.log(
-            `[Camera][${new Date().toISOString()}] photo command queued (busy). queue_length=${this.photoRequestQueue.length}`,
+          logger.debug(
+            'Photo command queued (busy)', { queueLength: this.photoRequestQueue.length }
           )
         }
         this.photoRequestQueue.push({ data, resolve, reject })
@@ -469,7 +486,7 @@ export class parseBleData {
 
           const meta = this.parseBinaryTakePhotoData(data)
           if (!meta) {
-            console.warn('_handleTakePhoto: 无效的拍照数据')
+            logger.warn('_handleTakePhoto: 无效的拍照数据')
             return
           }
 
@@ -482,7 +499,7 @@ export class parseBleData {
           const fileBaseName = `${currentBatchCounter}_${pitchStr}_${yawStr}`
 
           if (!this.protocolState.photoSession.active) {
-            console.warn('收到拍照命令但未处于拍照会话，自动进入预览')
+            logger.warn('收到拍照命令但未处于拍照会话，自动进入预览')
             this._handleStartTakePhoto()
           }
 
@@ -491,36 +508,36 @@ export class parseBleData {
             try {
               cameraReady = await this.cameraReadyPromise
             } catch (e) {
-              console.warn('等待相机就绪时出错:', e)
+              logger.warn('等待相机就绪时出错:', e)
               cameraReady = false
             }
           }
 
           if (!cameraReady) {
-            console.warn('相机未就绪，跳过本次拍照')
+            logger.warn('相机未就绪，跳过本次拍照')
             return
           }
 
           if (this.options.onTakePhoto && typeof this.options.onTakePhoto === 'function') {
             if (this.enableDebugLogging) {
               this.cameraCallbackCount++
-              console.log(
+              logger.debug(
                 `[Camera][${new Date().toISOString()}] invoking onTakePhoto callback. cmdCount=${this.cameraCmdCount}, callbackCount=${this.cameraCallbackCount}`,
               )
             }
-            console.log('即将执行 onTakePhoto 回调')
+            logger.debug('即将执行 onTakePhoto 回调')
             await this.options.onTakePhoto({ fileBaseName, meta })
-            console.log('onTakePhoto 回调执行完成')
+            logger.debug('onTakePhoto 回调执行完成')
           }
         } catch (err) {
-          console.error('HandleTakePhoto 内部发生错误:', err)
+          logger.error('HandleTakePhoto 内部发生错误:', err)
         } finally {
           // 清理处理标志
           this.isProcessingPhoto = false
           // 尝试处理挂起的结束请求
           this._tryProcessPendingEndRequests()
           if (this.enableDebugLogging) {
-            console.log(
+            logger.debug(
               `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,
             )
           }
@@ -536,7 +553,7 @@ export class parseBleData {
 
       // 如果正在处理，等待；否则立即执行
       if (this.isProcessingPhoto) {
-        console.log('拍照正在进行，将此请求加入等待队列')
+        logger.debug('拍照正在进行，将此请求加入等待队列')
         resolve()
       } else {
         task() // 立即执行
@@ -544,11 +561,11 @@ export class parseBleData {
     })
   }
   _handleEndTakePhoto() {
-    console.log('收到结束拍照请求')
+    logger.debug('收到结束拍照请求')
 
     // --- 检查是否有拍照正在进行 ---
     if (this.isProcessingPhoto) {
-      console.log('拍照正在进行，将结束请求加入等待队列')
+      logger.debug('拍照正在进行，将结束请求加入等待队列')
       return new Promise((resolve) => {
         this.pendingEndRequests.push(resolve) // 将 resolve 函数存起来，以便稍后调用
       })
@@ -566,13 +583,13 @@ export class parseBleData {
           try {
             this.options.onEndPreview()
           } catch (e) {
-            console.warn('onEndPreview 回调失败', e)
+            logger.warn('onEndPreview 回调失败', e)
           }
         }
         this.protocolState.photoSession.previewStarted = false
       }
       this.cameraReadyPromise = null
-      console.log('[_handleEndTakePhoto  结束拍照退出相机预览页面')
+      logger.debug('[_handleEndTakePhoto  结束拍照退出相机预览页面')
 
       if (
         this.options.onPhotoSessionEnded &&
@@ -581,17 +598,17 @@ export class parseBleData {
         try {
           this.options.onPhotoSessionEnded()
         } catch (callbackErr) {
-          console.error('onPhotoSessionEnded callback failed:', callbackErr)
+          logger.error('onPhotoSessionEnded callback failed:', callbackErr)
         }
       }
     } catch (err) {
-      console.error(' _handleEndTakePhoto 错误:', err)
+      logger.error(' _handleEndTakePhoto 错误:', err)
     }
   }
   _tryProcessPendingEndRequests() {
     // 当一个拍照任务完成后，检查是否有挂起的结束请求
     if (!this.isProcessingPhoto && this.pendingEndRequests.length > 0) {
-      console.log('处理挂起的结束请求')
+      logger.debug('处理挂起的结束请求')
       // 取出并执行一个挂起的结束请求
       const resolvePending = this.pendingEndRequests.shift()
       this._executeEndTakePhotoLogic() // 执行逻辑
@@ -601,7 +618,7 @@ export class parseBleData {
   // 解析下位机发送的拍照数据（uint16 小端序）
   parseBinaryTakePhotoData(packetData) {
     if (!packetData || packetData.length < 4) {
-      console.warn('[Parser] parseBinaryTakePhotoData: 数据长度不足')
+      logger.warn('[Parser] parseBinaryTakePhotoData: 数据长度不足')
       return null
     }
     // 创建 DataView（默认大端，需显式指定小端）
@@ -629,28 +646,28 @@ export class parseBleData {
   }
   // _handleSetSpeed(data) {
   //   // TODO: 实现设置速度逻辑
-  //   console.log(
+  //   logger.debug(
   //     ' CMD_SET_SPEED (0x' + CONTROL_COMMANDS.CMD_SET_SPEED.toString(16) + ') received',
   //   )
   // }
 
   // _handleGetPos(data) {
   //   // TODO: 实现查询位置逻辑
-  //   console.log(
+  //   logger.debug(
   //     ' CMD_GET_POS (0x' + CONTROL_COMMANDS.CMD_GET_POS.toString(16) + ') received',
   //   )
   // }
 
   // _handleSetHome(data) {
   //   // TODO: 实现设置零点逻辑
-  //   console.log(
+  //   logger.debug(
   //     ' CMD_SET_HOME (0x' + CONTROL_COMMANDS.CMD_SET_HOME.toString(16) + ') received',
   //   )
   // }
 
   // _handleGetStatus(data) {
   //   // TODO: 实现查询状态逻辑
-  //   console.log(
+  //   logger.debug(
   //     ' CMD_GET_STATUS (0x' +
   //       CONTROL_COMMANDS.CMD_GET_STATUS.toString(16) +
   //       ') received',
@@ -659,7 +676,7 @@ export class parseBleData {
 
   // _handleSetAccel(data) {
   //   // TODO: 实现设置加速度逻辑
-  //   console.log(
+  //   logger.debug(
   //     ' CMD_SET_ACCEL (0x' + CONTROL_COMMANDS.CMD_SET_ACCEL.toString(16) + ') received',
   //   )
   // }
@@ -667,12 +684,12 @@ export class parseBleData {
   _handlePointData(data) {
     // 如果处于拍照会话，忽略点云数据
     if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
-      console.log('处于拍照会话，忽略点云数据')
+      logger.debug('处于拍照会话，忽略点云数据')
       return
     }
 
     if (!data || data.length === 0 || data.length % 6 !== 0) {
-      console.warn(`CMD_POINT_DATA has invalid data length: ${data?.length}`)
+      logger.warn(`CMD_POINT_DATA has invalid data length: ${data?.length}`)
       return
     }
 
@@ -702,12 +719,12 @@ export class parseBleData {
   _handleRawPointData(data) {
     // 如果处于拍照会话，忽略点云数据
     if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
-      console.log('处于拍照会话，忽略点云数据')
+      logger.debug('处于拍照会话，忽略点云数据')
       return
     }
 
     if (!data || data.length === 0 || data.length % 6 !== 0) {
-      console.warn(`CMD_OUTPUT_POLAR has invalid data length: ${data?.length}`)
+      logger.warn(`CMD_OUTPUT_POLAR has invalid data length: ${data?.length}`)
       return
     }
 
@@ -772,7 +789,7 @@ export class parseBleData {
     const xyz = xyzPoints[0]
     const polar = polarPoints[0]
 
-    // console.log('[MergeSuccess] XYZ和极坐标数据合并成功')
+    // logger.debug('[MergeSuccess] XYZ和极坐标数据合并成功')
 
     // 合并后的点：使用XYZ的坐标（更精确，避免重复渲染）
     // 加上极坐标的原始数据用于保存到文件
@@ -800,14 +817,14 @@ export class parseBleData {
 
     if (this.receivedFormat === 'both') {
       // 双格式模式，但合并超时，丢弃数据（不保存到txt）
-      console.log('[MergeTimeout] 双格式模式，数据超时未合并，丢弃')
+      logger.debug('[MergeTimeout] 双格式模式，数据超时未合并，丢弃')
     } else if (pending.xyz) {
       // 单格式模式（XYZ），正常输出
-      console.log('[SingleMode] XYZ单独输出')
+      logger.debug('[SingleMode] XYZ单独输出')
       this.protocolState.accumulatedPoints.push(...pending.xyz)
     } else if (pending.polar) {
       // 单格式模式（极坐标），正常输出
-      console.log('[SingleMode] 极坐标单独输出')
+      logger.debug('[SingleMode] 极坐标单独输出')
       this.protocolState.accumulatedPoints.push(...pending.polar)
     }
 
@@ -835,7 +852,7 @@ export class parseBleData {
    */
   _handleReadCalibParam(data) {
     if (data.byteLength !== 12) {
-      console.warn('标定参数数据长度错误，期望 12 字节，实际:', data.byteLength)
+      logger.warn('标定参数数据长度错误，期望 12 字节，实际:', data.byteLength)
       return
     }
     // 统一使用 data.buffer, data.byteOffset
@@ -844,7 +861,7 @@ export class parseBleData {
     const y = view.getFloat32(4, true)
     const z = view.getFloat32(8, true)
 
-    console.log('✅ 收到下位机标定参数响应: X轴_mm=' + x + ', Y轴_mm=' + y + ', Z轴_mm=' + z)
+    logger.debug('✅ 收到下位机标定参数响应: X轴_mm=' + x + ', Y轴_mm=' + y + ', Z轴_mm=' + z)
     if (this.options.onCalibParamResponse) {
       this.options.onCalibParamResponse({ x, y, z })
     }
@@ -856,14 +873,14 @@ export class parseBleData {
    */
   _handleReadRotateSpeed(data) {
     if (data.byteLength !== 8) {
-      console.warn('转动速度数据长度错误，期望 8 字节，实际:', data.byteLength)
+      logger.warn('转动速度数据长度错误，期望 8 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const pitchSpeed = view.getFloat32(0, true)
     const yawSpeed = view.getFloat32(4, true)
 
-    console.log(
+    logger.debug(
       '✅ 收到下位机转动速度响应: 俯仰轴速度_rad_ms=' +
         pitchSpeed +
         ', 偏航轴速度_rad_ms=' +
@@ -880,13 +897,13 @@ export class parseBleData {
    */
   _handleReadScanTime(data) {
     if (data.byteLength !== 2) {
-      console.warn('扫描时间数据长度错误，期望 2 字节，实际:', data.byteLength)
+      logger.warn('扫描时间数据长度错误，期望 2 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const seconds = view.getUint16(0, true)
 
-    console.log('✅ 收到下位机扫描时间响应: 扫描时间_秒=' + seconds)
+    logger.debug('✅ 收到下位机扫描时间响应: 扫描时间_秒=' + seconds)
     if (this.options.onScanTimeResponse) {
       this.options.onScanTimeResponse({ seconds })
     }
@@ -898,14 +915,14 @@ export class parseBleData {
    */
   _handleReadPitchLimit(data) {
     if (data.byteLength !== 8) {
-      console.warn('俯仰角限制数据长度错误，期望 8 字节，实际:', data.byteLength)
+      logger.warn('俯仰角限制数据长度错误，期望 8 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const upperLimitRad = view.getFloat32(0, true)
     const lowerLimitRad = view.getFloat32(4, true)
 
-    console.log(
+    logger.debug(
       '✅ 收到下位机俯仰角限制响应: 俯仰角上限_rad=' +
         upperLimitRad +
         ', 俯仰角下限_rad=' +
@@ -922,13 +939,13 @@ export class parseBleData {
    */
   _handleReadOutputXYZ(data) {
     if (data.byteLength !== 1) {
-      console.warn('查询输出XYZ状态数据长度错误，期望 1 字节，实际:', data.byteLength)
+      logger.warn('查询输出XYZ状态数据长度错误，期望 1 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const status = view.getUint8(0) // 0:关闭, 1:开启
 
-    console.log('✅ 收到下位机查询输出XYZ状态响应: status=' + status)
+    logger.debug('✅ 收到下位机查询输出XYZ状态响应: status=' + status)
     if (this.options.onOutputXYZResponse) {
       this.options.onOutputXYZResponse({ status: status === 1 })
     }
@@ -940,13 +957,13 @@ export class parseBleData {
    */
   _handleReadOutputPolar(data) {
     if (data.byteLength !== 1) {
-      console.warn('查询输出极坐标状态数据长度错误，期望 1 字节，实际:', data.byteLength)
+      logger.warn('查询输出极坐标状态数据长度错误，期望 1 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const status = view.getUint8(0) // 0:关闭, 1:开启
 
-    console.log('✅ 收到下位机查询输出极坐标状态响应: status=' + status)
+    logger.debug('✅ 收到下位机查询输出极坐标状态响应: status=' + status)
     if (this.options.onOutputPolarResponse) {
       this.options.onOutputPolarResponse({ status: status === 1 })
     }
@@ -958,7 +975,7 @@ export class parseBleData {
    */
   _handleReadVPID(data) {
     if (data.byteLength !== 16) {
-      console.warn('速度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
+      logger.warn('速度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
@@ -967,7 +984,7 @@ export class parseBleData {
     const i = view.getFloat32(8, true)
     const d = view.getFloat32(12, true)
 
-    console.log(
+    logger.debug(
       '✅ 收到下位机速度环PID响应: 轴=' +
         (axis === 0 ? 'X' : 'Y') +
         ', P=' +
@@ -988,7 +1005,7 @@ export class parseBleData {
    */
   _handleReadAPID(data) {
     if (data.byteLength !== 16) {
-      console.warn('角度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
+      logger.warn('角度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
@@ -997,7 +1014,7 @@ export class parseBleData {
     const i = view.getFloat32(8, true)
     const d = view.getFloat32(12, true)
 
-    console.log(
+    logger.debug(
       '✅ 收到下位机角度环PID响应: 轴=' +
         (axis === 0 ? 'X' : 'Y') +
         ', P=' +
@@ -1018,13 +1035,13 @@ export class parseBleData {
    */
   _handleReadPitchOffset(data) {
     if (data.byteLength !== 4) {
-      console.warn('俯仰角零偏数据长度错误，期望 4 字节，实际:', data.byteLength)
+      logger.warn('俯仰角零偏数据长度错误，期望 4 字节，实际:', data.byteLength)
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const offset = view.getFloat32(0, true) // 零偏值，小端序，单位：度
 
-    console.log('✅ 收到下位机俯仰角零偏响应: 零偏值_deg=' + offset)
+    logger.debug('✅ 收到下位机俯仰角零偏响应: 零偏值_deg=' + offset)
     if (this.options.onPitchOffsetResponse) {
       this.options.onPitchOffsetResponse({ value: offset })
     }

@@ -6,6 +6,11 @@ import {
   NUS_WRITE_CHAR_UUID,
   NUS_NOTIFY_CHAR_UUID,
 } from '@/constants/bluetooth'
+// 导入全局日志工具
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('BluetoothStore')
 
 export const useBluetoothStore = defineStore('bluetooth', {
   state: () => ({
@@ -30,7 +35,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
         // Android 要求：BLUETOOTH_SCAN + 任一位置权限
         return hasBluetoothScan && (hasFineLocation || hasCoarseLocation)
       } catch (err) {
-        console.warn('权限请求被拒绝或出错:', err)
+        logger.warn('权限请求被拒绝或出错', err)
         return false
       }
     },
@@ -45,7 +50,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
       try {
         await bluetoothService.initBluetooth()
       } catch (err) {
-        console.error('蓝牙初始化失败:', err)
+        logger.error('蓝牙初始化失败', err)
         alert('蓝牙初始化失败，请重试')
         return
       }
@@ -59,10 +64,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
       this.scanning = true
       try {
         const found = await bluetoothService.scanDevices(5000)
-        console.log('发现附近的设备:', JSON.stringify(found))
+        logger.info('发现附近的设备', found)
         this.devices = found
       } catch (err) {
-        console.error('扫描异常:', err)
+        logger.error('扫描异常', err)
         alert('扫描过程中出错')
       } finally {
         this.scanning = false
@@ -76,7 +81,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
      * @param {boolean} isManualDisconnect - 是否为手动断开
      */
     handleDeviceDisconnected(deviceId, isManualDisconnect = false) {
-      console.log(`[BluetoothStore] 设备断开处理: ${deviceId}, 手动: ${isManualDisconnect}`)
+      logger.info('设备断开处理', { deviceId, isManualDisconnect })
 
       // 只处理当前连接的设备
       if (this.connectingDeviceId !== deviceId) {
@@ -134,7 +139,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
         this.connectingStatus = 2 // 已连接
       } catch (err) {
-        console.error('连接失败:', err)
+        logger.error('连接失败', err)
         this.connectingStatus = 0 // 回到未连接
         this.connectingDeviceId = null
         this.stopAccumulationTimer()
@@ -148,7 +153,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
      */
     startAccumulationTimer() {
       if (this.accumulationTimer !== null) {
-        console.warn('Accumulation timer already running')
+        logger.warn('Accumulation timer already running')
         return
       }
 
@@ -159,9 +164,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
         }
       }, this.ACCUMULATION_INTERVAL)
 
-      console.log(
-        `[Accumulation] Timer started - Interval: ${this.ACCUMULATION_INTERVAL}ms, Min batch: ${this.MIN_BATCH_SIZE}`,
-      )
+      logger.info('Timer started', { interval: this.ACCUMULATION_INTERVAL, minBatch: this.MIN_BATCH_SIZE })
     },
 
     /**
@@ -204,7 +207,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
         this.connectingDeviceId = null
       } catch (e) {
         this.connectingStatus = 2
-        console.log('断开连接失败', e)
+        logger.error('断开连接失败', e)
       }
     },
     async handleSendStart() {
@@ -216,7 +219,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
         )
       } catch (err) {
-        console.log('发送开始指令失败：', err)
+        logger.error('发送开始指令失败', err)
       }
     },
     async handleSendEnd() {
@@ -228,7 +231,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
         )
       } catch (err) {
-        console.log('发送结束指令失败：', err)
+        logger.error('发送结束指令失败', err)
       }
     },
 
@@ -244,7 +247,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
           z,
         )
       } catch (err) {
-        console.log('发送设置标定参数指令失败：', err)
+        logger.error('发送设置标定参数指令失败', err)
       }
     },
     async handleSendRotateSpeed(pitchSpeed, yawSpeed) {
@@ -258,7 +261,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
           yawSpeed,
         )
       } catch (err) {
-        console.log('发送设置转动速度指令失败：', err)
+        logger.error('发送设置转动速度指令失败', err)
       }
     },
     async handleSendScanTime(seconds) {
@@ -271,7 +274,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
           seconds,
         )
       } catch (err) {
-        console.log('发送设置扫描时间指令失败：', err)
+        logger.error('发送设置扫描时间指令失败', err)
       }
     },
     async handleSendPitchLimit(upperLimitRad, lowerLimitRad) {
@@ -285,7 +288,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
           lowerLimitRad,
         )
       } catch (err) {
-        console.log('发送设置俯仰角上下限指令失败：', err)
+        logger.error('发送设置俯仰角上下限指令失败', err)
       }
     },
     /**
@@ -300,9 +303,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
           on,
         )
-        console.log(`发送设置输出XYZ指令成功: ${on ? '开启' : '关闭'}`)
+        logger.info('发送设置输出XYZ指令成功', { on })
       } catch (err) {
-        console.log('发送设置输出XYZ指令失败：', err)
+        logger.error('发送设置输出XYZ指令失败', err)
         throw err
       }
     },
@@ -319,9 +322,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
           on,
         )
-        console.log(`发送设置输出极坐标指令成功: ${on ? '开启' : '关闭'}`)
+        logger.info('发送设置输出极坐标指令成功', { on })
       } catch (err) {
-        console.log('发送设置输出极坐标指令失败：', err)
+        logger.error('发送设置输出极坐标指令失败', err)
         throw err
       }
     },
@@ -338,9 +341,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送读取标定参数指令成功')
+        logger.info('发送读取标定参数指令成功')
       } catch (err) {
-        console.log('发送读取标定参数指令失败：', err)
+        logger.error('发送读取标定参数指令失败', err)
         throw err
       }
     },
@@ -355,9 +358,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送读取转动速度指令成功')
+        logger.info('发送读取转动速度指令成功')
       } catch (err) {
-        console.log('发送读取转动速度指令失败：', err)
+        logger.error('发送读取转动速度指令失败', err)
         throw err
       }
     },
@@ -372,9 +375,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送读取扫描时间指令成功')
+        logger.info('发送读取扫描时间指令成功')
       } catch (err) {
-        console.log('发送读取扫描时间指令失败：', err)
+        logger.error('发送读取扫描时间指令失败', err)
         throw err
       }
     },
@@ -389,9 +392,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送读取俯仰角限位指令成功')
+        logger.info('发送读取俯仰角限位指令成功')
       } catch (err) {
-        console.log('发送读取俯仰角限位指令失败：', err)
+        logger.error('发送读取俯仰角限位指令失败', err)
         throw err
       }
     },
@@ -405,9 +408,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送查询输出XYZ状态指令成功')
+        logger.info('发送查询输出XYZ状态指令成功')
       } catch (err) {
-        console.log('发送查询输出XYZ状态指令失败：', err)
+        logger.error('发送查询输出XYZ状态指令失败', err)
         throw err
       }
     },
@@ -422,9 +425,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送查询输出极坐标状态指令成功')
+        logger.info('发送查询输出极坐标状态指令成功')
       } catch (err) {
-        console.log('发送查询输出极坐标状态指令失败：', err)
+        logger.error('发送查询输出极坐标状态指令失败', err)
         throw err
       }
     },
@@ -447,9 +450,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           i,
           d,
         )
-        console.log('发送设置速度环PID指令成功')
+        logger.info('发送设置速度环PID指令成功')
       } catch (err) {
-        console.log('发送设置速度环PID指令失败：', err)
+        logger.error('发送设置速度环PID指令失败', err)
         throw err
       }
     },
@@ -472,9 +475,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           i,
           d,
         )
-        console.log('发送设置角度环PID指令成功')
+        logger.info('发送设置角度环PID指令成功')
       } catch (err) {
-        console.log('发送设置角度环PID指令失败：', err)
+        logger.error('发送设置角度环PID指令失败', err)
         throw err
       }
     },
@@ -491,9 +494,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
           offset,
         )
-        console.log('发送设置俯仰角零偏指令成功')
+        logger.info('发送设置俯仰角零偏指令成功')
       } catch (err) {
-        console.log('发送设置俯仰角零偏指令失败：', err)
+        logger.error('发送设置俯仰角零偏指令失败', err)
         throw err
       }
     },
@@ -510,9 +513,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
           axis,
         )
-        console.log('发送读取速度环PID指令成功')
+        logger.info('发送读取速度环PID指令成功')
       } catch (err) {
-        console.log('发送读取速度环PID指令失败：', err)
+        logger.error('发送读取速度环PID指令失败', err)
         throw err
       }
     },
@@ -529,9 +532,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_WRITE_CHAR_UUID,
           axis,
         )
-        console.log('发送读取角度环PID指令成功')
+        logger.info('发送读取角度环PID指令成功')
       } catch (err) {
-        console.log('发送读取角度环PID指令失败：', err)
+        logger.error('发送读取角度环PID指令失败', err)
         throw err
       }
     },
@@ -546,9 +549,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
           NUS_SERVICE_UUID,
           NUS_WRITE_CHAR_UUID,
         )
-        console.log('发送读取俯仰角零偏指令成功')
+        logger.info('发送读取俯仰角零偏指令成功')
       } catch (err) {
-        console.log('发送读取俯仰角零偏指令失败：', err)
+        logger.error('发送读取俯仰角零偏指令失败', err)
         throw err
       }
     },

@@ -15,35 +15,23 @@ import {
   FeatureFlags
 } from '@/constants/storage'
 import { FilePathError, sanitizePath } from '@/utils/storage/validate'
+// MODIFIED: 使用全局日志工具替换独立实现
+// 原因：统一日志管理，消除代码重复
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger, LogLevel, configureLogger } from '@/utils/logger'
 
 // ========== 日志工具 ==========
-const logger = {
-  debug: (msg, ...args) => {
-    if (FeatureFlags.ENABLE_DETAILED_LOGGING) {
-      const serializedArgs = args.map(arg => 
-        typeof arg === 'object' ? JSON.stringify(arg) : arg
-      )
-      console.debug(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
+// MODIFIED: 使用全局日志工具创建模块专用记录器
+const logger = createLogger('FileSystem')
+
+// MODIFIED: 根据 FeatureFlags 配置日志级别
+// 保持与原有行为兼容
+if (!FeatureFlags.ENABLE_DETAILED_LOGGING) {
+  configureLogger({
+    modules: {
+      FileSystem: false
     }
-  },
-  info: (msg, ...args) => {
-    const serializedArgs = args.map(arg => 
-      typeof arg === 'object' ? JSON.stringify(arg) : arg
-    )
-    console.info(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
-  },
-  warn: (msg, ...args) => {
-    const serializedArgs = args.map(arg => 
-      typeof arg === 'object' ? JSON.stringify(arg) : arg
-    )
-    console.warn(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
-  },
-  error: (msg, ...args) => {
-    const serializedArgs = args.map(arg => 
-      typeof arg === 'object' ? JSON.stringify(arg) : arg
-    )
-    console.error(`[${MODULE_NAME}] ${msg}`, ...serializedArgs)
-  }
+  })
 }
 
 // ========== 辅助函数 ==========

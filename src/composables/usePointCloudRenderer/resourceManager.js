@@ -3,6 +3,11 @@
  * 负责资源释放和内存统计
  */
 
+// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
+import { createLogger } from '@/utils/logger'
+
+const logger = createLogger('ResourceManager')
+
 /**
  * 创建资源管理器
  * @param {Object} params - 参数对象
@@ -15,7 +20,7 @@ export function createResourceManager({ rendererCore, bufferManager }) {
    * 释放所有资源
    */
   function dispose() {
-    console.log('[Renderer] Disposing resources...')
+    logger.info('Disposing resources...')
 
     const animationId = rendererCore.getAnimationId()
     if (animationId) {
@@ -43,7 +48,7 @@ export function createResourceManager({ rendererCore, bufferManager }) {
       }
     }
 
-    console.log('[Renderer] Resources disposed')
+    logger.info('Resources disposed')
   }
 
   /**
