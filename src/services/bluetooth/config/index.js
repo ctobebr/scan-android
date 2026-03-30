@@ -8,7 +8,7 @@
  * @since 2026-03-24
  */
 
-// MODIFIED: 导入协议常量，避免重复定义
+// 导入协议常量，避免重复定义
 // 原因：统一常量管理，消除重复定义
 import {
   PROTOCOL_HEADER_HIGH,
@@ -56,7 +56,7 @@ export const DEFAULT_CONFIG = {
     // 读取超时时间（毫秒）
     readTimeout: 5000,
     // 最大数据包大小（字节）
-    // MODIFIED: 使用导入的常量
+    // 使用导入的常量
     maxPacketSize: MAX_PACKET_SIZE,
     // 服务缓存持续时间（毫秒）
     cacheDuration: 60000,
@@ -65,13 +65,13 @@ export const DEFAULT_CONFIG = {
   // 协议配置
   protocol: {
     // 协议头高字节
-    // MODIFIED: 使用导入的常量
+    // 使用导入的常量
     headerHigh: PROTOCOL_HEADER_HIGH,
     // 协议头低字节
-    // MODIFIED: 使用导入的常量
+    // 使用导入的常量
     headerLow: PROTOCOL_HEADER_LOW,
     // 最大数据长度
-    // MODIFIED: 使用导入的常量
+    // 使用导入的常量
     maxDataLength: MAX_DATA_LENGTH,
     // 校验和计算方式
     checksumMode: 'sum', // 'sum' | 'crc8' | 'crc16'
@@ -255,7 +255,10 @@ function validateConnectionConfig(connectionConfig) {
   }
 
   if (connectionConfig.maxReconnectAttempts !== undefined) {
-    if (!Number.isInteger(connectionConfig.maxReconnectAttempts) || connectionConfig.maxReconnectAttempts < 0) {
+    if (
+      !Number.isInteger(connectionConfig.maxReconnectAttempts) ||
+      connectionConfig.maxReconnectAttempts < 0
+    ) {
       throw new Error('connection.maxReconnectAttempts 必须是非负整数')
     }
   }
@@ -289,7 +292,10 @@ function validateProtocolConfig(protocolConfig) {
   }
 
   const validChecksumModes = ['sum', 'crc8', 'crc16']
-  if (protocolConfig.checksumMode !== undefined && !validChecksumModes.includes(protocolConfig.checksumMode)) {
+  if (
+    protocolConfig.checksumMode !== undefined &&
+    !validChecksumModes.includes(protocolConfig.checksumMode)
+  ) {
     throw new Error(`protocol.checksumMode 必须是以下之一: ${validChecksumModes.join(', ')}`)
   }
 }

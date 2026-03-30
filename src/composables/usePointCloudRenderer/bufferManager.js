@@ -81,7 +81,7 @@ export function createBufferManager(config) {
       capacity = newCap
       return true
     } catch (err) {
-      // MODIFIED: 添加用户友好的错误提示
+      // 添加用户友好的错误提示
       logger.error('Memory allocation failed', err)
       showToast({ message: '内存不足，无法添加更多点云', position: 'bottom' })
       throw new Error(`无法分配 ${newCap} 个点的内存: ${err.message}`)

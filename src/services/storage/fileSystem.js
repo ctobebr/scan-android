@@ -12,25 +12,25 @@ import {
   MAX_RECURSION_DEPTH,
   RETRY_CONFIG,
   MODULE_NAME,
-  FeatureFlags
+  FeatureFlags,
 } from '@/constants/storage'
 import { FilePathError, sanitizePath } from '@/utils/storage/validate'
-// MODIFIED: 使用全局日志工具替换独立实现
+// 使用全局日志工具替换独立实现
 // 原因：统一日志管理，消除代码重复
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger, LogLevel, configureLogger } from '@/utils/logger'
 
 // ========== 日志工具 ==========
-// MODIFIED: 使用全局日志工具创建模块专用记录器
+// 使用全局日志工具创建模块专用记录器
 const logger = createLogger('FileSystem')
 
-// MODIFIED: 根据 FeatureFlags 配置日志级别
+// 根据 FeatureFlags 配置日志级别
 // 保持与原有行为兼容
 if (!FeatureFlags.ENABLE_DETAILED_LOGGING) {
   configureLogger({
     modules: {
-      FileSystem: false
-    }
+      FileSystem: false,
+    },
   })
 }
 
@@ -42,7 +42,7 @@ if (!FeatureFlags.ENABLE_DETAILED_LOGGING) {
  * @returns {Promise<void>}
  */
 async function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -54,11 +54,10 @@ async function sleep(ms) {
  */
 function wrapError(error, code, context) {
   if (error instanceof FilePathError) return error
-  return new FilePathError(
-    code,
-    `${context}: ${error.message}`,
-    { originalError: error.message, stack: error.stack }
-  )
+  return new FilePathError(code, `${context}: ${error.message}`, {
+    originalError: error.message,
+    stack: error.stack,
+  })
 }
 
 /**
@@ -80,10 +79,7 @@ async function retryOperation(operation, context, maxRetries = RETRY_CONFIG.MAX_
     } catch (error) {
       lastError = error
       if (i < maxRetries - 1) {
-        const delay = Math.min(
-          RETRY_CONFIG.BASE_DELAY * Math.pow(2, i),
-          RETRY_CONFIG.MAX_DELAY
-        )
+        const delay = Math.min(RETRY_CONFIG.BASE_DELAY * Math.pow(2, i), RETRY_CONFIG.MAX_DELAY)
         logger.warn(`${context} 失败，${delay}ms后重试 (${i + 1}/${maxRetries})`, error.message)
         await sleep(delay)
       }
@@ -109,12 +105,13 @@ export async function readFile(path, opts = {}) {
   }
 
   return retryOperation(
-    () => Filesystem.readFile({
-      path: sanitizedPath,
-      directory: Directory.Documents,
-      encoding: opts.encoding
-    }),
-    `读取文件 ${sanitizedPath}`
+    () =>
+      Filesystem.readFile({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+        encoding: opts.encoding,
+      }),
+    `读取文件 ${sanitizedPath}`,
   )
 }
 
@@ -134,13 +131,14 @@ export async function writeFile(path, data, opts = {}) {
   }
 
   return retryOperation(
-    () => Filesystem.writeFile({
-      path: sanitizedPath,
-      data,
-      directory: Directory.Documents,
-      encoding: opts.encoding
-    }),
-    `写入文件 ${sanitizedPath}`
+    () =>
+      Filesystem.writeFile({
+        path: sanitizedPath,
+        data,
+        directory: Directory.Documents,
+        encoding: opts.encoding,
+      }),
+    `写入文件 ${sanitizedPath}`,
   )
 }
 
@@ -157,11 +155,12 @@ export async function deleteFile(path) {
   }
 
   return retryOperation(
-    () => Filesystem.deleteFile({
-      path: sanitizedPath,
-      directory: Directory.Documents
-    }),
-    `删除文件 ${sanitizedPath}`
+    () =>
+      Filesystem.deleteFile({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+      }),
+    `删除文件 ${sanitizedPath}`,
   )
 }
 
@@ -178,11 +177,12 @@ export async function getUri(path) {
   }
 
   return retryOperation(
-    () => Filesystem.getUri({
-      path: sanitizedPath,
-      directory: Directory.Documents
-    }),
-    `获取URI ${sanitizedPath}`
+    () =>
+      Filesystem.getUri({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+      }),
+    `获取URI ${sanitizedPath}`,
   )
 }
 
@@ -199,11 +199,12 @@ export async function stat(path) {
   }
 
   return retryOperation(
-    () => Filesystem.stat({
-      path: sanitizedPath,
-      directory: Directory.Documents
-    }),
-    `获取状态 ${sanitizedPath}`
+    () =>
+      Filesystem.stat({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+      }),
+    `获取状态 ${sanitizedPath}`,
   )
 }
 
@@ -222,11 +223,12 @@ export async function readdir(path) {
   }
 
   return retryOperation(
-    () => Filesystem.readdir({
-      path: sanitizedPath,
-      directory: Directory.Documents
-    }),
-    `读取目录 ${sanitizedPath}`
+    () =>
+      Filesystem.readdir({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+      }),
+    `读取目录 ${sanitizedPath}`,
   )
 }
 
@@ -245,12 +247,13 @@ export async function mkdir(path, opts = {}) {
   }
 
   return retryOperation(
-    () => Filesystem.mkdir({
-      path: sanitizedPath,
-      directory: Directory.Documents,
-      recursive: !!opts.recursive
-    }),
-    `创建目录 ${sanitizedPath}`
+    () =>
+      Filesystem.mkdir({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+        recursive: !!opts.recursive,
+      }),
+    `创建目录 ${sanitizedPath}`,
   )
 }
 
@@ -271,22 +274,24 @@ export async function rmdir(path, opts = {}) {
   // 优先使用原生 rmdir
   if (Filesystem.rmdir) {
     return retryOperation(
-      () => Filesystem.rmdir({
-        path: sanitizedPath,
-        directory: Directory.Documents,
-        recursive: !!opts.recursive
-      }),
-      `删除目录 ${sanitizedPath}`
+      () =>
+        Filesystem.rmdir({
+          path: sanitizedPath,
+          directory: Directory.Documents,
+          recursive: !!opts.recursive,
+        }),
+      `删除目录 ${sanitizedPath}`,
     )
   }
 
   // 降级方案
   return retryOperation(
-    () => Filesystem.deleteFile({
-      path: sanitizedPath,
-      directory: Directory.Documents
-    }),
-    `删除目录(降级) ${sanitizedPath}`
+    () =>
+      Filesystem.deleteFile({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+      }),
+    `删除目录(降级) ${sanitizedPath}`,
   )
 }
 
@@ -310,13 +315,14 @@ export async function rename(oldPath, newPath) {
   }
 
   return retryOperation(
-    () => Filesystem.rename({
-      directory: Directory.Documents,
-      from: sanitizedOldPath,
-      to: sanitizedNewPath,
-      path: sanitizedOldPath
-    }),
-    `重命名 ${sanitizedOldPath} -> ${sanitizedNewPath}`
+    () =>
+      Filesystem.rename({
+        directory: Directory.Documents,
+        from: sanitizedOldPath,
+        to: sanitizedNewPath,
+        path: sanitizedOldPath,
+      }),
+    `重命名 ${sanitizedOldPath} -> ${sanitizedNewPath}`,
   )
 }
 
@@ -348,122 +354,218 @@ export async function ensureDir(path) {
   return sanitizedPath
 }
 
-// ========== 删除操作拆分（符合单一职责）==========
+// ========== 删除操作（统一接口）==========
 
 /**
  * 使用原生 API 删除路径
  * @param {string} sanitizedPath - 已清理的路径
+ * @param {boolean} recursive - 是否递归删除
  * @returns {Promise<boolean>} 是否成功删除
  */
-async function deleteWithNativeApi(sanitizedPath) {
+async function deleteWithNativeApi(sanitizedPath, recursive = true) {
   try {
     if (Filesystem.rmdir) {
-      await Filesystem.rmdir({
-        path: sanitizedPath,
-        directory: Directory.Documents,
-        recursive: true
-      })
-      logger.info('删除成功（使用rmdir）', { path: sanitizedPath })
-      return true
+      try {
+        await Filesystem.rmdir({
+          path: sanitizedPath,
+          directory: Directory.Documents,
+          recursive: recursive,
+        })
+        logger.info('删除成功（使用rmdir）', { path: sanitizedPath, recursive })
+        return true
+      } catch (rmdirError) {
+        // rmdir 失败，记录错误并继续尝试 deleteFile
+        logger.warn('rmdir 失败', { path: sanitizedPath, error: rmdirError.message })
+        // 不要在这里返回，继续尝试 deleteFile
+      }
     }
 
-    await Filesystem.deleteFile({
-      path: sanitizedPath,
-      directory: Directory.Documents
-    })
-    logger.info('删除成功（使用deleteFile）', { path: sanitizedPath })
-    return true
+    // 尝试使用 deleteFile（适用于文件或空目录）
+    try {
+      await Filesystem.deleteFile({
+        path: sanitizedPath,
+        directory: Directory.Documents,
+      })
+      logger.info('删除成功（使用deleteFile）', { path: sanitizedPath })
+      return true
+    } catch (deleteError) {
+      // deleteFile 也失败了
+      logger.warn('deleteFile 失败', { path: sanitizedPath, error: deleteError.message })
+    }
+
+    // 所有方法都失败了，返回 false 让手动删除流程执行
+    return false
   } catch (e) {
     // 文件不存在不算错误
     if (e.message && e.message.includes('does not exist')) {
       logger.debug('文件不存在，跳过删除', { path: sanitizedPath })
       return true
     }
+    logger.error('删除失败', { path: sanitizedPath, error: e.message })
     return false
   }
 }
 
 /**
- * 手动递归删除目录内容
- * @param {string} sanitizedPath - 已清理的目录路径
- * @returns {Promise<void>}
- */
-async function deleteDirectoryContents(sanitizedPath) {
-  const items = await listFilesRecursive(sanitizedPath)
-
-  for (const itemPath of items) {
-    try {
-      await Filesystem.deleteFile({
-        path: itemPath,
-        directory: Directory.Documents
-      })
-    } catch (err) {
-      logger.warn('删除子文件失败', { path: itemPath, error: err.message })
-    }
-  }
-}
-
-/**
- * 删除空目录
- * @param {string} sanitizedPath - 已清理的目录路径
+ * 递归删除目录中的所有内容
+ * @param {string} currentPath - 当前目录路径
+ * @param {Object} options - 删除选项
+ * @param {boolean} options.deleteSelf - 是否删除目录本身
+ * @param {number} options.maxDepth - 最大递归深度
+ * @param {boolean} options.force - 是否强制删除（忽略错误）
  * @returns {Promise<boolean>} 是否成功删除
  */
-async function deleteEmptyDirectory(sanitizedPath) {
+async function deleteDirectoryInternal(currentPath, options = {}) {
+  const {
+    deleteSelf = true,
+    maxDepth = 10,
+    force = false,
+  } = options
+
+  if (maxDepth <= 0) {
+    logger.warn('达到最大递归深度，跳过删除', { path: currentPath })
+    return false
+  }
+
   try {
-    if (Filesystem.rmdir) {
-      await Filesystem.rmdir({
-        path: sanitizedPath,
-        directory: Directory.Documents,
-        recursive: true
-      })
-    } else {
-      await Filesystem.deleteFile({
-        path: sanitizedPath,
-        directory: Directory.Documents
-      })
+    // 首先尝试使用原生API递归删除（更高效）
+    if (Filesystem.rmdir && deleteSelf) {
+      try {
+        await Filesystem.rmdir({
+          path: currentPath,
+          directory: Directory.Documents,
+          recursive: true,
+        })
+        logger.info('原生递归删除成功', { path: currentPath })
+        return true
+      } catch (nativeError) {
+        logger.debug('原生递归删除失败，使用手动删除', { path: currentPath, error: nativeError.message })
+      }
     }
+
+    // 手动递归删除
+    const res = await readdir(currentPath)
+    const items = res.files || []
+
+    // 先删除所有文件
+    for (const item of items) {
+      if (item.type === 'file') {
+        const filePath = `${currentPath}/${item.name}`
+        try {
+          await Filesystem.deleteFile({
+            path: filePath,
+            directory: Directory.Documents,
+          })
+          logger.debug('删除文件成功', { path: filePath })
+        } catch (err) {
+          if (!force) {
+            logger.warn('删除文件失败', { path: filePath, error: err.message })
+          }
+        }
+      }
+    }
+
+    // 递归删除所有子目录
+    for (const item of items) {
+      if (item.type === 'directory') {
+        const dirPath = `${currentPath}/${item.name}`
+        await deleteDirectoryInternal(dirPath, {
+          deleteSelf: true,
+          maxDepth: maxDepth - 1,
+          force,
+        })
+      }
+    }
+
+    // 删除目录本身（如果需要）
+    if (deleteSelf) {
+      try {
+        await Filesystem.rmdir({
+          path: currentPath,
+          directory: Directory.Documents,
+          recursive: false, // 内容已清空，不需要递归
+        })
+        logger.debug('删除目录本身成功', { path: currentPath })
+      } catch (err) {
+        if (!force) {
+          logger.warn('删除目录本身失败', { path: currentPath, error: err.message })
+          return false
+        }
+      }
+    }
+
     return true
   } catch (e) {
     if (e.message && e.message.includes('does not exist')) {
+      logger.debug('目录不存在，视为删除成功', { path: currentPath })
       return true
+    }
+    if (!force) {
+      logger.warn('读取目录失败', { path: currentPath, error: e.message })
     }
     return false
   }
 }
 
 /**
- * 递归删除文件或文件夹
- * @param {string} path - 要删除的路径
- * @returns {Promise<void>}
- * @throws {FilePathError} 当删除失败时抛出
+ * 删除目录
+ * @param {string} path - 要删除的目录路径
+ * @param {Object} [options={}] - 删除选项
+ * @param {boolean} [options.recursive=true] - 是否递归删除子目录和文件
+ * @param {boolean} [options.includeSelf=true] - 是否删除目录本身
+ * @param {boolean} [options.force=false] - 是否强制删除（忽略错误继续）
+ * @param {number} [options.maxDepth=10] - 最大递归深度
+ * @returns {Promise<boolean>} 删除是否成功
+ * @throws {FilePathError} 当路径无效或删除失败时抛出
+ * @example
+ * // 删除整个目录（包括子目录和文件）
+ * await deleteDirectory('pointcloud/session1')
+ *
+ * // 只删除目录内容，保留目录本身
+ * await deleteDirectory('pointcloud/session1', { includeSelf: false })
+ *
+ * // 强制删除，忽略错误
+ * await deleteDirectory('pointcloud/session1', { force: true })
  */
-export async function deletePath(path) {
+export async function deleteDirectory(path, options = {}) {
+  const {
+    recursive = true,
+    includeSelf = true,
+    force = false,
+    maxDepth = 10,
+  } = options
+
   const sanitizedPath = sanitizePath(path)
   if (!sanitizedPath) {
     throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '路径无效')
   }
 
-  // 尝试使用原生 API 删除
-  const nativeSuccess = await deleteWithNativeApi(sanitizedPath)
-  if (nativeSuccess) {
-    return
-  }
+  logger.info('开始删除目录', { path: sanitizedPath, recursive, includeSelf })
 
-  // 原生删除失败，使用手动递归删除
-  logger.warn('原生删除失败，尝试手动递归', { path: sanitizedPath })
-
-  try {
-    await deleteDirectoryContents(sanitizedPath)
-    const emptyDirSuccess = await deleteEmptyDirectory(sanitizedPath)
-
-    if (!emptyDirSuccess) {
-      throw new Error('删除空目录失败')
+  // 步骤1: 尝试使用原生API删除（最高效）
+  if (recursive && includeSelf) {
+    const nativeSuccess = await deleteWithNativeApi(sanitizedPath, true)
+    if (nativeSuccess) {
+      logger.info('目录删除成功（原生API）', { path: sanitizedPath })
+      return true
     }
-
-    logger.info('手动递归删除成功', { path: sanitizedPath })
-  } catch (e) {
-    throw wrapError(e, ErrorCodes.FILESYSTEM_ERROR, '删除路径失败')
   }
+
+  // 步骤2: 使用手动递归删除
+  logger.debug('原生删除未完全成功，使用手动递归删除', { path: sanitizedPath })
+
+  const success = await deleteDirectoryInternal(sanitizedPath, {
+    deleteSelf: includeSelf,
+    maxDepth,
+    force,
+  })
+
+  if (!success && !force) {
+    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除目录失败: ${sanitizedPath}`)
+  }
+
+  logger.info('目录删除完成', { path: sanitizedPath, success })
+  return success
 }
 
 // ========== 文件列表操作 ==========
@@ -511,21 +613,6 @@ export async function listFilesRecursive(path, maxDepth = MAX_RECURSION_DEPTH) {
 
   await walk(sanitizedPath, maxDepth)
   return results
-}
-
-/**
- * 列出文件夹下的直接文件（非递归）
- * @param {string} path - 文件夹路径
- * @returns {Promise<Array>} 文件列表
- */
-export async function listFilesInFolder(path) {
-  try {
-    const res = await readdir(path)
-    return res.files || []
-  } catch (e) {
-    logger.warn('列出文件夹内容失败', { path, error: e.message })
-    return []
-  }
 }
 
 /**
@@ -595,6 +682,6 @@ export async function move(fromPath, toPath) {
     // 如果重命名失败（跨分区），使用复制+删除
     logger.warn('重命名失败，尝试复制+删除方式', { error: e.message })
     await copyFile(fromPath, toPath)
-    await deletePath(fromPath)
+    await deleteDirectory(fromPath, { recursive: true, includeSelf: true })
   }
 }

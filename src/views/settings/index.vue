@@ -780,12 +780,12 @@ const handleIntegerInput = (e) => {
 // 获取连接状态文本
 // const getConnectionStatusText = () => {
 //   if (deviceDisconnected.value) return '未连接'
-//   if (bluetoothStore.connectingStatus === 0) return '连接中'
-//   if (bluetoothStore.connectingStatus === 2) return '已连接'
+//   if (bluetoothStore.connectionStatus === 0) return '连接中'
+//   if (bluetoothStore.connectionStatus === 2) return '已连接'
 //   return '未连接'
 // }
 const isConnected = computed(() => {
-  return !deviceDisconnected.value && bluetoothStore.connectingStatus === 2
+  return !deviceDisconnected.value && bluetoothStore.connectionStatus === 2
 })
 
 // --- 监听蓝牙Store的连接状态变化 ---
@@ -794,7 +794,7 @@ watch(
   // 0: 连接中
   // 1: 未连接
   // 2: 已连接
-  () => bluetoothStore.connectingStatus,
+  () => bluetoothStore.connectionStatus,
   (newStatus, oldStatus) => {
     if (oldStatus === 2 && newStatus !== 2) {
       // 连接从已连接变为非已连接状态
@@ -894,12 +894,12 @@ async function cleanupResourcesForExit() {
 
 const init = async () => {
   // --- 页面加载时检查连接状态 ---
-  if (bluetoothStore.connectingStatus !== 2) {
+  if (bluetoothStore.connectionStatus !== 2) {
     console.log('[SettingList] 页面加载时检测到设备未连接')
     deviceDisconnected.value = true
   } else {
     // 主动校验一次连接状态
-    bluetoothService.checkConnectionStatus(bluetoothStore.connectingDeviceId).catch(() => {
+    bluetoothService.checkConnectionStatus(bluetoothStore.connectedDeviceId).catch(() => {
       console.log('[SettingList] 页面加载时检测到连接已断开')
       deviceDisconnected.value = true
     })
@@ -923,7 +923,7 @@ const init = async () => {
     await handleAppResume()
   })
   // 只有当已经建立连接时，才去订阅服务
-  const deviceId = bluetoothStore.connectingDeviceId
+  const deviceId = bluetoothStore.connectedDeviceId
   console.log('deviceID:', deviceId)
   if (!deviceId) {
     return
@@ -994,7 +994,7 @@ function registerDisconnectListener() {
   }
   disconnectUnregister = bluetoothService.onDeviceDisconnected((deviceId, isManualDisconnect) => {
     // 只处理当前连接的设备
-    if (deviceId !== bluetoothStore.connectingDeviceId) {
+    if (deviceId !== bluetoothStore.connectedDeviceId) {
       return
     }
     console.log('[SettingList] 设备断开连接，手动断开:', isManualDisconnect)
@@ -1011,7 +1011,7 @@ async function unsubscribe() {
     return
   }
   try {
-    const deviceId = bluetoothStore.connectingDeviceId
+    const deviceId = bluetoothStore.connectedDeviceId
     if (deviceId) {
       await bluetoothService.unsubscribeFromNotifications(
         deviceId,

@@ -45,7 +45,7 @@ const LOG_LEVEL_NAMES = {
  */
 const DEFAULT_CONFIG = {
   // 全局日志级别
-  // MODIFIED: 移除环境区分，默认使用 DEBUG 级别
+  // 移除环境区分，默认使用 DEBUG 级别
   // 原因：项目目前只有一种环境，不需要区分生产和测试环境
   level: LogLevel.DEBUG,
 

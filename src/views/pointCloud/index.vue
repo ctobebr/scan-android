@@ -91,7 +91,7 @@
 
 <script setup>
 defineOptions({
-  name: 'PointCloudView'
+  name: 'PointCloudView',
 })
 
 import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -106,12 +106,12 @@ import cameraHelper from '@/utils/device/camera'
 import { parseBleData } from '@/utils/format/bleProtocol'
 import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
-// MODIFIED: 导入全局日志工具
+// 导入全局日志工具
 // 原因：统一日志管理，后续逐步替换 logger.debug
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger } from '@/utils/logger'
 
-// MODIFIED: 创建点云页面专用日志记录器
+// 创建点云页面专用日志记录器
 const logger = createLogger('PointCloudView')
 import {
   lockToLandscape,
@@ -158,7 +158,7 @@ const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
 const MAX_POINTS_PER_BATCH = 500000 // 单个点位最大点云数
 let accumulationTimer = null
 const ACCUMULATION_INTERVAL = 33
-const MIN_BATCH_SIZE = 3  //  进行渲染一次最少需要点数
+const MIN_BATCH_SIZE = 3 //  进行渲染一次最少需要点数
 let pauseListener = null
 let resumeListener = null
 let hasStarted = false
@@ -234,12 +234,12 @@ onMounted(async () => {
   registerDisconnectListener()
 
   // --- 页面加载时检查连接状态 ---
-  if (bluetoothStore.connectingStatus !== 2) {
+  if (bluetoothStore.connectionStatus !== 2) {
     logger.debug('[PointCloudPage] 页面加载时检测到设备未连接')
     deviceDisconnected.value = true
   } else {
     // 主动校验一次连接状态
-    bluetoothService.checkConnectionStatus(bluetoothStore.connectingDeviceId).catch(() => {
+    bluetoothService.checkConnectionStatus(bluetoothStore.connectedDeviceId).catch(() => {
       logger.debug('[PointCloudPage] 页面加载时检测到连接已断开')
       deviceDisconnected.value = true
     })
@@ -297,6 +297,10 @@ const handleSettingClick = () => {
   logger.debug('handleSettingClick')
 }
 
+const handleOverivew = () => {
+  // router.push('/overview')
+}
+
 async function init() {
   // 每次初始化重置清理标志
   _hasCleaned = false
@@ -344,19 +348,6 @@ async function init() {
       if (!currentSessionId) {
         currentSessionId = generateOptimizedSessionId()
         resetForNewProject()
-
-        // 预创建会话根目录的.nomedia标记（异步执行，不阻塞初始化）
-        setTimeout(async () => {
-          try {
-            const tempFolderName = storage.path.getTempSessionName(currentSessionId)
-            const rootDir = `pointcloud/${tempFolderName}`
-            await storage.file.ensureDir(rootDir)
-            await storage.file.ensureNoMedia(rootDir)
-            logger.debug('[PointCloud] 会话根目录.nomedia标记已预创建:', rootDir)
-          } catch (e) {
-            logger.warn('[PointCloud] 预创建.nomedia标记失败（可忽略）:', e)
-          }
-        }, 0)
       } else {
         // 若已有会话ID则加载已存在批次，用于返回时恢复
         loadBatchButtons()
@@ -432,12 +423,7 @@ async function saveCurrentBatch() {
     const linesWithHeader = [header, ...currentBatchData.rawLines]
 
     // 保存当前点位的数据到批次文件夹
-    await storage.batch.save(
-      tempFolderName,
-      bid,
-      linesWithHeader,
-      currentBatchData.photos,
-    )
+    await storage.batch.save(tempFolderName, bid, linesWithHeader, currentBatchData.photos)
     logger.debug(
       '[PointCloud] 点位保存成功到临时文件夹',
       bid,
@@ -465,7 +451,7 @@ function registerDisconnectListener() {
   disconnectUnregister = bluetoothService.onDeviceDisconnected(
     async (deviceId, isManualDisconnect) => {
       // 只处理当前连接的设备
-      if (deviceId !== bluetoothStore.connectingDeviceId) {
+      if (deviceId !== bluetoothStore.connectedDeviceId) {
         return
       }
 
@@ -498,7 +484,7 @@ function registerDisconnectListener() {
 
 // --- 监听蓝牙Store的连接状态变化 ---
 watch(
-  () => bluetoothStore.connectingStatus,
+  () => bluetoothStore.connectionStatus,
   async (newStatus, oldStatus) => {
     if (oldStatus === 2 && newStatus !== 2) {
       // 连接从已连接变为非已连接状态
@@ -629,7 +615,7 @@ async function handleAppResume() {
     return
   }
 
-  if (bluetoothStore.connectingStatus !== 2) {
+  if (bluetoothStore.connectionStatus !== 2) {
     logger.debug('[PointCloudPage] 设备未连接，不恢复采集')
     deviceDisconnected.value = true
     return
@@ -701,10 +687,12 @@ function startSessionParser() {
             name: photoData.fileName,
             filePath: photoData.filePath,
           })
-          logger.debug(
-            '[PointCloud] 照片已添加到当前点位，当前照片数:',
-            currentBatchData.photos.length,
-          )
+          if (currentBatchData.photos.length == 24) {
+            logger.debug(
+              '[PointCloud] 照片已添加到当前点位，当前照片数:',
+              currentBatchData.photos.length,
+            )
+          }
         }
         return photoData
       } catch (e) {
@@ -730,7 +718,7 @@ function startSessionParser() {
     },
   })
 
-  const deviceId = bluetoothStore.connectingDeviceId
+  const deviceId = bluetoothStore.connectedDeviceId
   if (!deviceId) {
     logger.warn('未连接设备，无法订阅通知')
     return
@@ -761,7 +749,9 @@ function startSessionParser() {
             if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
               // 完整数据：合并后的数据或单独的极坐标数据
               // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
-              currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`)
+              currentBatchData.rawLines.push(
+                `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
+              )
             } else {
               // 只有XYZ数据（单格式模式）
               currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
@@ -813,7 +803,7 @@ async function startDataStream() {
     showToast({ message: '设备已断开连接，请返回重连', position: 'bottom' })
     return
   }
-  if (bluetoothStore.connectingStatus !== 2) {
+  if (bluetoothStore.connectionStatus !== 2) {
     showToast({ message: '设备未连接', position: 'bottom' })
     return
   }
@@ -826,11 +816,24 @@ async function startDataStream() {
     return
   }
 
+  // 首次点击开始采集时，创建会话根目录和.nomedia标记
+  if (!hasStarted) {
+    try {
+      const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+      const rootDir = `pointcloud/${tempFolderName}`
+      await storage.file.ensureDir(rootDir)
+      await storage.file.ensureNoMedia(rootDir)
+      logger.debug('[PointCloud] 会话根目录已创建:', rootDir)
+    } catch (e) {
+      logger.warn('[PointCloud] 创建会话根目录失败:', e)
+      showToast({ message: '创建存储目录失败', position: 'bottom' })
+      return
+    }
+  }
+
   // 重置当前点位数据
   currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   accumulationBuffer.length = 0
-
-
 
   isCollecting.value = true
   bluetoothStore.handleSendStart()
@@ -854,7 +857,7 @@ const openSaveDialog = async () => {
   showSaveDialog.value = true
   nextTick(() => {
     try {
-      if (saveInput && saveInput.value && saveInput.value.focus) {
+      if (saveInput.value && typeof saveInput.value.focus === 'function') {
         saveInput.value.focus()
       }
     } catch (e) {
@@ -976,7 +979,7 @@ async function performSave(folderName) {
     logger.error('保存失败:', error)
     showToast({
       message: `保存失败：${error.message || '未知错误'}`,
-      position: 'bottom'
+      position: 'bottom',
     })
     throw error // 重新抛出错误以便上层捕获
   } finally {
@@ -995,7 +998,7 @@ async function stopSessionParser() {
   }
   accumulationBuffer.length = 0
   try {
-    const deviceId = bluetoothStore.connectingDeviceId
+    const deviceId = bluetoothStore.connectedDeviceId
     if (deviceId) {
       await bluetoothService.unsubscribeFromNotifications(
         deviceId,

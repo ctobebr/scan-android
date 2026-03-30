@@ -14,7 +14,7 @@
  * 校验和计算：
  *   只对 CMD + Length + Data 三部分求和，取低 8 位
  */
-// MODIFIED: 导入协议常量，避免硬编码
+// 导入协议常量，避免硬编码
 // 原因：统一常量管理，消除重复定义
 import {
   CONTROL_COMMANDS,
@@ -24,12 +24,12 @@ import {
   MAX_DATA_LENGTH,
   MAX_PACKET_SIZE,
 } from '@/constants/bluetooth'
-// MODIFIED: 导入全局日志工具
+// 导入全局日志工具
 // 原因：统一日志管理，后续逐步替换 logger.debug
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger } from '@/utils/logger'
 
-// MODIFIED: 创建协议解析专用日志记录器
+// 创建协议解析专用日志记录器
 const logger = createLogger('BleProtocol')
 
 // helper to convert Uint8Array to hex string
@@ -44,7 +44,7 @@ export class parseBleData {
   constructor(options = {}) {
     this.options = options || {}
     this.protocolState = {
-      // MODIFIED: 使用导入的常量定义缓冲区大小
+      // 使用导入的常量定义缓冲区大小
       buffer: new Uint8Array(MAX_PACKET_SIZE), // 增大缓冲区
       bufferIndex: 0,
       frameState: 'WAITING_HEADER', // 状态：WAITING_HEADER, READING_CMD, READING_LEN, READING_DATA, READING_CHECKSUM
@@ -307,8 +307,11 @@ export class parseBleData {
         case 'WAITING_HEADER':
           this.protocolState.buffer[this.protocolState.bufferIndex++] = byte
           if (this.protocolState.bufferIndex >= 2) {
-            // MODIFIED: 使用导入的常量替代硬编码
-            if (this.protocolState.buffer[0] === PROTOCOL_HEADER_HIGH && this.protocolState.buffer[1] === PROTOCOL_HEADER_LOW) {
+            // 使用导入的常量替代硬编码
+            if (
+              this.protocolState.buffer[0] === PROTOCOL_HEADER_HIGH &&
+              this.protocolState.buffer[1] === PROTOCOL_HEADER_LOW
+            ) {
               this.protocolState.frameState = 'READING_CMD'
               this.protocolState.bufferIndex = 0
               this.protocolState.checksum = 0 // 校验和从 CMD 开始计算
@@ -333,7 +336,7 @@ export class parseBleData {
           if (this.protocolState.dataLength === 0) {
             // 无数据区，直接跳转到校验和
             this.protocolState.frameState = 'READING_CHECKSUM'
-          // MODIFIED: 使用导入的常量替代硬编码
+            // 使用导入的常量替代硬编码
           } else if (this.protocolState.dataLength <= MAX_DATA_LENGTH) {
             // 限制单帧最大数据长度为 MAX_DATA_LENGTH 字节（防止异常）
             this.protocolState.packetData = new Uint8Array(this.protocolState.dataLength)
@@ -342,12 +345,12 @@ export class parseBleData {
           } else {
             // 数据长度超过限制，重置状态机
             errors.push(
-              // MODIFIED: 使用导入的常量替代硬编码
-            `[Parser] Data length exceeded limit: ${this.protocolState.dataLength} > ${MAX_DATA_LENGTH}. Resetting state.`,
+              // 使用导入的常量替代硬编码
+              `[Parser] Data length exceeded limit: ${this.protocolState.dataLength} > ${MAX_DATA_LENGTH}. Resetting state.`,
             )
-            logger.warn(
-              'Data length exceeded limit, resetting state', { dataLength: this.protocolState.dataLength }
-            )
+            logger.warn('Data length exceeded limit, resetting state', {
+              dataLength: this.protocolState.dataLength,
+            })
             this.resetProtocolState()
           }
           break
@@ -376,9 +379,10 @@ export class parseBleData {
                 this.protocolState.cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA
               ) {
                 this.cameraCmdCount++
-                logger.debug(
-                  'Camera cmd received', { count: this.cameraCmdCount, data: uint8ArrayToHex(this.protocolState.packetData) }
-                )
+                // logger.debug('Camera cmd received', {
+                //   count: this.cameraCmdCount,
+                //   data: uint8ArrayToHex(this.protocolState.packetData),
+                // })
               }
               //  logger.debug(
               //    `[Parser][${new Date().toISOString()}] , data=${uint8ArrayToHex(
@@ -461,20 +465,18 @@ export class parseBleData {
 
   async _handleTakePhoto(data) {
     if (this.enableDebugLogging) {
-      logger.debug(
-        '_handleTakePhoto start', { data: uint8ArrayToHex(data) }
-      )
+      // logger.debug('_handleTakePhoto start', { data: uint8ArrayToHex(data) })
     }
-    logger.info('CMD_CTRL_CAMERA received')
+    // logger.info('CMD_CTRL_CAMERA received')
 
     // --- 将拍照请求加入处理流程 ---
     return new Promise((resolve, reject) => {
       // if already processing, enqueue for later
       if (this.isProcessingPhoto) {
         if (this.enableDebugLogging) {
-          logger.debug(
-            'Photo command queued (busy)', { queueLength: this.photoRequestQueue.length }
-          )
+          logger.debug('Photo command queued (busy)', {
+            queueLength: this.photoRequestQueue.length,
+          })
         }
         this.photoRequestQueue.push({ data, resolve, reject })
         return
@@ -521,13 +523,13 @@ export class parseBleData {
           if (this.options.onTakePhoto && typeof this.options.onTakePhoto === 'function') {
             if (this.enableDebugLogging) {
               this.cameraCallbackCount++
-              logger.debug(
-                `[Camera][${new Date().toISOString()}] invoking onTakePhoto callback. cmdCount=${this.cameraCmdCount}, callbackCount=${this.cameraCallbackCount}`,
-              )
+              // logger.debug(
+              //   `[Camera][${new Date().toISOString()}] invoking onTakePhoto callback. cmdCount=${this.cameraCmdCount}, callbackCount=${this.cameraCallbackCount}`,
+              // )
             }
-            logger.debug('即将执行 onTakePhoto 回调')
+            // logger.debug('即将执行 onTakePhoto 回调')
             await this.options.onTakePhoto({ fileBaseName, meta })
-            logger.debug('onTakePhoto 回调执行完成')
+            // logger.debug('onTakePhoto 回调执行完成')
           }
         } catch (err) {
           logger.error('HandleTakePhoto 内部发生错误:', err)
@@ -538,7 +540,7 @@ export class parseBleData {
           this._tryProcessPendingEndRequests()
           if (this.enableDebugLogging) {
             logger.debug(
-              `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,
+              // `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,
             )
           }
           resolve() // 完成当前任务

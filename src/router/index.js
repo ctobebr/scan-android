@@ -26,6 +26,11 @@ const routes = [
     name: 'SettingsView',
     component: () => import('@/views/settings/index.vue'),
   },
+  {
+    path: '/overview',
+    name: 'Overview',
+    component: () => import('@/views/pointCloud/component/overView.vue'),
+  },
 ]
 
 const router = createRouter({

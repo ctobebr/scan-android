@@ -11,7 +11,7 @@ import {
   ErrorCodes,
   MODULE_NAME,
   FeatureFlags,
-  IMAGE_EXTENSIONS
+  IMAGE_EXTENSIONS,
 } from '@/constants/storage'
 import {
   FilePathError,
@@ -19,7 +19,7 @@ import {
   validateBatchId,
   sanitizePath,
   validatePhotosArray,
-  validateDataLines
+  validateDataLines,
 } from '@/utils/storage/validate'
 import {
   sessionFolder,
@@ -31,7 +31,7 @@ import {
   buildPointCloudDataFileName,
   normalizeBatchId,
   extractBatchNumber,
-  isImageFile
+  isImageFile,
 } from '@/utils/storage/path'
 import {
   readFile,
@@ -40,29 +40,28 @@ import {
   stat,
   readdir,
   ensureDir,
-  deletePath,
+  deleteDirectory,
   listFilesRecursive,
-  listFilesInFolder,
   ensureNoMedia,
   rename,
-  exists
+  exists,
 } from './fileSystem'
-// MODIFIED: 使用全局日志工具替换独立实现
+// 使用全局日志工具替换独立实现
 // 原因：统一日志管理，消除代码重复
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger, configureLogger } from '@/utils/logger'
 
 // ========== 日志工具 ==========
-// MODIFIED: 使用全局日志工具创建模块专用记录器
+// 使用全局日志工具创建模块专用记录器
 const logger = createLogger('PointCloud')
 
-// MODIFIED: 根据 FeatureFlags 配置日志级别
+// 根据 FeatureFlags 配置日志级别
 // 保持与原有行为兼容
 if (!FeatureFlags.ENABLE_DETAILED_LOGGING) {
   configureLogger({
     modules: {
-      PointCloud: false
-    }
+      PointCloud: false,
+    },
   })
 }
 
@@ -146,9 +145,7 @@ export async function ensureBatchDir(sessionId, batchId) {
 export async function listSessions() {
   try {
     const res = await readdir(POINTCLOUD_ROOT)
-    return (res.files || [])
-      .filter((f) => f.type === 'directory')
-      .map((f) => f.name)
+    return (res.files || []).filter((f) => f.type === 'directory').map((f) => f.name)
   } catch (e) {
     // 如果根目录不存在，返回空数组
     if (e.message && e.message.includes('Directory does not exist')) {
@@ -177,9 +174,7 @@ export async function listPointCloudFolders(includeAll = false) {
     if (includeAll) {
       return folders.map((folder) => {
         const info = parseFolderName(folder.name)
-        const formattedTime = info.sessionId
-          ? parseSessionIdToFormattedTime(info.sessionId)
-          : null
+        const formattedTime = info.sessionId ? parseSessionIdToFormattedTime(info.sessionId) : null
         return {
           ...folder,
           info: {
@@ -214,9 +209,7 @@ export function filterDisplayableFolders(folders) {
   return folders
     .map((folder) => {
       const info = parseFolderName(folder.name)
-      const formattedTime = info.sessionId
-        ? parseSessionIdToFormattedTime(info.sessionId)
-        : null
+      const formattedTime = info.sessionId ? parseSessionIdToFormattedTime(info.sessionId) : null
       info.displayDate = formattedTime
       return {
         ...folder,
@@ -263,48 +256,86 @@ export async function renameSession(oldName, newName) {
 
 /**
  * 删除整个会话文件夹
+ * 业务层删除函数，负责验证、事件通知和错误处理
+ * 实际文件系统操作委托给 fileSystem.deleteDirectory
+ *
  * @param {string} sessionId - 要删除的会话ID
  * @returns {Promise<void>}
  * @throws {FilePathError} 当删除失败时抛出
  */
 export async function deleteSession(sessionId) {
+  // 步骤1: 验证会话ID
   validateSessionId(sessionId)
 
+  // 步骤2: 构建完整路径
   const path = `${POINTCLOUD_ROOT}/${sessionId}`
-  await deletePath(path)
-  dispatchFolderUpdate('delete_session', { session: sessionId })
-  logger.info('会话删除成功', { sessionId })
+
+  logger.info('开始删除会话', { sessionId, path })
+
+  // 步骤3: 调用文件系统服务执行删除
+  try {
+    await deleteDirectory(path, {
+      recursive: true,      // 递归删除所有内容
+      includeSelf: true,    // 删除目录本身
+      force: false,         // 不强制删除，遇到错误抛出
+      maxDepth: 10,         // 最大递归深度
+    })
+
+    // 步骤4: 触发文件夹更新事件
+    dispatchFolderUpdate('delete_session', { session: sessionId })
+
+    logger.info('会话删除成功', { sessionId })
+  } catch (e) {
+    logger.error('删除会话失败', { sessionId, error: e.message })
+    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除会话失败: ${e.message}`)
+  }
 }
 
 /**
  * 删除 pointcloud 下的指定文件夹
+ * 业务层删除函数，负责验证、事件通知和错误处理
+ * 实际文件系统操作委托给 fileSystem.deleteDirectory
+ *
  * @param {string} folderOrRel - 文件夹名或相对路径
  * @returns {Promise<boolean>} 删除是否成功
  * @throws {FilePathError} 当删除失败时抛出
  */
 export async function deletePointCloudFolder(folderOrRel) {
+  // 步骤1: 参数验证
   const sanitizedPath = sanitizePath(folderOrRel)
-
   if (!sanitizedPath) {
     throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '需要提供有效的文件夹名称')
   }
 
+  // 步骤2: 路径标准化（移除 POINTCLOUD_ROOT 前缀）
   let rel = sanitizedPath
   if (rel.startsWith(`${POINTCLOUD_ROOT}/`)) {
     rel = rel.replace(`${POINTCLOUD_ROOT}/`, '')
   }
 
+  // 步骤3: 解析文件夹信息（用于日志和事件）
   const folderInfo = parseFolderName(rel)
   logger.info('删除文件夹', { folder: rel, type: folderInfo.type })
 
+  // 步骤4: 构建完整路径
   const folderPath = `${POINTCLOUD_ROOT}/${rel}`
+
+  // 步骤5: 调用文件系统服务执行删除
   try {
-    await deletePath(folderPath)
+    await deleteDirectory(folderPath, {
+      recursive: true,      // 递归删除所有内容
+      includeSelf: true,    // 删除目录本身
+      force: false,         // 不强制删除，遇到错误抛出
+      maxDepth: 10,         // 最大递归深度
+    })
+
+    // 步骤6: 触发文件夹更新事件
     dispatchFolderUpdate('delete', { folder: rel, type: folderInfo.type })
-    logger.info('文件夹删除成功', { folderPath })
+
+    logger.info('文件夹删除成功', { folder: rel })
     return true
   } catch (e) {
-    logger.error('删除文件夹失败', { error: e.message })
+    logger.error('删除文件夹失败', { error: e.message, folderPath })
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除文件夹失败: ${e.message}`)
   }
 }
@@ -339,7 +370,7 @@ async function prepareBatchPaths(sessionID, normalizedBatchId) {
   return {
     sessionPath,
     batchFolderName,
-    txtFilePath: `${sessionPath}/${batchFolderName}/${buildPointCloudDataFileName()}`
+    txtFilePath: `${sessionPath}/${batchFolderName}/${buildPointCloudDataFileName()}`,
   }
 }
 
@@ -439,7 +470,14 @@ async function savePhotos(sessionPath, batchFolderName, photos) {
  * @param {number} lineCount - 数据行数
  * @returns {Object} 完整的保存结果
  */
-function buildSaveBatchResult(paths, dataResult, photoUris, sessionID, normalizedBatchId, lineCount) {
+function buildSaveBatchResult(
+  paths,
+  dataResult,
+  photoUris,
+  sessionID,
+  normalizedBatchId,
+  lineCount,
+) {
   return {
     folder: paths.sessionPath,
     batchFolder: `${paths.sessionPath}/${paths.batchFolderName}`,
@@ -469,7 +507,7 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
     sessionID,
     batchId,
     lineCount: dataLines.length,
-    photoCount: photos.length
+    photoCount: photos.length,
   })
 
   const normalizedBatchId = normalizeBatchId(batchId)
@@ -496,7 +534,7 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
       photoUris,
       sessionID,
       normalizedBatchId,
-      dataLines.length
+      dataLines.length,
     )
   } catch (error) {
     logger.error('批次保存失败', { sessionID, batchId, error: error.message })
@@ -591,21 +629,44 @@ export async function readBatch(sessionId, batchId) {
 
 /**
  * 删除指定批次并自动重排其他批次
+ * 业务层删除函数，负责验证、事件通知和重索引
+ * 实际文件系统操作委托给 fileSystem.deleteDirectory
+ *
  * @param {string} sessionId - 会话ID
  * @param {number|string} batchId - 批次ID
  * @returns {Promise<void>}
  * @throws {FilePathError} 当参数无效时抛出
  */
 export async function deleteBatch(sessionId, batchId) {
+  // 步骤1: 验证参数
   validateSessionId(sessionId)
   validateBatchId(batchId)
 
+  // 步骤2: 构建批次文件夹路径
   const folder = batchFolder(sessionId, batchId)
-  await deletePath(folder)
-  dispatchFolderUpdate('batch-deleted', { session: sessionId, batch: batchId })
 
-  // 重索引其余批次
-  await reindexBatches(sessionId)
+  logger.info('开始删除批次', { sessionId, batchId, folder })
+
+  // 步骤3: 调用文件系统服务执行删除
+  try {
+    await deleteDirectory(folder, {
+      recursive: true,      // 递归删除批次内所有内容
+      includeSelf: true,    // 删除批次文件夹本身
+      force: false,         // 不强制删除，遇到错误抛出
+      maxDepth: 5,          // 批次目录层级较浅
+    })
+
+    // 步骤4: 触发批次删除事件
+    dispatchFolderUpdate('batch-deleted', { session: sessionId, batch: batchId })
+
+    // 步骤5: 重索引其余批次
+    await reindexBatches(sessionId)
+
+    logger.info('批次删除成功', { sessionId, batchId })
+  } catch (e) {
+    logger.error('删除批次失败', { sessionId, batchId, error: e.message })
+    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除批次失败: ${e.message}`)
+  }
 }
 
 /**
@@ -724,7 +785,7 @@ async function findThumbnailInBatch(folderPath, batchName) {
         } catch (e) {
           return { ...photo, mtime: 0 }
         }
-      })
+      }),
     )
 
     photosWithStats.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
@@ -766,9 +827,7 @@ export async function getProjectBatchInfo(sessionId) {
 
       try {
         const batchItems = await readdir(batchPath)
-        photoCount = batchItems.files.filter(
-          (f) => f.type === 'file' && isImageFile(f.name)
-        ).length
+        photoCount = batchItems.files.filter((f) => f.type === 'file' && isImageFile(f.name)).length
       } catch (e) {
         logger.warn('读取批次失败', { batch: batch.name, error: e.message })
       }
@@ -976,7 +1035,7 @@ export async function zipSessionToFile(sessionFolderName, zipFileName) {
     return {
       uri: existingCheck.uri,
       path: zipPath,
-      relativePath: zipPath
+      relativePath: zipPath,
     }
   }
 
@@ -990,60 +1049,8 @@ export async function zipSessionToFile(sessionFolderName, zipFileName) {
   return {
     uri,
     path: zipPath,
-    relativePath: zipPath
+    relativePath: zipPath,
   }
 }
 
-// ========== 向后兼容的包装函数 ==========
 
-/**
- * 将 BLE 数据保存到文件中（向后兼容）
- * @param {string[]} dataLines - 数据行数组
- * @param {string} sessionID - 会话ID
- * @param {Array} photos - 照片数组
- * @returns {Promise<Object>} 保存结果
- */
-export async function saveBleDataToFileWithSessionStructure(dataLines, sessionID, photos = []) {
-  return saveBatch(sessionID, 1, dataLines, photos)
-}
-
-/**
- * 列出蓝牙数据文件（向后兼容）
- * @param {string} [pattern='pointCloud_data_'] - 文件名匹配模式
- * @returns {Promise<Array>} 文件信息列表
- */
-export async function listBleDataFiles(pattern = 'pointCloud_data_') {
-  try {
-    const result = await readdir('')
-
-    const filteredFiles = result.files
-      .filter((file) => file.name.startsWith(pattern) && file.name.endsWith('.txt'))
-      .map((file) => ({
-        name: file.name,
-        size: file.size,
-        ctime: file.mtime,
-        mtime: file.mtime,
-      }))
-
-    filteredFiles.sort((a, b) => b.mtime - a.mtime)
-    return filteredFiles
-  } catch (error) {
-    logger.error('读取文件列表失败', { error: error.message })
-    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `读取文件列表失败: ${error.message}`)
-  }
-}
-
-/**
- * 读取蓝牙数据文件（向后兼容）
- * @param {string} filename - 文件名
- * @returns {Promise<string>} 文件内容
- */
-export async function readBleDataFile(filename) {
-  try {
-    const result = await readFile(filename, { encoding: 'utf8' })
-    return result.data
-  } catch (error) {
-    logger.error('读取文件失败', { filename, error: error.message })
-    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `读取文件失败: ${error.message}`)
-  }
-}

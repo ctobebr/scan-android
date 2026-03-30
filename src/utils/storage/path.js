@@ -34,7 +34,7 @@ export function isProjectWithSessionFormat(folderName) {
   if (!folderName || typeof folderName !== 'string') return false
 
   const parts = folderName.split('_')
-  // MODIFIED: 修复 - 确保项目名不为空
+  // 确保项目名不为空
   return parts.length === 2 && parts[0].length > 0 && isSessionId(parts[1])
 }
 
@@ -46,7 +46,7 @@ export function isProjectWithSessionFormat(folderName) {
 export function isCustomFolder(folderName) {
   if (!folderName || typeof folderName !== 'string') return false
 
-  // MODIFIED: 修复 - 排除临时会话
+  // 排除临时会话
   if (isTempSession(folderName)) return false
 
   // 如果不是会话ID格式，也不是"项目_会话ID"格式，就是自定义文件夹

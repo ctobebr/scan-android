@@ -75,14 +75,10 @@ const sessions = computed(() => {
 const waitForRefresh = (timeout = 10000) => {
   return new Promise((resolve, reject) => {
     let unwatchCleanup = null
-    let unwatch2Cleanup = null
     let timeoutId = null
+    let resolved = false
 
     const cleanup = () => {
-      if (unwatch2Cleanup) {
-        unwatch2Cleanup()
-        unwatch2Cleanup = null
-      }
       if (unwatchCleanup) {
         unwatchCleanup()
         unwatchCleanup = null
@@ -93,31 +89,20 @@ const waitForRefresh = (timeout = 10000) => {
       }
     }
 
-    console.log(`[FileList] 开始等待刷新，当前loading状态: ${folderStore.loading}`)
-
     timeoutId = setTimeout(() => {
-      cleanup()
-      reject(new Error('等待刷新超时'))
+      if (!resolved) {
+        cleanup()
+        reject(new Error('等待刷新超时'))
+      }
     }, timeout)
 
     const unwatch = watch(
       () => folderStore.loading,
       (newVal) => {
-        if (newVal === true) {
-          console.log('[FileList] 检测到loading开始，等待loading结束')
-          // 等待 loading 从 true 变 false
-          const unwatch2 = watch(
-            () => folderStore.loading,
-            (val) => {
-              if (val === false) {
-                console.log('[FileList] loading结束，刷新完成')
-                unwatch2Cleanup = null // 避免重复清理
-                cleanup()
-                resolve()
-              }
-            }
-          )
-          unwatch2Cleanup = unwatch2
+        if (newVal === false && !resolved) {
+          resolved = true
+          cleanup()
+          resolve()
         }
       },
       { immediate: true }
@@ -149,11 +134,15 @@ const onShareClick = async (folderName, projectName, sessionId) => {
   }
 
   try {
-    // 递归检查项目文件夹是否为空（包括子文件夹）
-    const allFiles = await storage.file.listRecursive(`pointcloud/${folderName}`)
+    // 检查项目文件夹是否为空（包括子文件夹和文件）
+    const folderPath = `pointcloud/${folderName}`
+    const directoryContent = await storage.file.readDir(folderPath)
+
+    // 检查是否有任何内容（文件或子目录）
+    const hasContent = directoryContent.files && directoryContent.files.length > 0
 
     // 空文件夹处理：询问是否删除
-    if (!allFiles || allFiles.length === 0) {
+    if (!hasContent) {
       // 获取正确的显示名称用于确认对话框
       const folderInfo = storage.path.parseFolderName(folderName)
       const displayName = folderInfo.displayName || folderName
@@ -174,13 +163,62 @@ const onShareClick = async (folderName, projectName, sessionId) => {
 
           await storage.session.deleteFolder(folderName)
 
+          // 手动刷新文件夹列表
+          await folderStore.refreshFolders()
+
           // 使用统一的等待刷新函数
-          await waitForRefresh(10000)
+          await waitForRefresh(15000)
 
           closeToast()
           showToast({ message: '删除成功', position: 'bottom' })
         } catch (e) {
-          console.error('删除项目失败：', e)
+          closeToast()
+          showToast({
+            message: `删除失败: ${e.message || '未知错误'}`,
+            position: 'bottom',
+          })
+        } finally {
+          cleanup()
+        }
+      }
+      return
+    }
+
+    // 递归检查项目文件夹是否有文件（用于打包分享）
+    const allFiles = await storage.file.listRecursive(folderPath)
+
+    // 如果只有子目录但没有文件，提示用户是否删除
+    if (!allFiles || allFiles.length === 0) {
+
+      // 获取正确的显示名称用于确认对话框
+      const folderInfo = storage.path.parseFolderName(folderName)
+      const displayName = folderInfo.displayName || folderName
+
+      const confirmed = await showConfirmDialog({
+        title: '提示',
+        message: `项目 "${displayName}" 为空（只有空文件夹），是否删除该项目？`,
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      }).catch(() => false)
+
+      if (confirmed) {
+        try {
+          showLoadingToast({
+            message: '加载中...',
+            forbidClick: true,
+          })
+
+          await storage.session.deleteFolder(folderName)
+
+          // 手动刷新文件夹列表
+          await folderStore.refreshFolders()
+
+          // 使用统一的等待刷新函数
+          await waitForRefresh(15000)
+
+          closeToast()
+          showToast({ message: '删除成功', position: 'bottom' })
+        } catch (e) {
           closeToast()
           showToast({
             message: `删除失败: ${e.message || '未知错误'}`,
@@ -270,7 +308,6 @@ const onShareClick = async (folderName, projectName, sessionId) => {
  * @param {string} fileNameOrFolder - 被点击项的文件
  */
 const onDeleteClick = (fileNameOrFolder) => {
-  console.log(`删除按钮被点击，目标: ${fileNameOrFolder}`)
   showMoreOptions(fileNameOrFolder)
 }
 
@@ -319,7 +356,12 @@ const deleteFile = async (folderPath) => {
     }
 
     const relativePath = folderPath.replace('pointcloud/', '')
-    console.log('[FileList] 删除项目文件夹:', relativePath)
+
+    // 检查文件夹是否存在
+    const folderExists = await storage.file.exists(folderPath)
+    if (!folderExists) {
+      throw new Error('文件夹不存在')
+    }
 
     showLoadingToast({
       message: '加载中...',
@@ -329,56 +371,16 @@ const deleteFile = async (folderPath) => {
     // 1. 执行删除
     await storage.session.deleteFolder(relativePath)
 
-    // 2. 等待刷新完成 - 这里会等待 loading 变为 false
-    // 但 refreshFolders() 内部调用 loadProjectFolders(true) 完成后才会把 loading 设为 false
-    await new Promise((resolve, reject) => {
-      // 设置超时保护
-      timeoutId = setTimeout(() => {
-        cleanup()
-        reject(new Error('等待刷新超时'))
-      }, 10000)
+    // 2. 手动刷新文件夹列表
+    await folderStore.refreshFolders()
 
-      const unwatch = watch(
-        () => folderStore.loading,
-        (newVal) => {
-          if (newVal === true) {
-            // 等待 loading 从 true 变 false
-            const unwatch2 = watch(
-              () => folderStore.loading,
-              (val) => {
-                if (val === false) {
-                  // 先清理内层 watch
-                  if (unwatch2Cleanup) {
-                    unwatch2Cleanup()
-                    unwatch2Cleanup = null
-                  }
-                  // 再清理外层 watch 和定时器
-                  if (unwatchCleanup) {
-                    unwatchCleanup()
-                    unwatchCleanup = null
-                  }
-                  if (timeoutId) {
-                    clearTimeout(timeoutId)
-                    timeoutId = null
-                  }
-                  resolve()
-                }
-              }
-            )
-            unwatch2Cleanup = unwatch2
-          }
-        },
-        { immediate: true }
-      )
-
-      unwatchCleanup = unwatch  // 保存清理函数
-    })
+    // 3. 等待刷新完成
+    await waitForRefresh(15000)
 
     closeToast()
     showToast({ message: '删除成功', position: 'bottom' })
 
   } catch (e) {
-    console.error('[FileList] 删除失败:', e)
     closeToast()
     showToast({
       message: `删除失败: ${e.message || '未知错误'}`,

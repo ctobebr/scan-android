@@ -59,13 +59,13 @@
                 <div class="action">
                   <!-- 情况1: 正在连接当前设备 -->
                   <div
-                    v-if="connectingStatus === 1 && connectingDeviceId === device.deviceId"
+                    v-if="connectionStatus === 1 && connectedDeviceId === device.deviceId"
                     class="spinner"
                   ></div>
 
                   <!-- 情况2: 已连接当前设备 -->
                   <button
-                    v-else-if="connectingStatus === 2 && connectingDeviceId === device.deviceId"
+                    v-else-if="connectionStatus === 2 && connectedDeviceId === device.deviceId"
                     @click="handleDisconnect(device)"
                     class="connect-btn connected"
                   >
@@ -106,7 +106,7 @@ const router = useRouter()
 const bluetoothStore = useBluetoothStore()
 const folderStore = useFoldersStore()
 
-const { devices, scanning, connectingStatus, connectingDeviceId } = storeToRefs(bluetoothStore)
+const { devices, scanning, connectionStatus, connectedDeviceId } = storeToRefs(bluetoothStore)
 
 // 计算属性：只显示 name 不为 "N/A" 且包含 "Luo" 的设备
 const filteredDevices = computed(() => {
@@ -115,7 +115,7 @@ const filteredDevices = computed(() => {
 
 // ========== 监听连接状态变化，更新设备列表中的显示 ==========
 watch(
-  [connectingStatus, connectingDeviceId],
+  [connectionStatus, connectedDeviceId],
   () => {
     console.log('连接状态变化，更新设备列表显示')
   },
@@ -133,8 +133,8 @@ onMounted(async () => {
 
   // 如果显示已连接，但实际可能已断开，做个状态校验
   setTimeout(() => {
-    if (connectingStatus.value === 2 && connectingDeviceId.value) {
-      bluetoothService.checkConnectionStatus(connectingDeviceId.value).catch(() => {
+    if (connectionStatus.value === 2 && connectedDeviceId.value) {
+      bluetoothService.checkConnectionStatus(connectedDeviceId.value).catch(() => {
         console.log('页面启动时检测到连接已断开')
       })
     }
@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
 })
 
 const handleStartRecord = () => {
-  if (connectingStatus.value != 2) {
+  if (connectionStatus.value != 2) {
     showToast({
       message: '请先连接设备',
       position: 'bottom',
@@ -233,7 +233,7 @@ const handleTabClick = (tab) => {
   switchTo(tab.id);
 
   // 只有在未解锁且点击数据页面时才处理计数
-  if (tab.id === 'FileList' && !isSettingUnlocked.value && connectingStatus.value == 2) {
+  if (tab.id === 'FileList' && !isSettingUnlocked.value && connectionStatus.value == 2) {
     const now = Date.now()
 
     // 检查时间窗口
@@ -261,7 +261,7 @@ const handleTabClick = (tab) => {
 
 // 获取连接状态图标路径
 const getConnectIconSrc = () => {
-  switch (connectingStatus.value) {
+  switch (connectionStatus.value) {
     case 2:
       return new URL('@/assets/img/connect_suc.png', import.meta.url).href // 连接成功
     // case 'failed':
@@ -290,7 +290,7 @@ const toggleConnectionDialog = () => {
   showConnectionDialog.value = !showConnectionDialog.value
   // 只在打开对话框（新状态为 true）且设备未连接时扫描
   // 如果蓝牙设备已经连接，再去搜索，会搜索不到蓝牙设备
-  if (showConnectionDialog.value && connectingStatus.value !== 2) {
+  if (showConnectionDialog.value && connectionStatus.value !== 2) {
     bluetoothStore.autoScanOnEnter()
   }
 }

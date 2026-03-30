@@ -49,7 +49,6 @@ async function removeBatch() {
     showToast({ message: '点位已删除', position: 'bottom' })
     router.back()
   } catch (e) {
-    console.error('删除批次失败', e)
     showToast({ message: '删除失败', position: 'bottom' })
   }
 }

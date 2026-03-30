@@ -243,7 +243,7 @@ export function sanitizePath(inputPath, throwOnError = true) {
     }
     return null
   }
-  
+
   // 检查路径中间是否包含 ../
   if (sanitized.includes('/../') || sanitized.endsWith('/..')) {
     if (throwOnError) {
@@ -254,10 +254,10 @@ export function sanitizePath(inputPath, throwOnError = true) {
     }
     return null
   }
-  
+
   // 移除 ./ 当前目录标记
   sanitized = sanitized.replace(/\.\/+/g, '')
-  
+
   // 移除多余的 ../ （如果存在）
   sanitized = sanitized.replace(/\.\.\//g, '')
 
@@ -360,7 +360,7 @@ export function validatePhotosArray(photos, throwOnError = true) {
   for (let i = 0; i < photos.length; i++) {
     const photo = photos[i]
 
-    // MODIFIED: 修复 - 先检查是否为对象（包括排除 null）
+    // 先检查是否为对象（包括排除 null）
     if (!photo || typeof photo !== 'object' || Array.isArray(photo)) {
       if (throwOnError) {
         throw new FilePathError(
