@@ -536,8 +536,8 @@ const loopTypeOptions = [
 ]
 
 const axisOptions = [
-  { text: 'X轴', value: 'X' },
-  { text: 'Y轴', value: 'Y' }
+  { text: 'X轴', value: 'x' },
+  { text: 'Y轴', value: 'y' }
 ]
 
 // 保存状态

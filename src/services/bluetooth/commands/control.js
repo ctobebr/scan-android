@@ -227,7 +227,7 @@ export class ControlCommands {
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
-   * @param {string} axis - 轴，'pitch' 或 'yaw'
+   * @param {string} axis - 轴，'x' 或 'y'
    * @param {number} p - P参数 (float)
    * @param {number} i - I参数 (float)
    * @param {number} d - D参数 (float)
@@ -244,7 +244,7 @@ export class ControlCommands {
 
     const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
     const view = new DataView(buffer)
-    view.setUint32(0, axis === 'pitch' ? 0 : 1, true) // 轴值：pitch=0, yaw=1，小端序
+    view.setUint32(0, axis === 'x' ? 0 : 1, true) // 轴值：x=0, y=1，小端序
     view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
     view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
     view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
@@ -262,7 +262,7 @@ export class ControlCommands {
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
-   * @param {string} axis - 轴，'pitch' 或 'yaw'
+   * @param {string} axis - 轴，'x' 或 'y'
    * @param {number} p - P参数 (float)
    * @param {number} i - I参数 (float)
    * @param {number} d - D参数 (float)
@@ -279,7 +279,7 @@ export class ControlCommands {
 
     const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
     const view = new DataView(buffer)
-    view.setUint32(0, axis === 'pitch' ? 0 : 1, true) // 轴值：pitch=0, yaw=1，小端序
+    view.setUint32(0, axis === 'x' ? 0 : 1, true) // 轴值：x=0, y=1，小端序
     view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
     view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
     view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)

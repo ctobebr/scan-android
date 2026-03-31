@@ -6,6 +6,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 
 /**
  * 创建全景查看器
@@ -26,6 +27,8 @@ export function usePanoramaViewer(container, options = {}) {
   let renderer = null
   let sphere = null
   let hotspotGroup = null
+  let labelGroup = null
+  let cssRenderer = null
   let raycaster = null
   let mouse = null
   let controls = null
@@ -34,6 +37,7 @@ export function usePanoramaViewer(container, options = {}) {
   let currentTexture = null
   let animationId = null
   let hotspotClickCallback = null
+  let hotspots = []
 
   function init() {
     if (isInitialized) return
@@ -62,12 +66,24 @@ export function usePanoramaViewer(container, options = {}) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     container.appendChild(renderer.domElement)
 
+    // 初始化 CSS2DRenderer
+    cssRenderer = new CSS2DRenderer()
+    cssRenderer.setSize(container.clientWidth, container.clientHeight)
+    cssRenderer.domElement.style.position = 'absolute'
+    cssRenderer.domElement.style.top = '0'
+    cssRenderer.domElement.style.left = '0'
+    cssRenderer.domElement.style.pointerEvents = 'none'
+    container.appendChild(cssRenderer.domElement)
+
     console.log('[PanoramaViewer] 渲染器创建完成, 尺寸:', container.clientWidth, 'x', container.clientHeight)
 
     createSphere()
 
     hotspotGroup = new THREE.Group()
     scene.add(hotspotGroup)
+
+    labelGroup = new THREE.Group()
+    scene.add(labelGroup)
 
     raycaster = new THREE.Raycaster()
     mouse = new THREE.Vector2()
@@ -163,46 +179,80 @@ export function usePanoramaViewer(container, options = {}) {
     const y = r * Math.cos(phiRad)
     const z = r * Math.sin(phiRad) * Math.sin(thetaRad)
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 64
-    canvas.height = 64
-    const ctx = canvas.getContext('2d')
+    console.log(`[调试] 添加锚点: ${label}, 角度: theta=${theta}°, phi=${phi}°`)
 
-    ctx.beginPath()
-    ctx.arc(32, 32, 28, 0, Math.PI * 2)
-    ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`
-    ctx.fill()
-    ctx.strokeStyle = '#ffffff'
-    ctx.lineWidth = 4
-    ctx.stroke()
+    // 创建透明 Mesh 球体作为点击检测区域
+    const geometry = new THREE.SphereGeometry(50, 16, 16)
+    const material = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false
+    })
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.position.set(x, y, z)
+    mesh.userData = { id, label, color, position: { theta, phi }, type: 'hotspot' }
+    hotspotGroup.add(mesh)
 
-    ctx.beginPath()
-    ctx.arc(32, 32, 12, 0, Math.PI * 2)
-    ctx.fillStyle = '#ffffff'
-    ctx.fill()
+    // 创建 CSS2DObject 作为文字标签
+    let labelObject = null
+    if (label) {
+      const div = document.createElement('div')
+      div.className = 'hotspot-label'
+      div.style.backgroundColor = 'rgba(0, 0, 0, 0.7)'
+      div.style.color = '#ffffff'
+      div.style.padding = '8px 12px'
+      div.style.borderRadius = '4px'
+      div.style.fontSize = '14px'
+      div.style.fontWeight = 'bold'
+      div.style.border = `2px solid #${color.toString(16).padStart(6, '0')}`
+      div.style.whiteSpace = 'nowrap'
+      div.style.pointerEvents = 'none'
+      div.textContent = label
 
-    const texture = new THREE.CanvasTexture(canvas)
-    const material = new THREE.SpriteMaterial({ map: texture, transparent: true })
-    const sprite = new THREE.Sprite(material)
+      labelObject = new CSS2DObject(div)
+      // 计算标签位置（锚点上方 28 单位）
+      const labelHeight = 28
+      const labelX = x
+      const labelY = y + labelHeight
+      const labelZ = z
+      labelObject.position.set(labelX, labelY, labelZ)
+      labelGroup.add(labelObject)
+    }
 
-    sprite.position.set(x, y, z)
-    sprite.scale.set(20, 20, 1)
-    sprite.userData = { id, label, type: 'hotspot' }
+    // 保存锚点信息
+    const hotspotInfo = {
+      id,
+      mesh,
+      labelObject
+    }
+    hotspots.push(hotspotInfo)
 
-    hotspotGroup.add(sprite)
-    console.log('[PanoramaViewer] 锚点添加完成:', id, '位置:', x, y, z)
-    return sprite
+    console.log('[PanoramaViewer] 锚点添加完成:', label)
+    return hotspotInfo
   }
 
   function clearHotspots() {
+    // 清理 Mesh 球体
     while (hotspotGroup.children.length > 0) {
-      const sprite = hotspotGroup.children[0]
-      if (sprite.material.map) {
-        sprite.material.map.dispose()
+      const mesh = hotspotGroup.children[0]
+      if (mesh.geometry) {
+        mesh.geometry.dispose()
       }
-      sprite.material.dispose()
-      hotspotGroup.remove(sprite)
+      if (mesh.material) {
+        mesh.material.dispose()
+      }
+      hotspotGroup.remove(mesh)
     }
+
+    // 清理 CSS2DObject
+    while (labelGroup.children.length > 0) {
+      const labelObject = labelGroup.children[0]
+      labelGroup.remove(labelObject)
+    }
+
+    // 清空锚点数组
+    hotspots = []
+
     console.log('[PanoramaViewer] 锚点已清除')
   }
 
@@ -210,42 +260,53 @@ export function usePanoramaViewer(container, options = {}) {
     hotspotClickCallback = callback
   }
 
-  function switchView(target, duration = 1000) {
-    const { theta, phi } = target
-    const targetThetaRad = (theta * Math.PI) / 180
-    const targetPhiRad = (phi * Math.PI) / 180
+function switchView(target, duration = 1000) {
+  const { theta, phi } = target
 
-    const targetY = -targetThetaRad
-    const targetX = targetPhiRad - Math.PI / 2
+  // 将角度转换为弧度
+  const targetThetaRad = (theta * Math.PI) / 180
+  const targetPhiRad = (phi * Math.PI) / 180
 
-    console.log('[PanoramaViewer] 切换视角到:', theta, phi)
+  // 计算目标相机位置（球面上的点）
+  const radius = 0.5 // 相机到中心的距离
+  const targetX = radius * Math.sin(targetPhiRad) * Math.sin(targetThetaRad)
+  const targetY = radius * Math.cos(targetPhiRad)
+  const targetZ = radius * Math.sin(targetPhiRad) * Math.cos(targetThetaRad)
 
-    const startX = camera.rotation.x
-    const startY = camera.rotation.y
-    const startTime = Date.now()
+  // 获取起始相机位置
+  const startPos = camera.position.clone()
+  const targetPos = new THREE.Vector3(targetX, targetY, targetZ)
 
-    function animate() {
-      const elapsed = Date.now() - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2
+  const startTime = Date.now()
 
-      camera.rotation.x = startX + (targetX - startX) * eased
-      camera.rotation.y = startY + (targetY - startY) * eased
+  function animate() {
+    const elapsed = Date.now() - startTime
+    const progress = Math.min(elapsed / duration, 1)
+    const eased =
+      progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2
 
-      if (progress < 1) {
-        requestAnimationFrame(animate)
-      }
+    // 插值相机位置
+    camera.position.lerpVectors(startPos, targetPos, eased)
+
+    // 让相机始终看向中心
+    controls.target.set(0, 0, 0)
+    controls.update()
+
+    if (progress < 1) {
+      requestAnimationFrame(animate)
     }
-    animate()
   }
+
+  animate()
+}
 
   function bindEvents() {
     renderer.domElement.addEventListener('click', onMouseClick)
     window.addEventListener('resize', onResize)
 
-    renderer.domElement.addEventListener('touchstart', (e) => {
-      e.preventDefault()
-    }, { passive: false })
+    // renderer.domElement.addEventListener('touchstart', (e) => {
+    //   e.preventDefault()
+    // }, { passive: false })
   }
 
   function onMouseClick(event) {
@@ -255,22 +316,32 @@ export function usePanoramaViewer(container, options = {}) {
     checkHotspotClick()
   }
 
-  function checkHotspotClick() {
-    raycaster.setFromCamera(mouse, camera)
-    const intersects = raycaster.intersectObjects(hotspotGroup.children)
+function checkHotspotClick() {
+  raycaster.setFromCamera(mouse, camera)
 
-    if (intersects.length > 0 && hotspotClickCallback) {
-      const hotspot = intersects[0].object
-      console.log('[PanoramaViewer] 锚点点击:', hotspot.userData)
-      hotspotClickCallback(hotspot.userData)
-    }
+  // 调试：打印检测到的物体
+  const intersects = raycaster.intersectObjects(hotspotGroup.children, true)
+  console.log('[调试] 射线检测到的物体数量:', intersects.length)
+
+  if (intersects.length > 0) {
+    console.log('[调试] 第一个物体:', JSON.stringify(intersects[0].object.userData))
   }
+
+  if (intersects.length > 0 && hotspotClickCallback) {
+    const hotspot = intersects[0].object
+    console.log('[PanoramaViewer] 锚点点击:', JSON.stringify(hotspot.userData))
+    hotspotClickCallback(hotspot.userData)
+  }
+}
 
   function onResize() {
     if (!camera || !renderer) return
     camera.aspect = container.clientWidth / container.clientHeight
     camera.updateProjectionMatrix()
     renderer.setSize(container.clientWidth, container.clientHeight)
+    if (cssRenderer) {
+      cssRenderer.setSize(container.clientWidth, container.clientHeight)
+    }
     console.log('[PanoramaViewer] 窗口大小变化:', container.clientWidth, 'x', container.clientHeight)
   }
 
@@ -282,6 +353,9 @@ export function usePanoramaViewer(container, options = {}) {
       }
       if (renderer && scene && camera) {
         renderer.render(scene, camera)
+      }
+      if (cssRenderer && scene && camera) {
+        cssRenderer.render(scene, camera)
       }
     }
     render()
@@ -335,6 +409,13 @@ export function usePanoramaViewer(container, options = {}) {
       renderer = null
     }
 
+    if (cssRenderer) {
+      if (cssRenderer.domElement && cssRenderer.domElement.parentNode) {
+        cssRenderer.domElement.parentNode.removeChild(cssRenderer.domElement)
+      }
+      cssRenderer = null
+    }
+
     if (scene) {
       scene.clear()
       scene = null
@@ -342,6 +423,7 @@ export function usePanoramaViewer(container, options = {}) {
 
     camera = null
     hotspotGroup = null
+    labelGroup = null
     raycaster = null
     mouse = null
     controls = null

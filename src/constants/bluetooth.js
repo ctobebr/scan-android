@@ -86,9 +86,9 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_OUTPUT_POLAR: 0x16,
   /** 设置俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
   CMD_SET_PITCH_OFFSET: 0x17,
-  /** 设置速度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
+  /** 设置速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   CMD_SET_V_PID: 0x1E,
-  /** 设置角度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
+  /** 设置角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   CMD_SET_A_PID: 0x1F,
 })
 
@@ -118,9 +118,9 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_READ_OUTPUT_POLAR: 0x36,
   /** 读取俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
   CMD_READ_PITCH_OFFSET: 0x37,
-  /** 读取速度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
+  /** 读取速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   CMD_READ_V_PID: 0x3E,
-  /** 读取角度环PID data{uint32 axis:x/y,float:P,float:I,float:D} data位长度16字节 */
+  /** 读取角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   CMD_READ_A_PID: 0x3F,
 
   /** 控制上位机拍照（附带角度值回传）data{int:yaw,int:pitch}单位：弧度 */
@@ -168,7 +168,7 @@ export const SETTING_DEFAULT_VALUES = {
   /** PID参数默认值 */
   PID: {
     loopType: 'V', // 速度环
-    axis: 'X', // X轴
+    axis: 'x', // x轴
     p: 0,
     i: 0,
     d: 0

@@ -164,7 +164,7 @@ export class QueryCommands {
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
-   * @param {string} axis - 轴，'pitch' 或 'yaw'
+   * @param {string} axis - 轴，'x' 或 'y'
    */
   async sendReadVPID(deviceId, serviceUUID, characteristicUUID, axis) {
     // 添加特有参数验证
@@ -175,7 +175,7 @@ export class QueryCommands {
 
     const buffer = new ArrayBuffer(1) // 1 byte axis
     const view = new Uint8Array(buffer)
-    view[0] = axis === 'pitch' ? 0 : 1 // 轴值：pitch=0, yaw=1
+    view[0] = axis === 'x' ? 0 : 1 // 轴值：x=0, y=1
     await this.parent.sendCommand(
       deviceId,
       serviceUUID,
@@ -190,7 +190,7 @@ export class QueryCommands {
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
-   * @param {string} axis - 轴，'pitch' 或 'yaw'
+   * @param {string} axis - 轴，'x' 或 'y'
    */
   async sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis) {
     // 添加特有参数验证
@@ -201,7 +201,7 @@ export class QueryCommands {
 
     const buffer = new ArrayBuffer(1) // 1 byte axis
     const view = new Uint8Array(buffer)
-    view[0] = axis === 'pitch' ? 0 : 1 // 轴值：pitch=0, yaw=1
+    view[0] = axis === 'x' ? 0 : 1 // 轴值：x=0, y=1
     await this.parent.sendCommand(
       deviceId,
       serviceUUID,

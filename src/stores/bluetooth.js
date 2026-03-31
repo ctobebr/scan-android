@@ -433,7 +433,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
     /**
      * 发送设置速度环PID指令
-     * @param {string} axis - 轴，'X'或'Y'
+     * @param {string} axis - 轴，'x'或'y'
      * @param {number} p - P参数
      * @param {number} i - I参数
      * @param {number} d - D参数
@@ -450,7 +450,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
     /**
      * 发送设置角度环PID指令
-     * @param {string} axis - 轴，'X'或'Y'
+     * @param {string} axis - 轴，'x'或'y'
      * @param {number} p - P参数
      * @param {number} i - I参数
      * @param {number} d - D参数
@@ -481,7 +481,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
     /**
      * 发送读取速度环PID指令
-     * @param {string} axis - 轴，'X'或'Y'
+     * @param {string} axis - 轴，'x'或'y'
      */
     async handleReadVPID(axis) {
       return this.sendBluetoothCommand(
@@ -495,7 +495,7 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
     /**
      * 发送读取角度环PID指令
-     * @param {string} axis - 轴，'X'或'Y'
+     * @param {string} axis - 轴，'x'或'y'
      */
     async handleReadAPID(axis) {
       return this.sendBluetoothCommand(

@@ -997,7 +997,7 @@ export class parseBleData {
         d,
     )
     if (this.options.onVPIDResponse) {
-      this.options.onVPIDResponse({ axis: axis === 0 ? 'X' : 'Y', p, i, d })
+      this.options.onVPIDResponse({ axis: axis === 0 ? 'x' : 'y', p, i, d })
     }
   }
 
@@ -1027,7 +1027,7 @@ export class parseBleData {
         d,
     )
     if (this.options.onAPIDResponse) {
-      this.options.onAPIDResponse({ axis: axis === 0 ? 'X' : 'Y', p, i, d })
+      this.options.onAPIDResponse({ axis: axis === 0 ? 'x' : 'y', p, i, d })
     }
   }
 

@@ -47,7 +47,7 @@
     </div>
 
     <!-- 操作提示 -->
-    <div v-if="showGestureHint" class="gesture-hint" @click="showGestureHint = false">
+    <!-- <div v-if="showGestureHint" class="gesture-hint" @click="showGestureHint = false">
       <div class="hint-content">
         <div class="hint-item">
           <span class="hint-icon">👆</span>
@@ -62,7 +62,7 @@
           <span class="hint-text">点击锚点切换视角</span>
         </div>
       </div>
-    </div>
+    </div> -->
   </div>
 </template>
 
@@ -83,6 +83,10 @@ import img5 from '@/assets/overViewTest/f6052a720b26973a774a57d522cf80e4.jpg'
 import img6 from '@/assets/overViewTest/f6e9b61c1202dbe1df854c0fb9148617.png'
 
 // 图片列表配置
+// 目前锚点硬编码，锚点（单位角度，HOOKS函数内部写的角度转弧度的转换方法）由后端提供
+// 后续点击锚点切换视角时，有两种切换锚点视角的方案，目前代码是方案①，
+//  ①切换到一张全景照片内的不同视角 ，只改变相机的朝向，画面内容不变（因为球体内侧贴图的固定的）
+//  ②切换到另一张全景照片的视角，有一种到达下一个观测点的感觉，实现思路是直接将球体内侧贴图替换为另一张全景照片。（整体效果像贝壳租房客厅进入卧室感觉）
 const photoList = [
   {
     name: '全景1',
@@ -182,7 +186,7 @@ async function initViewer() {
 
   // 设置锚点点击回调
   viewer.onHotspotClick((hotspot) => {
-    selectedHotspot.value = hotspot
+    selectedHotspot.value = hotspot // 这行设置选中的锚点，触发锚点上面 div标签显示
     // 切换到锚点对应的视角
     const targetTheta = (hotspot.position?.theta || 0) + 180
     const targetPhi = 90

@@ -481,7 +481,7 @@ export function validateAxis(axis, paramName = 'axis') {
     throw createMissingParameterError(paramName)
   }
 
-  const validAxes = ['pitch', 'yaw']
+  const validAxes = ['x', 'y']
   if (!validAxes.includes(axis)) {
     throw createParameterError(paramName, axis, `one of ${validAxes.join(', ')}`)
   }
