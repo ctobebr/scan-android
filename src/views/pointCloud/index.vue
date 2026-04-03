@@ -11,6 +11,7 @@
 
         <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
 
+        <!-- <button @click="handleOverivew" class="preview-btn" > -->
         <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
           预览
         </button>
@@ -43,7 +44,7 @@
         </div> -->
 
         <!-- 注释点位，下周的进度搞这个 -->
-        <!-- <div class="batch-buttons-row">
+        <div class="batch-buttons-row">
           <button
             v-for="(b, idx) in batchButtons"
             :key="idx"
@@ -52,7 +53,7 @@
           >
             点位{{ idx + 1 }}
           </button>
-        </div> -->
+        </div>
         <div class="bottom-left-stat">
           <span>采集点位数：{{ dataBatchCounter }} / 50</span>
         </div>
@@ -107,8 +108,6 @@ import { parseBleData } from '@/utils/format/bleProtocol'
 import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
 // 导入全局日志工具
-// 原因：统一日志管理，后续逐步替换 logger.debug
-// 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger } from '@/utils/logger'
 
 // 创建点云页面专用日志记录器
@@ -181,6 +180,10 @@ let _hasCleaned = false
 // const isDev = ref(import.meta.env.DEV)
 const isDev = true
 
+// ==============================================
+// 辅助函数
+// ==============================================
+
 /**
  * 显示内存统计信息
  */
@@ -201,168 +204,193 @@ const showMemoryStats = () => {
     duration: 3000,
   })
 }
+
+/**
+ * 判断是否真的是离开会话页面（返回主页）
+ */
+function isLeavingSession(to) {
+  // 如果跳转到 BatchDetail，不是离开
+  if (to.name === 'BatchDetail') return false
+
+  // 如果跳转到主页，是离开
+  if (to.name === 'MainView') return true
+
+  // 如果路由深度变小（返回上一级），且上一级是主页，也是离开
+  const currentDepth = router.currentRoute.value.matched.length
+  const targetDepth = to.matched.length
+  if (targetDepth < currentDepth && to.name === 'MainView') {
+    return true
+  }
+
+  return false
+}
+
+// ==============================================
+// 导航相关函数
+// ==============================================
+
+/**
+ * 处理返回操作
+ * 触发路由返回并确保导航状态正确管理
+ */
 const goBack = async () => {
-  if (isNavigating.value) return
-  isNavigating.value = true
-
-  logger.info('用户点击返回，开始执行清理...')
-
-  // 立即开始路由返回，不等待清理完成
-  const navigationPromise = router.back()
-
-  // 将清理操作延迟到下一个事件循环，避免阻塞路由返回
-  setTimeout(() => {
-    cleanupResourcesForExit().catch((err) => {
-      logger.error('清理时发生错误', err)
-    })
-  }, 50)
-
-  // 先判断是否需要删除
-  if (!savedDuringDialog.value && currentSessionId && hasStarted) {
-    // await delSessionDir()  // 没保存，先暂时不删除 3/19
-    // setTimeout(async () => {
-    // }, 200)
+  // 防止重复触发
+  if (isNavigating.value) {
+    logger.debug('[PointCloud] 导航中，忽略重复的返回操作')
+    return
   }
 
-  return navigationPromise
+  try {
+    // 设置导航状态
+    isNavigating.value = true
+    logger.info('[PointCloud] 用户点击返回，开始导航...')
+
+    // 立即开始路由返回
+    await router.back()
+    // logger.debug('[PointCloud] 路由返回已触发')
+
+  } catch (error) {
+    logger.error('[PointCloud] 返回操作失败', error)
+    showToast({ message: '返回失败', position: 'bottom' })
+  } finally {
+    // 重置导航状态
+    setTimeout(() => {
+      isNavigating.value = false
+      logger.debug('[PointCloud] 导航状态已重置')
+    }, 100)
+  }
 }
 
-onMounted(async () => {
-  await init()
-
-  // --- 注册断开监听 ---
-  registerDisconnectListener()
-
-  // --- 页面加载时检查连接状态 ---
-  if (bluetoothStore.connectionStatus !== 2) {
-    logger.debug('[PointCloudPage] 页面加载时检测到设备未连接')
-    deviceDisconnected.value = true
-  } else {
-    // 主动校验一次连接状态
-    bluetoothService.checkConnectionStatus(bluetoothStore.connectedDeviceId).catch(() => {
-      logger.debug('[PointCloudPage] 页面加载时检测到连接已断开')
-      deviceDisconnected.value = true
-    })
-  }
-  // --- 结束：页面加载时检查连接状态 ---
-
-  pauseListener = await App.addListener('pause', () => {
-    cleanupResourcesForPause() // 暂停清理函数
-  })
-  resumeListener = await App.addListener('resume', async () => {
-    await handleAppResume() // 恢复函数
-  })
-
-  // 监听统一的 pointcloud-updated 事件以响应批次变化
-  batchDeletedListener = async (e) => {
-    const { type } = e.detail || {}
-    if (type === 'batch-deleted' || type === 'batches-reindexed') {
-      await loadBatchButtons()
-    }
-  }
-  window.addEventListener('pointcloud-updated', batchDeletedListener)
-})
-
-onUnmounted(async () => {
-  if (pauseListener) {
-    pauseListener.remove()
-    pauseListener = null
-  }
-  if (resumeListener) {
-    resumeListener.remove()
-    resumeListener = null
-  }
-  if (batchDeletedListener) {
-    window.removeEventListener('pointcloud-updated', batchDeletedListener)
-    batchDeletedListener = null
-  }
-  // 组件卸载时也执行彻底清理
-  await cleanupResourcesForExit()
-})
-
-onBeforeRouteLeave(async (to, from, next) => {
-  if (isLeavingSession(to) && hasStarted) {
-    // 如果是返回主页并且开始过采集，则删除多余文件夹
-    // await delSessionDir() // 没保存，暂时先不删除 3/19
-  }
-  await cleanupResourcesForExit()
-  next()
-})
-
-const handleEditClick = () => {
-  logger.debug('handleEditClick')
-}
-
-const handleSettingClick = () => {
-  logger.debug('handleSettingClick')
-}
-
+/**
+ * 跳转到预览页面
+ */
 const handleOverivew = () => {
-  // router.push('/overview')
+  let testID = 1
+  router.push({ name: 'BatchDetail', params: { session: currentSessionId, bid: testID } })
 }
 
-async function init() {
-  // 每次初始化重置清理标志
-  _hasCleaned = false
-  if (isRendererReady.value) return
-  await lockToLandscape()
-  await enableScreenKeepAwake()
-  try {
-    await StatusBar.setOverlaysWebView({ overlay: true })
-    await StatusBar.setBackgroundColor({ color: '#0e1420' })
-    await StatusBar.setStyle({ style: 'LIGHT' })
-  } catch (err) {
-    logger.warn('StatusBar overlay set failed', err)
-  }
-  try {
-    setImmersive(true)
-    // setTimeout(() => setImmersive(true), 120)
-    // setTimeout(async () => {
-    //   await setImmersive(true)
-    //   try {
-    //     await StatusBar.setBackgroundColor({ color: '#0e1420' })
-    //   } catch (e) {
-    //     // logger.warn('沉浸式设置失败', e)
-    //   }
-    // }, 900)
-  } catch (err) {
-    logger.warn('setImmersive initial calls failed', err)
-  }
-
-  setTimeout(() => {
-    if (container.value) {
-      // 可以传入自定义配置覆盖默认值，不传则使用默认配置
-      const customConfig = {
-        // maxPoints: 300000,        // 降低点云上限
-        // initialCapacity: 30000,   // 降低初始容量
-        // targetFps: 60,            // 提高帧率
-        // pointSize: 0.5,           // 增大点的大小
-      }
-      renderer = usePointCloudRenderer(container.value, customConfig)
-
-      renderer.init()
-      frameRate.value = 30
-      isRendererReady.value = true
-      window.addEventListener('resize', renderer.onResize)
-
-      if (!currentSessionId) {
-        currentSessionId = generateOptimizedSessionId()
-        resetForNewProject()
-      } else {
-        // 若已有会话ID则加载已存在批次，用于返回时恢复
-        loadBatchButtons()
-      }
-    }
-  }, 100)
-}
+/**
+ * 跳转到点位详情页面
+ * @param {number} idx - 点位索引
+ */
 function goToBatch(idx) {
   if (!currentSessionId) return
   const bid = idx + 1
   router.push({ name: 'BatchDetail', params: { session: currentSessionId, bid } })
 }
-// ================开始： 编辑批次数据相关=======================
 
-// 加载现有批次按钮（如果存在）
+/**
+ * 打开保存对话框
+ */
+const openSaveDialog = async () => {
+  if (!currentSessionId) {
+    showToast({ message: '会话ID未生成，无法保存', position: 'bottom' })
+    return
+  }
+
+  // 检查整个项目是否有数据（所有点位）
+  if (dataBatchCounter.value === 0) {
+    showToast({ message: '暂无数据可保存', position: 'bottom' })
+    return
+  }
+
+  // await unlockOrientation()
+  showSaveDialog.value = true
+  nextTick(() => {
+    try {
+      if (saveInput.value && typeof saveInput.value.focus === 'function') {
+        saveInput.value.focus()
+      }
+    } catch (e) {
+      logger.warn('focus failed', e)
+    }
+  })
+}
+
+/**
+ * 关闭保存对话框
+ */
+const closeSaveDialog = async () => {
+  showSaveDialog.value = false
+}
+
+/**
+ * 确认保存操作
+ */
+const confirmSave = async () => {
+  const name = (projectName.value || '').trim()
+
+  if (name && name.length > 10) {
+    showToast({ message: '项目名称不能超过10个字符', position: 'bottom' })
+    return
+  }
+
+  const validRe = /^[\u4e00-\u9fa5A-Za-z0-9 _-]*$/
+  if (name && !validRe.test(name)) {
+    showToast({
+      message: '项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线',
+      position: 'bottom',
+    })
+    return
+  }
+
+  const folderName = name ? `${name}_${currentSessionId}` : currentSessionId
+  lastSavedFolder.value = folderName
+  savedDuringDialog.value = false
+
+  // 先关闭保存对话框
+  closeSaveDialog()
+
+  // try {
+  //   // 显示加载中提示
+  //   showLoadingToast({
+  //     message: '保存中...',
+  //     forbidClick: true,
+  //   })
+  //   // 执行保存操作
+  //   await performSave(folderName)
+
+  //   // 保存成功后关闭加载提示
+  //   closeToast()
+  // } catch (error) {
+  //   // 保存失败也关闭加载提示
+  //   closeToast()
+  //   showToast({
+  //     message: '保存失败',
+  //     position: 'bottom',
+  //   })
+  // } finally {
+  //   router.back()
+  // }
+  try {
+    showLoadingToast({
+      message: '保存中...',
+      forbidClick: true,
+    })
+    // 执行保存操作（非阻塞）
+    performSave(folderName).finally(() => {
+      // 保存完成后关闭加载提示
+      // 立即执行返回操作
+      closeToast()
+      router.back()
+    })
+  } catch (error) {
+    closeToast()
+    showToast({
+      message: '保存失败',
+      position: 'bottom',
+    })
+    router.back()
+  }
+}
+
+// ==============================================
+// 数据管理函数
+// ==============================================
+
+/**
+ * 加载现有批次按钮（如果存在）
+ */
 async function loadBatchButtons() {
   if (!currentSessionId) return
   // 如果未保存，尝试从临时文件夹加载
@@ -383,7 +411,9 @@ async function loadBatchButtons() {
   }
 }
 
-// 重置为新项目
+/**
+ * 重置为新项目
+ */
 function resetForNewProject() {
   dataBatchCounter.value = 0
   batchButtons.value = []
@@ -395,7 +425,9 @@ function resetForNewProject() {
   }
 }
 
-// 重置为新点位
+/**
+ * 重置为新点位
+ */
 function resetForNewBatch() {
   currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   accumulationBuffer.length = 0
@@ -405,7 +437,9 @@ function resetForNewBatch() {
   }
 }
 
-// 保存当前点位数据
+/**
+ * 保存当前点位数据
+ */
 async function saveCurrentBatch() {
   if (!currentSessionId) return
 
@@ -440,223 +474,418 @@ async function saveCurrentBatch() {
     throw e
   }
 }
-// ================结束： 编辑批次数据相关=======================
 
-function registerDisconnectListener() {
+/**
+ * 保存整个项目（重命名会话文件夹）
+ * @param {string} folderName - 目标文件夹名    `${name}_${currentSessionId}` 或者 currentSessionId
+ * @returns {Promise} - 保存操作的 Promise
+ */
+function performSave(folderName) {
+  logger.debug('====folderName',folderName)
+  return new Promise( async (resolve, reject) => {
+    saving.value = true
+    try {
+      const tempName = storage.path.getTempSessionName(currentSessionId)
+      // 确定目标文件夹名
+      let targetName
+      if (folderName && folderName !== currentSessionId) {  // 用户有自定义项目名称
+        targetName = folderName
+      } else {
+        // 用户没输入项目名，直接使用会话ID
+        targetName = currentSessionId
+      }
+      // 检查临时文件夹是否存在，存在则重命名
+      try {
+        await storage.file.stat(`pointcloud/${tempName}`)
+
+        if (tempName !== targetName) {  // 之前新建的临时项目文件夹名称与用户输入自定义项目名称不同
+          await storage.session.rename(tempName, targetName)
+          // 优化：直接更新 store 中的文件夹信息，不刷新整个列表
+          updateFolderInStore(tempName, targetName)
+          logger.debug('[PointCloud] 项目重命名完成，已更新 store 数据')
+        }
+      } catch (e) {
+        logger.warn('[PointCloud] 临时文件夹不存在', tempName)
+      }
+      showToast({
+        message: '保存成功',
+        position: 'bottom',
+      })
+      savedDuringDialog.value = true
+      lastSavedFolder.value = targetName
+      resolve()
+    } catch (error) {
+      logger.error('保存失败:', error)
+      showToast({
+        message: `保存失败：${error.message || '未知错误'}`,
+        position: 'bottom',
+      })
+      reject(error)
+    } finally {
+      saving.value = false
+    }
+  })
+}
+
+/**
+ * 更新 store 中的文件夹信息
+ * @param {string} oldName - 旧文件夹名称
+ * @param {string} newName - 新文件夹名称
+ */
+function updateFolderInStore(oldName, newName) {
+  try {
+    // 解析新的文件夹名称，提取项目名和会话ID
+    const folderInfo = storage.path.parseFolderName(newName)
+
+    // 构建更新对象，只更新与名称相关的属性
+    const updates = {
+      name: newName,
+      projectName: folderInfo.projectName || newName,
+      sessionId: folderInfo.sessionId || newName,
+      displayName: folderInfo.displayName
+    }
+
+    // 直接更新 store 中的文件夹信息
+    folderStore.updateFolder(oldName, updates)
+
+    logger.debug(`[PointCloud] 已更新 store 中的文件夹信息: ${oldName} -> ${newName}`)
+    logger.debug(`[PointCloud] 解析后的信息: projectName=${folderInfo.projectName}, sessionId=${folderInfo.sessionId}, displayName=${folderInfo.displayName}`)
+  } catch (error) {
+    logger.error('[PointCloud] 更新 store 文件夹信息失败', error)
+  }
+}
+
+/**
+ * 删除临时会话目录
+ */
+const delSessionDir = async () => {
+  // 防止重复执行
+  if (isDeletingSession) return
+  if (!savedDuringDialog.value && currentSessionId && currentSessionId !== lastSavedFolder.value) {
+    isDeletingSession = true
+    try {
+      const folderToDelete = storage.path.getTempSessionName(currentSessionId)
+      await storage.session.delete(folderToDelete)
+      logger.debug('[Pointcloud] 未保存会话，已删除目录', folderToDelete)
+    } catch (e) {
+      logger.warn('[Pointcloud] 删除未保存会话失败', e)
+    } finally {
+      isDeletingSession = false
+    }
+  }
+}
+
+let isDeletingSession = false
+
+// ==============================================
+// 资源清理函数
+// ==============================================
+
+/**
+ * 清理定时器和事件监听器
+ */
+function cleanupTimersAndListeners() {
+  // 清理点云渲染定时器
+  cleanupAccumulationTimer()
+
+  // 移除 resize 事件监听器
+  if (renderer?.onResize) {
+    window.removeEventListener('resize', renderer.onResize)
+  }
+
+  // 移除蓝牙断开监听
   if (disconnectUnregister) {
     disconnectUnregister()
     disconnectUnregister = null
   }
-
-  disconnectUnregister = bluetoothService.onDeviceDisconnected(
-    async (deviceId, isManualDisconnect) => {
-      // 只处理当前连接的设备
-      if (deviceId !== bluetoothStore.connectedDeviceId) {
-        return
-      }
-
-      logger.debug('[PointCloudPage] 设备断开连接，手动断开:', isManualDisconnect)
-
-      // 如果是手动断开（主动调用handleDisconnect），直接返回上一页
-      if (isManualDisconnect) {
-        goBack()
-        return
-      }
-
-      // 意外断开：显示UI提示，停止采集
-      deviceDisconnected.value = true
-      isCollecting.value = false
-
-      // 停止订阅和清空累加器
-      try {
-        bluetoothStore.setCleanupStatus(true) // 清理中
-        await stopSessionParser() // 这里会取消订阅
-      } catch (e) {
-        logger.warn('[PointCloudPage] 清理会话失败', e)
-      } finally {
-        bluetoothStore.setCleanupStatus(false) // 清理结束
-      }
-      // 显示提示
-      showToast({ message: '设备已断开连接', position: 'bottom' })
-    },
-  )
 }
 
-// --- 监听蓝牙Store的连接状态变化 ---
-watch(
-  () => bluetoothStore.connectionStatus,
-  async (newStatus, oldStatus) => {
-    if (oldStatus === 2 && newStatus !== 2) {
-      // 连接从已连接变为非已连接状态
-      if (!deviceDisconnected.value) {
-        logger.debug('[PointCloudPage] 检测到全局连接状态变为未连接')
-        deviceDisconnected.value = true
-        isCollecting.value = false
-        try {
-          bluetoothStore.setCleanupStatus(true) // 清理中
-          await stopSessionParser() // 这里会取消订阅
-        } catch (e) {
-          logger.warn('[PointCloudPage] 清理会话失败', e)
-        } finally {
-          bluetoothStore.setCleanupStatus(false) // 清理结束
-        }
-      }
-    }
-  },
-)
-// --- 结束：监听蓝牙Store的连接状态变化 ---
-
-// ---清理资源函数 (进入后台时调用) ---
-async function cleanupResourcesForPause() {
-  // 1. 记录当前采集状态，用于恢复
-  wasCollectingBeforePause = isCollecting.value
-
-  // 2. 如果正在采集，则停止会话解析器（取消订阅、停止相机、清除定时器）
-  if (isCollecting.value) {
-    try {
-      bluetoothStore.setCleanupStatus(true) // 清理中
-      await stopSessionParser() // 这里会取消订阅
-    } catch (e) {
-      logger.warn('[PointCloudPage] 清理会话失败', e)
-    } finally {
-      bluetoothStore.setCleanupStatus(false) // 清理结束
-    }
-  } else {
-    logger.debug('[PointCloudPage] 未在采集状态，无需停止会话解析器')
-  }
-
-  // 3. 发送蓝牙结束指令（可根据业务逻辑调整）
-  // bluetoothStore.handleSendEnd()
-
-  // 4. 停止屏幕常亮
-  await disableScreenKeepAwake()
-}
-
-// 路由切换时彻底清理资源
-
-async function cleanupResourcesForExit() {
-  if (_hasCleaned) {
-    logger.debug('[PointCloud] cleanupResourcesForExit 已执行过，忽略')
-    return
-  }
-  _hasCleaned = true
-
-  // 同步清理定时器，确保立即生效
-  if (accumulationTimer) {
-    clearInterval(accumulationTimer)
-    accumulationTimer = null
-  }
-
-  try {
-    // 延迟执行状态栏恢复，让页面先退出
-    setTimeout(async () => {
-      try {
-        await StatusBar.setBackgroundColor({ color: '#0a0a1a' })
-        await StatusBar.setStyle({ style: 'LIGHT' })
-      } catch (err) {
-        logger.warn('StatusBar restore overlays failed', err)
-      }
-    }, 200)
-
-    // 延迟执行沉浸模式关闭
+/**
+ * 清理渲染器资源
+ * @returns {Promise} - 清理操作的 Promise
+ */
+function cleanupRenderer() {
+  return new Promise((resolve) => {
     setTimeout(() => {
-      setImmersive(false)
-    }, 250)
-  } catch (err) {
-    logger.warn('StatusBar restore overlays failed', err)
-  }
+      if (renderer?.dispose && typeof renderer.dispose === 'function') {
+        renderer.dispose()
+      }
+      renderer = null
+      isRendererReady.value = false
+      resolve()
+    }, 100)
+  })
+}
 
-  if (renderer?.onResize) {
-    window.removeEventListener('resize', renderer.onResize)
-  }
-  // 延迟销毁渲染器
-  setTimeout(() => {
-    if (renderer?.dispose && typeof renderer.dispose === 'function') {
-      renderer.dispose()
-    }
-    renderer = null
-    isRendererReady.value = false
-  }, 100)
-
-  await disableScreenKeepAwake()
+/**
+ * 清理蓝牙会话
+ */
+async function cleanupBluetoothSession() {
   try {
     bluetoothStore.setCleanupStatus(true) // 清理中
-    await stopSessionParser() // 这里会取消订阅
+    await stopSessionParser() // 取消订阅
+    bluetoothStore.handleSendEnd() // 发送结束指令
   } catch (e) {
     logger.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
     bluetoothStore.setCleanupStatus(false) // 清理结束
   }
+}
 
-  // --- 移除断开监听 ---
-  if (disconnectUnregister) {
-    disconnectUnregister()
-    disconnectUnregister = null
-  }
-  // --- 结束：移除断开监听 ---
-
-  bluetoothStore.handleSendEnd()
+/**
+ * 重置状态变量
+ * @param {boolean} resetState - 是否重置所有状态
+ */
+function resetStateVariables(resetState) {
   isCollecting.value = false
-  hasStarted = false
   pointCount.value = 0
-  dataBatchCounter.value = 0
   deviceDisconnected.value = false
-  await lockToPortrait()
+
+  if (resetState) {
+    hasStarted = false
+    dataBatchCounter.value = 0
+  }
 }
 
-// --- 回到前台时调用 ---
-async function handleAppResume() {
-  // 1. 重新启用屏幕常亮
-  await enableScreenKeepAwake()
+/**
+ * 恢复系统设置
+ * @param {Object} options - 恢复选项
+ */
+async function restoreSystemSettings(options) {
+  const { restoreStatusBar, disableImmersive, disableKeepAwake, restorePortrait } = options
 
-  // --- 恢复前检查设备是否仍然连接 ---
-  if (deviceDisconnected.value) {
-    logger.debug('[PointCloudPage] 设备已断开，不恢复采集')
-    return
+  // 恢复状态栏设置
+  if (restoreStatusBar) {
+    try {
+      await StatusBar.setBackgroundColor({ color: '#0a0a1a' })
+      await StatusBar.setStyle({ style: 'LIGHT' })
+    } catch (err) {
+      logger.warn('StatusBar restore overlays failed', err)
+    }
   }
 
-  if (bluetoothStore.connectionStatus !== 2) {
-    logger.debug('[PointCloudPage] 设备未连接，不恢复采集')
-    deviceDisconnected.value = true
-    return
+  // 禁用沉浸模式
+  if (disableImmersive) {
+    setImmersive(false)
   }
-  // --- 结束：恢复前检查设备是否仍然连接 ---
 
-  // 2. 如果之前正在采集，则尝试恢复订阅
-  // if (wasCollectingBeforePause) {
-  //   // 确保渲染器和会话ID都存在
-  //   if (isRendererReady.value && currentSessionId) {
-  //     // 重新启动会话解析器（重新订阅、启动相机）
-  //     startSessionParser()
-  //   } else {
-  //     logger.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
-  //   }
-  // } else {
-  //   logger.debug('[App] 上次未在采集状态，无需恢复')
-  // }
+  // 停止屏幕常亮
+  if (disableKeepAwake) {
+    await disableScreenKeepAwake()
+  }
+
+  // 恢复竖屏
+  if (restorePortrait) {
+    await lockToPortrait()
+  }
 }
 
-// 启动解析器并订阅蓝牙通知
-function startSessionParser() {
-  let reNameFlag = 0
-  // --- 检查设备是否已断开 ---
-  if (deviceDisconnected.value) {
-    logger.warn('[startSessionParser] 设备已断开，无法订阅')
+/**
+ * 应用进入后台时的清理函数
+ * 记录采集状态并停止必要的资源
+ */
+async function cleanupResourcesForPause() {
+  logger.debug('[PointCloud] cleanupResourcesForPause 开始执行')
+
+  try {
+    // 1. 记录当前采集状态，用于恢复
+    wasCollectingBeforePause = isCollecting.value
+    // logger.debug(`[PointCloud] 记录采集状态: ${isCollecting.value}`)
+
+    // 2. 如果正在采集，则停止会话解析器
+    if (isCollecting.value) {
+      logger.debug('[PointCloud] 正在采集，停止会话解析器')
+      await cleanupBluetoothSession()
+    } else {
+      logger.debug('[PointCloud] 未在采集状态，无需停止会话解析器')
+    }
+
+    // 3. 停止屏幕常亮
+    // logger.debug('[PointCloud] 停止屏幕常亮')
+    await disableScreenKeepAwake()
+
+  } catch (error) {
+    logger.error('[PointCloud] 清理暂停资源时发生错误', error)
+  } finally {
+    logger.debug('[PointCloud] cleanupResourcesForPause 执行结束')
+  }
+}
+
+/**
+ * 路由切换时彻底清理资源
+ * @param {Object} options - 清理选项
+ * @param {boolean} options.restorePortrait - 是否恢复竖屏
+ * @param {boolean} options.disableKeepAwake - 是否禁用屏幕常亮
+ * @param {boolean} options.disableImmersive - 是否禁用沉浸模式
+ * @param {boolean} options.restoreStatusBar - 是否恢复状态栏设置
+ * @param {boolean} options.resetState - 是否重置状态变量
+ */
+async function cleanupResourcesForExit(options = {}) {
+  const {
+    restorePortrait = true,
+    disableKeepAwake = true,
+    disableImmersive = true,
+    restoreStatusBar = true,
+    resetState = true
+  } = options
+
+  if (_hasCleaned) {
+    logger.debug('[PointCloud] cleanupResourcesForExit 已执行过，忽略')
     return
   }
-  // --- 结束：检查设备是否已断开 ---
 
-  if (parser) return
-  logger.debug('[startSessionParser] Starting parser and subscription...')
+  _hasCleaned = true
+  logger.debug('[PointCloud] cleanupResourcesForExit 开始执行')
 
-  parser = new parseBleData({
+  try {
+    // 1. 清理定时器和事件监听器
+    cleanupTimersAndListeners()
+
+    // 2. 清理渲染器资源
+    await cleanupRenderer()
+
+    // 3. 清理蓝牙会话
+    await cleanupBluetoothSession()
+
+    // 4. 重置状态变量
+    resetStateVariables(resetState)
+
+    // 5. 恢复系统设置
+    await restoreSystemSettings({
+      restoreStatusBar,
+      disableImmersive,
+      disableKeepAwake,
+      restorePortrait
+    })
+
+  } catch (error) {
+    logger.error('[PointCloud] 清理资源时发生错误', error)
+  } finally {
+    logger.debug('[PointCloud] cleanupResourcesForExit 执行结束')
+  }
+}
+
+/**
+ * 清理积累定时器
+ */
+function cleanupAccumulationTimer() {
+  if (accumulationTimer) {
+    clearInterval(accumulationTimer)
+    accumulationTimer = null
+    logger.debug('[cleanupAccumulationTimer] 定时器已清理')
+  }
+}
+
+/**
+ * 清空积累缓冲区
+ */
+function clearAccumulationBuffer() {
+  accumulationBuffer.length = 0
+  logger.debug('[clearAccumulationBuffer] 缓冲区已清空')
+}
+
+/**
+ * 取消蓝牙订阅
+ * @returns {Promise<void>}
+ */
+async function unsubscribeFromBluetooth() {
+  try {
+    const deviceId = bluetoothStore.connectedDeviceId
+    if (deviceId) {
+      await bluetoothService.unsubscribeFromNotifications(
+        deviceId,
+        NUS_SERVICE_UUID,
+        NUS_NOTIFY_CHAR_UUID,
+      )
+      logger.debug('[unsubscribeFromBluetooth] 蓝牙订阅已取消')
+    }
+  } catch (e) {
+    logger.warn('[unsubscribeFromBluetooth] 取消订阅失败', e)
+  }
+}
+
+/**
+ * 停止相机预览
+ * @returns {Promise<void>}
+ */
+async function stopCameraPreview() {
+  try {
+    await cameraHelper.stopPreview()
+    logger.debug('[stopCameraPreview] 相机预览已停止')
+  } catch (e) {
+    logger.warn('[stopCameraPreview] 停止相机预览失败', e)
+  }
+}
+
+/**
+ * 重置会话解析器状态
+ */
+function resetSessionParserState() {
+  // 不再设置 parser = null，保持实例以便复用
+  // parser = null
+  isCollecting.value = false
+  logger.debug('[resetSessionParserState] 解析器状态已重置，实例已保留')
+}
+
+/**
+ * 停止会话解析器
+ * 取消蓝牙订阅、停止相机预览、清理相关资源
+ * @returns {Promise<void>}
+ */
+async function stopSessionParser() {
+  if (!parser) {
+    logger.debug('[stopSessionParser] 解析器不存在，无需停止')
+    return
+  }
+
+  logger.debug('[stopSessionParser] 开始停止解析器和订阅...')
+
+  try {
+    // 清理定时器
+    cleanupAccumulationTimer()
+
+    // 清空缓冲区
+    clearAccumulationBuffer()
+
+    // 取消蓝牙订阅
+    await unsubscribeFromBluetooth()
+
+    // 停止相机预览
+    await stopCameraPreview()
+
+    // 重置状态
+    resetSessionParserState()
+
+  } catch (error) {
+    logger.error('[stopSessionParser] 停止解析器时发生错误', error)
+  }
+}
+
+/**
+ * 检查设备连接状态
+ * @returns {boolean} - 设备是否已连接
+ */
+function checkDeviceConnection() {
+  if (deviceDisconnected.value) {
+    logger.warn('[checkDeviceConnection] 设备已断开，无法订阅')
+    return false
+  }
+  return true
+}
+
+/**
+ * 创建会话解析器实例
+ * @returns {Object} - 会话解析器实例
+ */
+function createSessionParser() {
+  const parser = new parseBleData({
     enableDebug: true,
     getDataBatchCounter: () => `dataBatch_${dataBatchCounter.value.toString().padStart(3, '0')}`,
     onStartPreview: async () => {
       // 拍照前再次检查连接状态
       if (deviceDisconnected.value) {
         logger.warn(
-          '[startSessionParser] Device disconnected before starting camera preview. Aborting.',
+          '[createSessionParser] Device disconnected before starting camera preview. Aborting.',
         )
         throw new Error('Device disconnected before starting camera preview.')
       }
@@ -665,7 +894,7 @@ function startSessionParser() {
     onTakePhoto: async ({ fileBaseName, meta }) => {
       if (deviceDisconnected.value) {
         logger.warn(
-          '[startSessionParser] Device disconnected before taking photo. Aborting photo capture.',
+          '[createSessionParser] Device disconnected before taking photo. Aborting photo capture.',
         )
         throw new Error('Device disconnected before taking photo.')
       }
@@ -674,10 +903,9 @@ function startSessionParser() {
         const tempFolderName = storage.path.getTempSessionName(currentSessionId)
         const bid = dataBatchCounter.value
         const targetDir = `pointcloud/${tempFolderName}/Batch_${String(bid).padStart(3, '0')}`
-
         // 拍照并在后台保存（不阻塞主线程）
         const photoData = await cameraHelper.captureAndSave(
-          fileBaseName + '====' + ++reNameFlag,
+          fileBaseName + '====' + ++parser.reNameFlag,
           targetDir,
         )
 
@@ -715,17 +943,23 @@ function startSessionParser() {
       batchButtons.value.push(dataBatchCounter.value)
       isCollecting.value = false
       logger.debug('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
+
+      // 停止会话解析器，清理资源但保持 parser 实例
+      await stopSessionParser()
     },
   })
 
-  const deviceId = bluetoothStore.connectedDeviceId
-  if (!deviceId) {
-    logger.warn('未连接设备，无法订阅通知')
-    return
-  }
+  return parser
+}
 
-  bluetoothService
-    .subscribeToNotifications(deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, (uint8) => {
+/**
+ * 订阅蓝牙通知
+ * @param {string} deviceId - 设备ID
+ * @returns {Promise<void>}
+ */
+async function subscribeToBluetoothNotifications(deviceId) {
+  try {
+    await bluetoothService.subscribeToNotifications(deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, (uint8) => {
       try {
         // 检查单个点位点云数量上限
         if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
@@ -763,7 +997,7 @@ function startSessionParser() {
           if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
             logger.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
             showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
-            stopSessionParser()
+            stopSessionParser() // 这里会取消订阅
             isCollecting.value = false
             bluetoothStore.handleSendEnd()
           }
@@ -772,8 +1006,18 @@ function startSessionParser() {
         logger.error('notification handler error', e)
       }
     })
-    .catch((e) => logger.warn('subscribeToNotifications failed', e))
+  } catch (e) {
+    logger.warn('subscribeToNotifications failed', e)
+  }
+}
 
+/**
+ * - 条件检查（渲染器状态和采集状态）
+- 点云数据的批量处理
+- 点云渲染操作
+- 点计数更新
+ */
+function initAndStartRenderingTimer () {
   accumulationTimer = setInterval(() => {
     if (!isRendererReady.value || !isCollecting.value) return
     if (accumulationBuffer.length >= MIN_BATCH_SIZE) {
@@ -784,14 +1028,56 @@ function startSessionParser() {
       }
     }
   }, ACCUMULATION_INTERVAL)
+}
+
+/**
+ * 启动会话解析器并订阅蓝牙通知
+ */
+function startSessionParser() {
+  // 检查设备连接状态
+  if (!checkDeviceConnection()) {
+    return
+  }
+
+  if (parser) {
+    // 如果 parser 已存在，先重置状态
+    logger.debug('[startSessionParser] Parser already exists, resetting state...')
+    parser.reset(() => {
+      parser.reNameFlag = 0
+    })
+  } else {
+    // 创建会话解析器实例
+    parser = createSessionParser()
+    logger.debug('[startSessionParser] Creating new parser instance...')
+  }
+
+  const deviceId = bluetoothStore.connectedDeviceId
+  if (!deviceId) {
+    logger.warn('未连接设备，无法订阅通知')
+    return
+  }
+
+  // 订阅蓝牙通知
+  subscribeToBluetoothNotifications(deviceId)
+
+  // 初始化渲染定时器
+  initAndStartRenderingTimer()
 
   hasStarted = true // 表示是否开始过采集，如果没有则不用删除文件夹
 }
 
+/**
+ * 开始数据采集
+ */
 async function startDataStream() {
   if (isCollecting.value) {
     showToast({ message: '正在采集中...', position: 'bottom' })
     return
+  }
+  if (dataBatchCounter.value >= 50) {
+  // if (dataBatchCounter.value >= 5) {
+    showToast({ message: '采集点位已达上限', position: 'bottom' })
+     return
   }
   // 开始新点位采集前，清空渲染器中的点云
   if (renderer && typeof renderer.resetPointCloud === 'function') {
@@ -836,199 +1122,282 @@ async function startDataStream() {
   accumulationBuffer.length = 0
 
   isCollecting.value = true
+
+  // 先重置状态  再去发送开始指令
+  startSessionParser()
   bluetoothStore.handleSendStart()
   logger.debug('startDataStream click', '开始新点位采集，点位编号:', dataBatchCounter.value + 1)
-  startSessionParser()
 }
 
-const openSaveDialog = async () => {
-  if (!currentSessionId) {
-    showToast({ message: '会话ID未生成，无法保存', position: 'bottom' })
-    return
+// ==============================================
+// 初始化和设置函数
+// ==============================================
+
+/**
+ * 初始化页面和渲染器
+ */
+async function init() {
+  // 每次初始化重置清理标志
+  _hasCleaned = false
+  if (isRendererReady.value) return
+  await lockToLandscape()
+  await enableScreenKeepAwake()
+  try {
+    await StatusBar.setOverlaysWebView({ overlay: true })
+    await StatusBar.setBackgroundColor({ color: '#0e1420' })
+    await StatusBar.setStyle({ style: 'LIGHT' })
+  } catch (err) {
+    logger.warn('StatusBar overlay set failed', err)
+  }
+  try {
+    setImmersive(true)
+
+  } catch (err) {
+    logger.warn('setImmersive initial calls failed', err)
   }
 
-  // 检查整个项目是否有数据（所有点位）
-  if (dataBatchCounter.value === 0) {
-    showToast({ message: '暂无数据可保存', position: 'bottom' })
-    return
-  }
-
-  // await unlockOrientation()
-  showSaveDialog.value = true
-  nextTick(() => {
-    try {
-      if (saveInput.value && typeof saveInput.value.focus === 'function') {
-        saveInput.value.focus()
+  setTimeout(() => {
+    if (container.value) {
+      // 可以传入自定义配置覆盖默认值，不传则使用默认配置
+      const customConfig = {
+        // maxPoints: 300000,        // 降低点云上限
+        // initialCapacity: 30000,   // 降低初始容量
+        // targetFps: 60,            // 提高帧率
+        // pointSize: 0.5,           // 增大点的大小
       }
-    } catch (e) {
-      logger.warn('focus failed', e)
+      renderer = usePointCloudRenderer(container.value, customConfig)
+
+      renderer.init()
+      frameRate.value = 30
+      isRendererReady.value = true
+      window.addEventListener('resize', renderer.onResize)
+
+      if (!currentSessionId) {
+        currentSessionId = generateOptimizedSessionId()
+        resetForNewProject()
+      } else {
+        // 若已有会话ID则加载已存在批次，用于返回时恢复
+        loadBatchButtons()
+      }
     }
+  }, 100)
+}
+
+/**
+ * 注册蓝牙断开监听器
+ */
+function registerDisconnectListener() {
+  if (disconnectUnregister) {
+    disconnectUnregister()
+    disconnectUnregister = null
+  }
+
+  disconnectUnregister = bluetoothService.onDeviceDisconnected(
+    async (deviceId, isManualDisconnect) => {
+      // 只处理当前连接的设备
+      if (deviceId !== bluetoothStore.connectedDeviceId) {
+        return
+      }
+
+      logger.debug('[PointCloudPage] 设备断开连接，手动断开:', isManualDisconnect)
+
+      // 如果是手动断开（主动调用handleDisconnect），直接返回上一页
+      if (isManualDisconnect) {
+        goBack()
+        return
+      }
+
+      // 意外断开：显示UI提示，停止采集
+      deviceDisconnected.value = true
+      isCollecting.value = false
+
+      // 停止订阅和清空累加器
+      try {
+        bluetoothStore.setCleanupStatus(true) // 清理中
+        await stopSessionParser() // 这里会取消订阅
+      } catch (e) {
+        logger.warn('[PointCloudPage] 清理会话失败', e)
+      } finally {
+        bluetoothStore.setCleanupStatus(false) // 清理结束
+      }
+      // 显示提示
+      showToast({ message: '设备已断开连接', position: 'bottom' })
+    },
+  )
+}
+
+// ==============================================
+// 监听器和生命周期钩子
+// ==============================================
+
+// --- 监听蓝牙Store的连接状态变化 ---
+watch(
+  () => bluetoothStore.connectionStatus,
+  async (newStatus, oldStatus) => {
+    if (oldStatus === 2 && newStatus !== 2) {
+      // 连接从已连接变为非已连接状态
+      if (!deviceDisconnected.value) {
+        logger.debug('[PointCloudPage] 检测到全局连接状态变为未连接')
+        deviceDisconnected.value = true
+        isCollecting.value = false
+        try {
+          bluetoothStore.setCleanupStatus(true) // 清理中
+          await stopSessionParser() // 这里会取消订阅
+        } catch (e) {
+          logger.warn('[PointCloudPage] 清理会话失败', e)
+        } finally {
+          bluetoothStore.setCleanupStatus(false) // 清理结束
+        }
+      }
+    }
+  },
+)
+// --- 结束：监听蓝牙Store的连接状态变化 ---
+
+/**
+ * 组件挂载时的初始化
+ */
+onMounted(async () => {
+  await init()
+
+  // --- 注册断开监听 ---
+  registerDisconnectListener()
+
+  // --- 页面加载时检查连接状态 ---
+  if (bluetoothStore.connectionStatus !== 2) {
+    logger.debug('[PointCloudPage] 页面加载时检测到设备未连接')
+    deviceDisconnected.value = true
+  } else {
+    // 主动校验一次连接状态
+    bluetoothService.checkConnectionStatus(bluetoothStore.connectedDeviceId).catch(() => {
+      logger.debug('[PointCloudPage] 页面加载时检测到连接已断开')
+      deviceDisconnected.value = true
+    })
+  }
+  // --- 结束：页面加载时检查连接状态 ---
+
+  pauseListener = await App.addListener('pause', () => {
+    cleanupResourcesForPause() // 暂停清理函数
   })
-}
+  resumeListener = await App.addListener('resume', async () => {
+    await handleAppResume() // 恢复函数
+  })
 
-const closeSaveDialog = async () => {
-  showSaveDialog.value = false
-}
-
-const confirmSave = async () => {
-  const name = (projectName.value || '').trim()
-
-  if (name && name.length > 10) {
-    showToast({ message: '项目名称不能超过10个字符', position: 'bottom' })
-    return
+  // 监听统一的 pointcloud-updated 事件以响应批次变化
+  batchDeletedListener = async (e) => {
+    const { type } = e.detail || {}
+    if (type === 'batch-deleted' || type === 'batches-reindexed') {
+      await loadBatchButtons()
+    }
   }
+  window.addEventListener('pointcloud-updated', batchDeletedListener)
+})
 
-  const validRe = /^[\u4e00-\u9fa5A-Za-z0-9 _-]*$/
-  if (name && !validRe.test(name)) {
-    showToast({
-      message: '项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线',
-      position: 'bottom',
-    })
-    return
+/**
+ * 组件卸载时的清理
+ */
+onUnmounted(async () => {
+  logger.debug('onUnmounted 开始执行')
+  if (pauseListener) {
+    pauseListener.remove()
+    pauseListener = null
   }
+  if (resumeListener) {
+    resumeListener.remove()
+    resumeListener = null
+  }
+  if (batchDeletedListener) {
+    window.removeEventListener('pointcloud-updated', batchDeletedListener)
+    batchDeletedListener = null
+  }
+  // 组件卸载时也执行彻底清理
+  await cleanupResourcesForExit()
+})
 
-  const folderName = name ? `${name}_${currentSessionId}` : currentSessionId
-  lastSavedFolder.value = folderName
-  savedDuringDialog.value = false
-
-  // 先关闭保存对话框
-  closeSaveDialog()
+/**
+ * 路由离开守卫
+ * 根据目标路由执行不同的清理策略
+ */
+onBeforeRouteLeave(async (to, from, next) => {
+  logger.debug('[PointCloud] 执行 beforeRouteLeave 守卫')
 
   try {
-    // 显示加载中提示
-    showLoadingToast({
-      message: '保存中...',
-      forbidClick: true,
-    })
-    // 执行保存操作
-    await performSave(folderName)
-
-    // 保存成功后关闭加载提示
-    closeToast()
-  } catch (error) {
-    // 保存失败也关闭加载提示
-    closeToast()
-    showToast({
-      message: '保存失败',
-      position: 'bottom',
-    })
-  } finally {
-    router.back()
-  }
-}
-
-let isDeletingSession = false
-
-const delSessionDir = async () => {
-  // 防止重复执行
-  if (isDeletingSession) return
-  if (!savedDuringDialog.value && currentSessionId && currentSessionId !== lastSavedFolder.value) {
-    isDeletingSession = true
-    try {
-      const folderToDelete = storage.path.getTempSessionName(currentSessionId)
-      await storage.session.delete(folderToDelete)
-      logger.debug('[Pointcloud] 未保存会话，已删除目录', folderToDelete)
-    } catch (e) {
-      logger.warn('[Pointcloud] 删除未保存会话失败', e)
-    } finally {
-      isDeletingSession = false
-    }
-  }
-}
-// 保存整个项目（重命名会话文件夹）
-async function performSave(folderName) {
-  saving.value = true
-  try {
-    const tempName = storage.path.getTempSessionName(currentSessionId)
-    // 确定目标文件夹名
-    let targetName
-    if (folderName && folderName !== currentSessionId) {
-      targetName = folderName
-    } else {
-      // 用户没输入项目名，直接使用会话ID
-      targetName = currentSessionId
-    }
-
-    // 检查临时文件夹是否存在，存在则重命名
-    try {
-      await storage.file.stat(`pointcloud/${tempName}`)
-
-      if (tempName !== targetName) {
-        await storage.session.rename(tempName, targetName)
-        currentSessionId = targetName
-        logger.debug('[PointCloud] 开始刷新项目列表...')
-        await folderStore.refreshFolders()
-        logger.debug('[PointCloud] 刷新完成')
-      }
-    } catch (e) {
-      logger.warn('[PointCloud] 临时文件夹不存在', tempName)
-    }
-    // // 重命名会话文件夹
-    // if (currentSessionId && folderName && folderName !== currentSessionId) {
-    //   await storage.session.rename(currentSessionId, folderName)
-    //   currentSessionId = folderName
+    // 检查是否离开会话页面
+    // if (isLeavingSession(to) && hasStarted) {
+      // logger.debug('[PointCloud] 离开会话页面，检查是否需要删除临时文件夹')
+      // await delSessionDir() // 没保存，暂时先不删除 3/19
     // }
 
-    showToast({
-      message: '保存成功',
-      position: 'bottom',
-    })
-    savedDuringDialog.value = true
-    lastSavedFolder.value = targetName
-  } catch (error) {
-    logger.error('保存失败:', error)
-    showToast({
-      message: `保存失败：${error.message || '未知错误'}`,
-      position: 'bottom',
-    })
-    throw error // 重新抛出错误以便上层捕获
-  } finally {
-    saving.value = false
-  }
-}
+    // 根据目标路由执行不同的清理策略
+    if (to.name === 'BatchDetail') {
+      logger.debug('[PointCloud] 导航到 BatchDetail 页面，保持横屏等设置')
+      logger.debug('to.name', to.name)
+      await cleanupResourcesForExit({
+        restorePortrait: false,      // 保持横屏
+        disableKeepAwake: false,      // 保持屏幕常亮
+        disableImmersive: false,      // 保持沉浸模式
+        restoreStatusBar: false,      // 保持状态栏设置
+        resetState: false             // 不重置状态变量
+      })
+    } else {
+      logger.debug('to.name111', to.name)
+      logger.debug('[PointCloud] 导航到其他页面，执行完整清理')
+      await cleanupResourcesForExit()
+    }
 
-async function stopSessionParser() {
-  if (!parser) {
+    next()
+  } catch (error) {
+    logger.error('[PointCloud] 路由离开守卫执行错误', error)
+    next()
+  }
+})
+
+/**
+ * 应用恢复时的处理
+ */
+async function handleAppResume() {
+  // 1. 重新启用屏幕常亮
+  await enableScreenKeepAwake()
+
+  // --- 恢复前检查设备是否仍然连接 ---
+  if (deviceDisconnected.value) {
+    logger.debug('[PointCloudPage] 设备已断开，不恢复采集')
     return
   }
-  logger.debug('[stopSessionParser] Stopping parser and subscription...')
-  if (accumulationTimer) {
-    clearInterval(accumulationTimer)
-    accumulationTimer = null
+
+  if (bluetoothStore.connectionStatus !== 2) {
+    logger.debug('[PointCloudPage] 设备未连接，不恢复采集')
+    deviceDisconnected.value = true
+    return
   }
-  accumulationBuffer.length = 0
-  try {
-    const deviceId = bluetoothStore.connectedDeviceId
-    if (deviceId) {
-      await bluetoothService.unsubscribeFromNotifications(
-        deviceId,
-        NUS_SERVICE_UUID,
-        NUS_NOTIFY_CHAR_UUID,
-      )
-    }
-  } catch (e) {
-    logger.warn('unsubscribe failed', e)
-  }
-  await cameraHelper.stopPreview().catch(() => {})
-  parser = null
-  isCollecting.value = false
+  // --- 结束：恢复前检查设备是否仍然连接 ---
+
+  // 2. 如果之前正在采集，则尝试恢复订阅
+  // if (wasCollectingBeforePause) {
+  //   // 确保渲染器和会话ID都存在
+  //   if (isRendererReady.value && currentSessionId) {
+  //     // 重新启动会话解析器（重新订阅、启动相机）
+  //     startSessionParser()
+  //   } else {
+  //     logger.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
+  //   }
+  // } else {
+  //   logger.debug('[App] 上次未在采集状态，无需恢复')
+  // }
 }
-// 判断是否真的是离开会话页面（返回主页）
-function isLeavingSession(to) {
-  // 如果跳转到 BatchDetail，不是离开
-  if (to.name === 'BatchDetail') return false
 
-  // 如果跳转到主页，是离开
-  if (to.name === 'MainView') return true
+/**
+ * 处理编辑点击
+ */
+const handleEditClick = () => {
+  logger.debug('handleEditClick')
+}
 
-  // 如果路由深度变小（返回上一级），且上一级是主页，也是离开
-  const currentDepth = router.currentRoute.value.matched.length
-  const targetDepth = to.matched.length
-  if (targetDepth < currentDepth && to.name === 'MainView') {
-    return true
-  }
-
-  return false
+/**
+ * 处理设置点击
+ */
+const handleSettingClick = () => {
+  logger.debug('handleSettingClick')
 }
 </script>
 
@@ -1319,7 +1688,8 @@ function isLeavingSession(to) {
 
 .capture-btn:active:not(:disabled)::after {
   transform: translate(-50%, -50%) scale(0.9);
-} */
+}
+ */
 
 /* ========== 批次按钮行 ========== */
 .batch-buttons-row {

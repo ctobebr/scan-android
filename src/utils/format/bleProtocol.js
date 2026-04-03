@@ -32,6 +32,9 @@ import { createLogger } from '@/utils/logger'
 // 创建协议解析专用日志记录器
 const logger = createLogger('BleProtocol')
 
+import { useBluetoothStore } from '@/stores/bluetooth'
+const bluetoothStore = useBluetoothStore()
+
 // helper to convert Uint8Array to hex string
 function uint8ArrayToHex(arr) {
   if (!arr) return ''
@@ -78,6 +81,9 @@ export class parseBleData {
 
     // 用于区分单格式和双格式模式
     this.receivedFormat = null // null | 'xyz' | 'polar' | 'both'
+
+    // 照片重命名标志，用于生成唯一文件名
+    this.reNameFlag = 0
   }
   // 验证数据包
   validateBinaryPacket(receivedChecksum) {
@@ -527,9 +533,20 @@ export class parseBleData {
               //   `[Camera][${new Date().toISOString()}] invoking onTakePhoto callback. cmdCount=${this.cameraCmdCount}, callbackCount=${this.cameraCallbackCount}`,
               // )
             }
-            // logger.debug('即将执行 onTakePhoto 回调')
-            await this.options.onTakePhoto({ fileBaseName, meta })
-            // logger.debug('onTakePhoto 回调执行完成')
+            /**
+             * 测试代码开始============
+             */
+            // if (this.cameraCallbackCount == 1 && this.enableDebugLogging) {
+            //     bluetoothStore.handleSendEnd()
+            //     logger.debug('测试代码----只拍一张照片发送结束')
+            //     await this.options.onTakePhoto({ fileBaseName, meta })
+            //     this.options.onEndPreview()
+            //     this.options.onPhotoSessionEnded()
+            // }
+            /**
+             * 测试代码结束============
+             */
+            await this.options.onTakePhoto({ fileBaseName, meta }) // 关闭测试代码后，启用这行代码
           }
         } catch (err) {
           logger.error('HandleTakePhoto 内部发生错误:', err)
@@ -539,9 +556,9 @@ export class parseBleData {
           // 尝试处理挂起的结束请求
           this._tryProcessPendingEndRequests()
           if (this.enableDebugLogging) {
-            logger.debug(
-              // `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,
-            )
+            // logger.debug(
+            //    `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,
+            // )
           }
           resolve() // 完成当前任务
           // check queue for more requests
@@ -1086,5 +1103,49 @@ export class parseBleData {
       yawDeg: (yaw * 180) / Math.PI, // 角度
       distanceM: r,
     }
+  }
+
+  /**
+   * 重置所有状态，准备新的会话
+   * @param {Function} [onReset] - 可选的外部重置回调，用于重置外部状态（如 reNameFlag）
+   */
+  reset(onReset) {
+    // 重置协议解析状态
+    this.resetProtocolState();
+
+    // 重置累积的点
+    this.protocolState.accumulatedPoints = [];
+
+    // 重置拍照会话状态
+    this.protocolState.photoSession = {
+      active: false,
+      previewStarted: false,
+    };
+
+    // 重置数据合并状态
+    this._clearPendingMergeData();
+
+    // 重置其他状态
+    this.isProcessingPhoto = false;
+    this.pendingEndRequests = [];
+    this.photoRequestQueue = [];
+    this.cameraReadyPromise = null;
+
+    // 重置调试计数器
+    this.cameraCmdCount = 0;
+    this.cameraCallbackCount = 0;
+
+    // 重置数据格式标记
+    this.receivedFormat = null;
+
+    // 重置照片重命名标志
+    this.reNameFlag = 0;
+
+    // 调用外部重置回调
+    if (typeof onReset === 'function') {
+      onReset();
+    }
+
+    logger.debug('Parser reset complete');
   }
 }

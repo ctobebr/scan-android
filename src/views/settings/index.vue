@@ -1269,8 +1269,8 @@ const saveParam = async (type, silent = false) => {
       }
       break
     case 'speed':
-      validateAndFormat('speed', 'pitchSpeed', 4)
-      validateAndFormat('speed', 'yawSpeed', 4)
+      validateAndFormat('speed', 'pitchSpeed', 5)
+      validateAndFormat('speed', 'yawSpeed', 5)
       if (!isSpeedValid.value) {
         showToast({ message: '请填写正确的速度参数', position: 'bottom' })
         return

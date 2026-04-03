@@ -30,6 +30,7 @@
         <img :src="getConnectIconSrc()" alt="Connection Status" class="connect-icon" />
       </button>
       <button class="btn-start" @click="handleStartRecord">开始采集</button>
+      <!-- <button class="btn-start" @click="handleOverivew">全景预览</button> -->
     </div>
 
     <!-- 连接设备选择对话框 -->
@@ -156,7 +157,9 @@ onActivated(async () => {
 
 onBeforeUnmount(() => {
 })
-
+// const handleOverivew = () => {
+//   router.push('/overview')
+// }
 const handleStartRecord = () => {
   if (connectionStatus.value != 2) {
     showToast({
