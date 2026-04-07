@@ -519,6 +519,19 @@ export const useBluetoothStore = defineStore('bluetooth', {
         true
       )
     },
+
+    /**
+     * 发送拍照准备就绪指令(0x91)
+     * @description 通知下位机当前已准备就绪，可以开始接收拍照指令
+     */
+    async handleSendCameraNextPhoto() {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendCameraNextPhoto(...args),
+        [],
+        null,
+        '发送拍照准备就绪指令失败'
+      )
+    },
     // ==========结束： 读取参数方法 ==========
     /**
      * 设置清理状态

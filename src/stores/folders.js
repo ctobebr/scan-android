@@ -32,7 +32,20 @@ export const useFoldersStore = defineStore('folders', () => {
     }
 
     pointcloudUpdatedHandler = (e) => {
-      logger.debug('收到 pointcloud-updated 事件', e?.detail)
+      const detail = e?.detail || {}
+      logger.debug('收到 pointcloud-updated 事件', detail)
+
+      if (detail.type === 'partial_update') {
+        const { folders, action } = detail
+        if (folders && folders.length > 0) {
+          logger.info('执行局部更新', { action, count: folders.length })
+          projectFolders.value = projectFolders.value.filter(
+            (f) => !folders.includes(f.name),
+          )
+        }
+        return
+      }
+
       setTimeout(() => {
         refreshFolders()
       }, 0)

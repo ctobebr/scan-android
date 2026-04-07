@@ -5,7 +5,16 @@
         <p>暂无历史数据文件</p>
       </div>
       <div v-else class="list">
-        <div v-for="session in sessions" :key="session.folderName" class="list-item">
+        <div
+          v-for="session in sessions"
+          :key="session.folderName"
+          class="list-item"
+          :class="{ 'list-item-selected': isMultiSelectMode && selectedItems.includes(session.folderName) }"
+          @click="handleItemClick(session)"
+          @touchstart.passive="handleTouchStart(session.folderName)"
+          @touchend="handleTouchEnd"
+          @touchcancel="handleTouchCancel"
+        >
           <div class="info">
             <!-- title 显示 projectName 或 sessionId -->
             <div class="title">{{ session.displayName }}</div>
@@ -16,7 +25,7 @@
           </div>
 
           <!-- 操作图标容器 -->
-          <div class="action-icons">
+          <div v-if="!isMultiSelectMode" class="action-icons">
             <img
               src="@/assets/img/share.png"
               @click.stop="onShareClick(session.folderName, session.projectName, session.sessionId)"
@@ -30,9 +39,39 @@
               alt="Delete"
             />
           </div>
+
+          <!-- 多选模式选中指示器 -->
+          <div v-else class="selection-indicator">
+            <div
+              class="selection-circle"
+              :class="{ selected: selectedItems.includes(session.folderName) }"
+            >
+              <van-icon v-if="selectedItems.includes(session.folderName)" name="success" />
+            </div>
+          </div>
         </div>
       </div>
     </main>
+
+    <!-- 多选模式底部工具栏 -->
+    <div v-if="isMultiSelectMode" class="multi-select-toolbar">
+      <div class="toolbar-left" @click="toggleSelectAll">
+        <div class="selection-circle" :class="{ selected: isAllSelected }">
+          <van-icon v-if="isAllSelected" name="success" />
+        </div>
+        <span class="select-all-text">全选</span>
+      </div>
+      <div class="toolbar-right">
+        <div class="exit-btn" @click="exitMultiSelectMode">
+          <van-icon name="cross" class="exit-icon" />
+          <span class="exit-text">退出</span>
+        </div>
+        <div class="delete-btn" @click="deleteSelectedItems">
+          <van-icon name="delete-o" class="delete-icon" />
+          <span class="delete-text">删除</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -46,10 +85,21 @@ import * as storage from '@/api/pointCloudStorage'
 
 const folderStore = useFoldersStore()
 
+// 多选模式状态
+const isMultiSelectMode = ref(false)
+const selectedItems = ref([])
+const longPressTimer = ref(null)
+const longPressDuration = 800 // 长按阈值（毫秒）
+
 // --- 新增：组件卸载时强制关闭 Toast ---
 // 防止页面跳转了 Toast 还在转
 onUnmounted(() => {
   closeToast()
+  // 清理长按定时器
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
+  }
 })
 
 onMounted(() => {
@@ -65,6 +115,118 @@ onActivated(() => {
 const sessions = computed(() => {
   return folderStore.fileListItems
 })
+
+// 是否全部选中
+const isAllSelected = computed(() => {
+  return sessions.value.length > 0 && selectedItems.value.length === sessions.value.length
+})
+
+// 长按开始
+const handleTouchStart = (folderName) => {
+  longPressTimer.value = setTimeout(() => {
+    enterMultiSelectMode(folderName)
+  }, longPressDuration)
+}
+
+// 长按结束/取消
+const handleTouchEnd = () => {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value)
+    longPressTimer.value = null
+  }
+}
+
+const handleTouchCancel = () => {
+  handleTouchEnd()
+}
+
+// 进入多选模式
+const enterMultiSelectMode = (folderName) => {
+  isMultiSelectMode.value = true
+  selectedItems.value = [folderName]
+}
+
+// 退出多选模式
+const exitMultiSelectMode = () => {
+  isMultiSelectMode.value = false
+  selectedItems.value = []
+}
+
+// 处理列表项点击
+const handleItemClick = (session) => {
+  if (isMultiSelectMode.value) {
+    toggleItemSelection(session.folderName)
+  }
+}
+
+// 切换单个项目选中状态
+const toggleItemSelection = (folderName) => {
+  const index = selectedItems.value.indexOf(folderName)
+  if (index === -1) {
+    selectedItems.value.push(folderName)
+  } else {
+    selectedItems.value.splice(index, 1)
+  }
+  // 如果取消选中后没有项目了，退出多选模式
+  if (selectedItems.value.length === 0) {
+    exitMultiSelectMode()
+  }
+}
+
+// 切换全选/取消全选
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedItems.value = []
+  } else {
+    selectedItems.value = sessions.value.map(s => s.folderName)
+  }
+}
+
+// 批量删除选中项
+const deleteSelectedItems = async () => {
+  if (selectedItems.value.length === 0) return
+
+  const confirmed = await showConfirmDialog({
+    title: '提示',
+    message: `确定要删除选中的 ${selectedItems.value.length} 个项目吗？此操作不可撤销。`,
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+  }).catch(() => false)
+
+  if (confirmed) {
+    try {
+      showLoadingToast({
+        message: '删除中...',
+        forbidClick: true,
+      })
+
+      // 使用批量删除接口
+      const result = await storage.session.deleteFoldersBatch(selectedItems.value)
+
+      closeToast()
+
+      if (result.failed.length > 0) {
+        showToast({
+          message: `部分删除失败: ${result.failed.length} 个`,
+          position: 'bottom',
+        })
+      }
+
+      if (result.deleted.length > 0) {
+        showToast({ message: '删除成功', position: 'bottom' })
+      }
+
+      // 退出多选模式
+      exitMultiSelectMode()
+    } catch (e) {
+      closeToast()
+      showToast({
+        message: `删除失败: ${e.message || '未知错误'}`,
+        position: 'bottom',
+      })
+    }
+  }
+}
 
 // ========== 新增：统一的等待刷新函数 ==========
 /**
@@ -521,5 +683,99 @@ const formatFileSize = (bytes) => {
 }
 .icon-delete {
   filter: hue-rotate(-10deg) saturate(1.1);
+}
+
+/* 选中状态 */
+.list-item-selected {
+  background-color: #e6f0fa !important;
+  border: 2px solid #1890ff;
+}
+
+/* 选择指示器 */
+.selection-indicator {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.selection-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  background-color: #fff;
+}
+
+.selection-circle.selected {
+  border-color: #1890ff;
+  background-color: #1890ff;
+  color: #fff;
+}
+
+/* 多选模式底部工具栏 */
+.multi-select-toolbar {
+  position: fixed;
+  bottom: 80px;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background-color: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.exit-btn,
+.delete-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.exit-icon {
+  font-size: 18px;
+  color: #666;
+}
+
+.exit-text {
+  font-size: 14px;
+  color: #666;
+}
+
+.select-all-text {
+  font-size: 14px;
+  color: #333;
+}
+
+.delete-icon {
+  font-size: 20px;
+  color: #ff4d4f;
+}
+
+.delete-text {
+  font-size: 14px;
+  color: #ff4d4f;
 }
 </style>

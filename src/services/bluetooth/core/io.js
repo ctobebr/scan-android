@@ -238,7 +238,10 @@ export class DataIO {
 
         const frame = buildProtocolFrame(command, payload)
         await this.writeBinaryData(deviceId, serviceUUID, characteristicUUID, frame)
-        logger.withContext({ deviceId, command: `0x${command.toString(16).padStart(2, '0').toUpperCase()}` }).info('指令已发送', { frame })
+        const frameHex = Array.from(frame)
+          .map((b) => '0x' + b.toString(16).padStart(2, '0').toUpperCase())
+          .join(', ')
+        logger.withContext({ deviceId, command: `0x${command.toString(16).padStart(2, '0').toUpperCase()}` }).info('指令已发送', { frame: `[${frameHex}]` })
         return true
       },
       BluetoothErrorCode.WRITE_FAILED,

@@ -690,17 +690,23 @@ async function cleanupResourcesForPause() {
   try {
     // 1. 记录当前采集状态，用于恢复
     wasCollectingBeforePause = isCollecting.value
-    // logger.debug(`[PointCloud] 记录采集状态: ${isCollecting.value}`)
 
-    // 2. 如果正在采集，则停止会话解析器
+    // 2. 检查是否处于拍照会话中
+    const isInPhotoSession = parser?.protocolState?.photoSession?.active === true
+
+    // 3. 如果正在采集但处于拍照会话中，不清理蓝牙会话（拍照流程需要蓝牙连接）
     if (isCollecting.value) {
-      logger.debug('[PointCloud] 正在采集，停止会话解析器')
-      await cleanupBluetoothSession()
+      if (isInPhotoSession) {
+        logger.debug('[PointCloud] 正在拍照会话中，跳过蓝牙会话清理')
+      } else {
+        logger.debug('[PointCloud] 正在采集（非拍照会话），停止会话解析器')
+        await cleanupBluetoothSession()
+      }
     } else {
       logger.debug('[PointCloud] 未在采集状态，无需停止会话解析器')
     }
 
-    // 3. 停止屏幕常亮
+    // 4. 停止屏幕常亮
     // logger.debug('[PointCloud] 停止屏幕常亮')
     await disableScreenKeepAwake()
 
@@ -890,6 +896,9 @@ function createSessionParser() {
         throw new Error('Device disconnected before starting camera preview.')
       }
       return cameraHelper.startPreview('cameraPreview')
+    },
+    onSendCameraReady: async () => {
+      return bluetoothStore.handleSendCameraNextPhoto()
     },
     onTakePhoto: async ({ fileBaseName, meta }) => {
       if (deviceDisconnected.value) {

@@ -63,6 +63,7 @@ import {
   renameSession as sessionRename,
   deleteSession as sessionDelete,
   deletePointCloudFolder as sessionDeleteFolder,
+  deleteFoldersBatch as sessionDeleteFoldersBatch,
 } from '@/services/storage/pointCloud'
 
 /**
@@ -78,6 +79,8 @@ export const session = {
   delete: sessionDelete,
   /** 删除点云文件夹 */
   deleteFolder: sessionDeleteFolder,
+  /** 批量删除文件夹（触发一次局部更新事件） */
+  deleteFoldersBatch: sessionDeleteFoldersBatch,
 }
 
 // ============================================

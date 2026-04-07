@@ -442,7 +442,9 @@ export class parseBleData {
 
   _handleStartTakePhoto() {
     // 收到开始拍照指令：进入拍照预览并让调用方启动预览
-    if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
+    // 幂等性检查：如果预览正在启动中(active=true但previewStarted=false)，忽略重复的0x83指令
+    if (this.protocolState.photoSession.active && !this.protocolState.photoSession.previewStarted) {
+      logger.debug('预览启动中，忽略重复的0x83指令')
       return
     }
     this.protocolState.photoSession.active = true
@@ -454,7 +456,10 @@ export class parseBleData {
         .then((ok) => {
           if (this.protocolState.photoSession.active) {
             this.protocolState.photoSession.previewStarted = !!ok
-            if (ok) logger.info('相机预览已通过回调启动')
+            if (ok) {
+              logger.info('相机预览已通过回调启动')
+              this._sendCameraReadyNotification()
+            }
           }
           return ok
         })
@@ -469,11 +474,27 @@ export class parseBleData {
     logger.info('_handleStartTakePhoto over')
   }
 
+  /**
+   * 发送拍照准备就绪通知(0x91)给下位机
+   * @description 当相机预览启动成功后调用此方法通知下位机当前已准备就绪，可以开始接收拍照指令
+   * @returns {Promise<void>}
+   */
+  async _sendCameraReadyNotification() {
+    if (this.options.onSendCameraReady) {
+      try {
+        await this.options.onSendCameraReady()
+        logger.debug('已发送拍照准备就绪通知(0x91)')
+      } catch (err) {
+        logger.error('发送拍照准备就绪通知失败', err)
+      }
+    }
+  }
+
   async _handleTakePhoto(data) {
     if (this.enableDebugLogging) {
       // logger.debug('_handleTakePhoto start', { data: uint8ArrayToHex(data) })
     }
-    // logger.info('CMD_CTRL_CAMERA received')
+    logger.info('CMD_CTRL_CAMERA received 接收到拍照指令  0x81 执行拍照逻辑')
 
     // --- 将拍照请求加入处理流程 ---
     return new Promise((resolve, reject) => {
@@ -555,6 +576,10 @@ export class parseBleData {
           this.isProcessingPhoto = false
           // 尝试处理挂起的结束请求
           this._tryProcessPendingEndRequests()
+          // 拍照完成后发送0x91通知下位机准备就绪
+          if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
+            this._sendCameraReadyNotification()
+          }
           if (this.enableDebugLogging) {
             // logger.debug(
             //    `[Camera][${new Date().toISOString()}] _handleTakePhoto finally counts: cmd=${this.cameraCmdCount}, callbacks=${this.cameraCallbackCount}`,

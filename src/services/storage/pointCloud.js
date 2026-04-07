@@ -340,6 +340,57 @@ export async function deletePointCloudFolder(folderOrRel) {
   }
 }
 
+/**
+ * 批量删除文件夹（触发一次局部更新事件）
+ * 用于批量删除时的局部刷新优化
+ * @param {string[]} folders - 文件夹名称数组
+ * @returns {Promise<{deleted: string[], failed: Array<{folder: string, error: string}>}>}
+ */
+export async function deleteFoldersBatch(folders) {
+  const results = {
+    deleted: [],
+    failed: [],
+  }
+
+  for (const folder of folders) {
+    try {
+      const sanitizedPath = sanitizePath(folder)
+      if (!sanitizedPath) {
+        results.failed.push({ folder, error: '无效的文件夹名称' })
+        continue
+      }
+
+      let rel = sanitizedPath
+      if (rel.startsWith(`${POINTCLOUD_ROOT}/`)) {
+        rel = rel.replace(`${POINTCLOUD_ROOT}/`, '')
+      }
+
+      const folderPath = `${POINTCLOUD_ROOT}/${rel}`
+      await deleteDirectory(folderPath, {
+        recursive: true,
+        includeSelf: true,
+        force: false,
+        maxDepth: 10,
+      })
+
+      results.deleted.push(rel)
+      logger.debug('批量删除成功', { folder: rel })
+    } catch (e) {
+      logger.error('批量删除失败', { folder, error: e.message })
+      results.failed.push({ folder, error: e.message })
+    }
+  }
+
+  if (results.deleted.length > 0) {
+    dispatchFolderUpdate('partial_update', {
+      folders: results.deleted,
+      action: 'delete',
+    })
+  }
+
+  return results
+}
+
 // ========== 批次操作 - 拆分后的函数 ==========
 
 /**

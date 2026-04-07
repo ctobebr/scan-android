@@ -317,4 +317,22 @@ export class ControlCommands {
       buffer,
     )
   }
+
+  /**
+   * 发送"拍照准备就绪"指令(0x91)
+   * @description 通知下位机当前已准备就绪，可以开始接收拍照指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID) {
+    logger.withContext({ deviceId }).debug('发送拍照准备就绪指令(0x91)')
+    await this.parent.sendCommand(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      CONTROL_COMMANDS.CMD_CTRL_CAMERA_NEXT_PHOTO,
+      null,
+    )
+  }
 }

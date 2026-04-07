@@ -286,6 +286,10 @@ export class BluetoothService {
     return this.control.sendSetPitchOffset(deviceId, serviceUUID, characteristicUUID, offset)
   }
 
+  async sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID) {
+    return this.control.sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID)
+  }
+
   // ==================== 查询指令代理 ====================
 
   async sendReadPitchOffset(deviceId, serviceUUID, characteristicUUID) {

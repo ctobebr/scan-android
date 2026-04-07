@@ -90,6 +90,8 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_V_PID: 0x1E,
   /** 设置角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   CMD_SET_A_PID: 0x1F,
+  /** 拍照准备就绪，通知下位机(设备)可以开始接收拍照指令(0x91) */
+  CMD_CTRL_CAMERA_NEXT_PHOTO: 0x91,
 })
 
 // ========== 设备数据命令（设备 → 上位机）==========
