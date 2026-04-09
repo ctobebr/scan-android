@@ -4,6 +4,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem'
 // 原因：统一日志管理，后续逐步替换 console.log
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger } from '@/utils/logger'
+import { dispatchFolderUpdate } from '@/services/storage/pointCloud'
 
 // 创建相机辅助专用日志记录器
 const logger = createLogger('CameraHelper')
@@ -107,16 +108,10 @@ const cameraHelper = {
               // 触发文件夹更新事件，通知列表刷新缩略图
               const sessionId = filePath.split('/')[1]
               if (sessionId) {
-                window.dispatchEvent(
-                  new CustomEvent('pointcloud-updated', {
-                    detail: {
-                      type: 'partial_update',
-                      action: 'refresh',
-                      folders: [sessionId],
-                      timestamp: Date.now(),
-                    },
-                  })
-                )
+                dispatchFolderUpdate('partial_update', {
+                  action: 'folder_refreshed',
+                  folders: [sessionId],
+                })
                 logger.debug('第一张照片保存后触发文件夹刷新', { sessionId })
               }
             }

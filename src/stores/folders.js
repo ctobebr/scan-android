@@ -18,6 +18,9 @@ export const useFoldersStore = defineStore('folders', () => {
   const lastFetched = ref(null)
   const fetchPromise = ref(null)
 
+  // 批次变化回调函数（由 pointCloud/index.vue 注册）
+  const batchChangeCallbacks = ref(new Set())
+
   // 事件监听器引用
   let pointcloudUpdatedHandler = null
 
@@ -40,77 +43,129 @@ export const useFoldersStore = defineStore('folders', () => {
         const { folders, action } = detail
         if (folders && folders.length > 0) {
           logger.info('执行局部更新', { action, count: folders.length })
-          if (action === 'add') {
-            // 异步获取新文件夹的完整详情
-            const newFoldersDetails = await Promise.all(
-              folders.map(async (name) => {
-                const info = parseFolderName(name)
-                // 创建临时文件夹对象，用于获取详情
-                const tempFolder = {
-                  name,
-                  info: {
-                    projectName: info.projectName || info.displayName,
-                    sessionId: info.sessionId || name,
-                    displayName: info.displayName,
-                    displayDate: '',
-                    type: info.type,
-                  },
-                }
-                // 获取完整详情（包括缩略图、文件状态等）
-                return await getFolderDetails(tempFolder)
-              })
-            )
-            projectFolders.value = [...newFoldersDetails, ...projectFolders.value]
-          } else if (action === 'delete') {
-            projectFolders.value = projectFolders.value.filter(
-              (f) => !folders.includes(f.name),
-            )
-          } else if (action === 'rename') {
-            const { oldName, newName } = detail
-            const index = projectFolders.value.findIndex((f) => f.name === oldName)
-            if (index !== -1) {
-              const folderInfo = parseFolderName(newName)
-              const oldFolder = projectFolders.value[index]
-              projectFolders.value[index] = {
-                ...oldFolder,
-                name: newName,
-                projectName: folderInfo.projectName || folderInfo.displayName,
-                sessionId: folderInfo.sessionId || newName,
-                displayName: folderInfo.displayName,
-                // 保留原来的 displayDate（如果有文件则保留时间，否则保留空）
-                displayDate: oldFolder.hasFiles ? oldFolder.displayDate : '',
-                type: folderInfo.type,
-                isTemp: folderInfo.isTemp,
-              }
-            }
-          } else if (action === 'refresh') {
-            // 刷新指定文件夹的详情（如照片保存后更新缩略图）
-            for (const folderName of folders) {
-              const index = projectFolders.value.findIndex((f) => f.name === folderName)
-              if (index !== -1) {
-                const folder = projectFolders.value[index]
-                const updatedDetails = await getFolderDetails({
-                  name: folder.name,
-                  info: {
-                    projectName: folder.projectName,
-                    sessionId: folder.sessionId || folder.name,
-                    displayName: folder.displayName,
-                    displayDate: folder.displayDate,
-                    type: folder.type,
-                  },
+
+          // 统一处理所有 action 类型
+          switch (action) {
+            case 'folder_added': {
+              // 异步获取新文件夹的完整详情
+              const newFoldersDetails = await Promise.all(
+                folders.map(async (name) => {
+                  const info = parseFolderName(name)
+                  // 创建临时文件夹对象，用于获取详情
+                  const tempFolder = {
+                    name,
+                    info: {
+                      projectName: info.projectName || info.displayName,
+                      sessionId: info.sessionId || name,
+                      displayName: info.displayName,
+                      displayDate: '',
+                      type: info.type,
+                    },
+                  }
+                  // 获取完整详情（包括缩略图、文件状态等）
+                  return await getFolderDetails(tempFolder)
                 })
-                projectFolders.value[index] = updatedDetails
-                logger.debug('文件夹详情已刷新', { folderName })
-              }
+              )
+              projectFolders.value = [...newFoldersDetails, ...projectFolders.value]
+              break
             }
+
+            case 'folder_deleted': {
+              projectFolders.value = projectFolders.value.filter(
+                (f) => !folders.includes(f.name),
+              )
+              break
+            }
+
+            case 'folder_renamed': {
+              const { oldName, newName } = detail
+              const targetName = oldName || folders[0]
+              const index = projectFolders.value.findIndex((f) => f.name === targetName)
+              if (index !== -1 && newName) {
+                const folderInfo = parseFolderName(newName)
+                const oldFolder = projectFolders.value[index]
+                projectFolders.value[index] = {
+                  ...oldFolder,
+                  name: newName,
+                  projectName: folderInfo.projectName || folderInfo.displayName,
+                  sessionId: folderInfo.sessionId || newName,
+                  displayName: folderInfo.displayName,
+                  // 保留原来的 displayDate（如果有文件则保留时间，否则保留空）
+                  displayDate: oldFolder.hasFiles ? oldFolder.displayDate : '',
+                  type: folderInfo.type,
+                  isTemp: folderInfo.isTemp,
+                }
+              }
+              break
+            }
+
+            case 'folder_refreshed': {
+              // 刷新指定文件夹的详情（如照片保存后更新缩略图）
+              for (const folderName of folders) {
+                const index = projectFolders.value.findIndex((f) => f.name === folderName)
+                if (index !== -1) {
+                  const folder = projectFolders.value[index]
+                  const updatedDetails = await getFolderDetails({
+                    name: folder.name,
+                    info: {
+                      projectName: folder.projectName,
+                      sessionId: folder.sessionId || folder.name,
+                      displayName: folder.displayName,
+                      displayDate: folder.displayDate,
+                      type: folder.type,
+                    },
+                  })
+                  projectFolders.value[index] = updatedDetails
+                  logger.debug('文件夹详情已刷新', { folderName })
+                }
+              }
+              break
+            }
+
+            case 'batch_added':
+            case 'batch_deleted':
+            case 'batch_reindexed': {
+              // 批次操作后刷新文件夹详情（缩略图、文件状态等可能变化）
+              for (const folderName of folders) {
+                const index = projectFolders.value.findIndex((f) => f.name === folderName)
+                if (index !== -1) {
+                  const folder = projectFolders.value[index]
+                  const updatedDetails = await getFolderDetails({
+                    name: folder.name,
+                    info: {
+                      projectName: folder.projectName,
+                      sessionId: folder.sessionId || folder.name,
+                      displayName: folder.displayName,
+                      displayDate: folder.displayDate,
+                      type: folder.type,
+                    },
+                  })
+                  projectFolders.value[index] = updatedDetails
+                  logger.debug('批次操作后文件夹详情已刷新', { folderName, action })
+                }
+              }
+              // 通知注册的回调函数（如 pointCloud/index.vue 的 loadBatchButtons）
+              batchChangeCallbacks.value.forEach((callback) => {
+                try {
+                  callback(folders, action)
+                } catch (e) {
+                  logger.warn('批次变化回调执行失败', { error: e.message })
+                }
+              })
+              break
+            }
+
+            default:
+              logger.warn('未知的 action 类型，执行完整刷新', { action })
+              refreshFolders()
           }
         }
         return
       }
 
-      setTimeout(() => {
-        refreshFolders()
-      }, 0)
+      // 非 partial_update 类型事件的 fallback 处理
+      logger.warn('收到非 partial_update 类型事件，执行完整刷新', { type: detail.type })
+      refreshFolders()
     }
 
     window.addEventListener('pointcloud-updated', pointcloudUpdatedHandler)
@@ -127,6 +182,35 @@ export const useFoldersStore = defineStore('folders', () => {
     window.removeEventListener('pointcloud-updated', pointcloudUpdatedHandler)
     pointcloudUpdatedHandler = null
     logger.info('事件监听器已清理')
+  }
+
+  /**
+   * 注册批次变化回调函数
+   * 用于 pointCloud/index.vue 监听批次变化并刷新批次按钮
+   * @param {Function} callback - 回调函数，接收 (folders, action) 参数
+   * @returns {Function} 注销回调的函数
+   */
+  function onBatchChange(callback) {
+    if (typeof callback !== 'function') {
+      logger.warn('onBatchChange: callback 必须是函数')
+      return () => {}
+    }
+    batchChangeCallbacks.value.add(callback)
+    logger.debug('批次变化回调已注册')
+
+    // 返回注销函数
+    return () => {
+      batchChangeCallbacks.value.delete(callback)
+      logger.debug('批次变化回调已注销')
+    }
+  }
+
+  /**
+   * 清除所有批次变化回调
+   */
+  function clearBatchChangeCallbacks() {
+    batchChangeCallbacks.value.clear()
+    logger.info('所有批次变化回调已清除')
   }
 
   // 计算属性
@@ -453,5 +537,7 @@ export const useFoldersStore = defineStore('folders', () => {
     removeFolder,
     clearFolders,
     cleanupEventListeners,
+    onBatchChange,
+    clearBatchChangeCallbacks,
   }
 })

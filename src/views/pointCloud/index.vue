@@ -172,8 +172,8 @@ const isNavigating = ref(false)
 // 批次按钮状态
 const batchButtons = ref([]) // 存储已经生成的点位序号
 
-// 删除事件监听器
-let batchDeletedListener = null
+// 批次变化注销函数
+let unsubscribeBatchChange = null
 let _hasCleaned = false
 
 // 开发环境标志
@@ -500,11 +500,8 @@ function performSave(folderName) {
 
         if (tempName !== targetName) {
           await storage.session.rename(tempName, targetName)
-          storage.session.dispatchFolderUpdate('rename', {
-            oldName: tempName,
-            newName: targetName,
-          })
-          logger.debug('[PointCloud] 项目重命名完成，已派发事件')
+          // 事件已在 renameSession 内部派发，无需外部处理
+          logger.debug('[PointCloud] 项目重命名完成')
         }
       } catch (e) {
         logger.warn('[PointCloud] 临时文件夹不存在', tempName)
@@ -1095,7 +1092,7 @@ async function startDataStream() {
       //优化： 通知其他页面新增了文件夹（局部更新）
       //存在问题： 当处于拍照阶段未结束时，滑动屏幕返回（无法监听这个事件）导致数据列表项展示有问题，无法识别保存的照片等效果（暂时不用解决）
       storage.session.dispatchFolderUpdate('partial_update', {
-        action: 'add',
+        action: 'folder_added',
         folders: [tempFolderName],
       })
     } catch (e) {
@@ -1271,14 +1268,14 @@ onMounted(async () => {
     await handleAppResume() // 恢复函数
   })
 
-  // 监听统一的 pointcloud-updated 事件以响应批次变化
-  batchDeletedListener = async (e) => {
-    const { type } = e.detail || {}
-    if (type === 'batch-deleted' || type === 'batches-reindexed') {
+  // 注册批次变化回调，由 Pinia store 统一管理
+  unsubscribeBatchChange = folderStore.onBatchChange(async (folders, action) => {
+    // 当当前会话的批次发生变化时，刷新批次按钮
+    const currentFolder = currentSessionId || storage.path.getTempSessionName(currentSessionId)
+    if (folders.includes(currentFolder) || folders.includes(currentSessionId)) {
       await loadBatchButtons()
     }
-  }
-  window.addEventListener('pointcloud-updated', batchDeletedListener)
+  })
 })
 
 /**
@@ -1294,9 +1291,9 @@ onUnmounted(async () => {
     resumeListener.remove()
     resumeListener = null
   }
-  if (batchDeletedListener) {
-    window.removeEventListener('pointcloud-updated', batchDeletedListener)
-    batchDeletedListener = null
+  if (unsubscribeBatchChange) {
+    unsubscribeBatchChange()
+    unsubscribeBatchChange = null
   }
   // 组件卸载时也执行彻底清理
   await cleanupResourcesForExit()

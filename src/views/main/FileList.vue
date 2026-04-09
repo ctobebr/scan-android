@@ -130,6 +130,7 @@ onUnmounted(() => {
 
 onMounted(() => {
   if (folderStore.projectFolders.length === 0) {
+    console.log("不会执行")
     folderStore.loadProjectFolders()
   }
 })

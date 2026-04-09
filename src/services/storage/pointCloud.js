@@ -69,8 +69,8 @@ if (!FeatureFlags.ENABLE_DETAILED_LOGGING) {
 /**
  * 触发文件夹更新自定义事件
  * 用于通知应用的其他部分 pointcloud 文件夹内容已更新
- * @param {string} type - 事件类型（如 'new_batch', 'rename', 'delete' 等）
- * @param {object} data - 事件附带的数据
+ * @param {string} type - 事件类型（统一使用 'partial_update'）
+ * @param {object} data - 事件附带的数据，包含 action 和 folders 等字段
  * @returns {boolean} 事件是否成功触发
  */
 export function dispatchFolderUpdate(type, data) {
@@ -243,6 +243,15 @@ export async function renameSession(oldName, newName) {
 
   try {
     await rename(oldPath, newPath)
+
+    // 触发文件夹更新事件
+    dispatchFolderUpdate('partial_update', {
+      action: 'folder_renamed',
+      folders: [trimmedOldName],
+      oldName: trimmedOldName,
+      newName: trimmedNewName,
+    })
+
     logger.info('重命名成功')
     return true
   } catch (e) {
@@ -279,7 +288,10 @@ export async function deleteSession(sessionId) {
     })
 
     // 步骤4: 触发文件夹更新事件
-    dispatchFolderUpdate('delete_session', { session: sessionId })
+    dispatchFolderUpdate('partial_update', {
+      action: 'folder_deleted',
+      folders: [sessionId],
+    })
 
     logger.info('会话删除成功', { sessionId })
   } catch (e) {
@@ -331,8 +343,8 @@ export async function deleteFoldersBatch(folders) {
 
   if (results.deleted.length > 0) {
     dispatchFolderUpdate('partial_update', {
+      action: 'folder_deleted',
       folders: results.deleted,
-      action: 'delete',
     })
   }
 
@@ -524,7 +536,10 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
     logger.info('批次保存成功', { filePath: paths.txtFilePath, photoCount: photoUris.length })
 
     // 步骤5: 触发事件
-    dispatchFolderUpdate('new_batch', { session: sessionID, batch: normalizedBatchId })
+    dispatchFolderUpdate('partial_update', {
+      action: 'batch_added',
+      folders: [sessionID],
+    })
 
     // 步骤6: 返回结果
     return buildSaveBatchResult(
@@ -656,7 +671,10 @@ export async function deleteBatch(sessionId, batchId) {
     })
 
     // 步骤4: 触发批次删除事件
-    dispatchFolderUpdate('batch-deleted', { session: sessionId, batch: batchId })
+    dispatchFolderUpdate('partial_update', {
+      action: 'batch_deleted',
+      folders: [sessionId],
+    })
 
     // 步骤5: 重索引其余批次
     await reindexBatches(sessionId)
@@ -693,7 +711,10 @@ export async function reindexBatches(sessionId) {
     }
   }
 
-  dispatchFolderUpdate('batches-reindexed', { session: sessionId })
+  dispatchFolderUpdate('partial_update', {
+    action: 'batch_reindexed',
+    folders: [sessionId],
+  })
 }
 
 // ========== 缩略图和项目信息 ==========
