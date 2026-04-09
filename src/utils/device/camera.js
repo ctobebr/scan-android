@@ -71,7 +71,32 @@ const cameraHelper = {
       // logger.info('====CameraPreview.capture')
       if (CameraPreview && typeof CameraPreview.capture === 'function') {
         // 1. 立即捕获照片（实时性关键）
-        const res = await CameraPreview.capture({ quality: 90 })
+        // const res = await CameraPreview.capture({ quality: 90 })
+
+        // 高清 宽高比 16:9  网络传输、屏幕适配、节省存储=========实际1920*1080
+        // const res = await CameraPreview.capture({
+        //   quality: 90,
+        //   width: 1920, // 限制宽度
+        //   height: 1080, // 限制高度
+        // })
+        // 2k 宽高比 16:9  高清显示、打印小尺寸照片=========实际3840*1760
+        // const res = await CameraPreview.capture({
+        //   quality: 90,
+        //   width: 2560, // 限制宽度
+        //   height: 1440, // 限制高度
+        // })
+        // 全高清+ 	 宽高比 4:3  常规拍照、平衡画质与文件大小=========实际3264*2448
+        // const res = await CameraPreview.capture({
+        //   quality: 90,
+        //   width: 3264, // 限制宽度
+        //   height: 2448, // 限制高度
+        // })
+        // 4K 宽高比 16:9 高分辨率需求、大屏显示=========实际3840*2160
+        const res = await CameraPreview.capture({
+          quality: 90,
+          width: 3840, // 限制宽度
+          height: 2160, // 限制高度
+        })
         let base64 = res?.value || res?.data || ''
         if (!base64) {
           throw new Error('CameraPreview.capture 未返回数据')
