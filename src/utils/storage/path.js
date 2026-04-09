@@ -134,7 +134,7 @@ export function getDisplayName(folderName) {
 /**
  * 根据会话ID构建会话文件夹路径
  * @param {string} sessionId - 会话ID
- * @returns {string} 会话文件夹的相对路径（相对于 Documents）
+ * @returns {string} 会话文件夹的相对路径（相对于 ExternalStorage）
  * @example
  * sessionFolder('abc123') // 'pointcloud/abc123'
  */

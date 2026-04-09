@@ -108,7 +108,7 @@ export async function readFile(path, opts = {}) {
     () =>
       Filesystem.readFile({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
         encoding: opts.encoding,
       }),
     `读取文件 ${sanitizedPath}`,
@@ -135,7 +135,7 @@ export async function writeFile(path, data, opts = {}) {
       Filesystem.writeFile({
         path: sanitizedPath,
         data,
-        directory: Directory.Documents,
+        directory: Directory.External,
         encoding: opts.encoding,
       }),
     `写入文件 ${sanitizedPath}`,
@@ -158,7 +158,7 @@ export async function deleteFile(path) {
     () =>
       Filesystem.deleteFile({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
       }),
     `删除文件 ${sanitizedPath}`,
   )
@@ -180,7 +180,7 @@ export async function getUri(path) {
     () =>
       Filesystem.getUri({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
       }),
     `获取URI ${sanitizedPath}`,
   )
@@ -202,7 +202,7 @@ export async function stat(path) {
     () =>
       Filesystem.stat({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
       }),
     `获取状态 ${sanitizedPath}`,
   )
@@ -226,7 +226,7 @@ export async function readdir(path) {
     () =>
       Filesystem.readdir({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
       }),
     `读取目录 ${sanitizedPath}`,
   )
@@ -250,7 +250,7 @@ export async function mkdir(path, opts = {}) {
     () =>
       Filesystem.mkdir({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
         recursive: !!opts.recursive,
       }),
     `创建目录 ${sanitizedPath}`,
@@ -277,7 +277,7 @@ export async function rmdir(path, opts = {}) {
       () =>
         Filesystem.rmdir({
           path: sanitizedPath,
-          directory: Directory.Documents,
+          directory: Directory.External,
           recursive: !!opts.recursive,
         }),
       `删除目录 ${sanitizedPath}`,
@@ -289,7 +289,7 @@ export async function rmdir(path, opts = {}) {
     () =>
       Filesystem.deleteFile({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
       }),
     `删除目录(降级) ${sanitizedPath}`,
   )
@@ -317,7 +317,7 @@ export async function rename(oldPath, newPath) {
   return retryOperation(
     () =>
       Filesystem.rename({
-        directory: Directory.Documents,
+        directory: Directory.External,
         from: sanitizedOldPath,
         to: sanitizedNewPath,
         path: sanitizedOldPath,
@@ -368,7 +368,7 @@ async function deleteWithNativeApi(sanitizedPath, recursive = true) {
       try {
         await Filesystem.rmdir({
           path: sanitizedPath,
-          directory: Directory.Documents,
+          directory: Directory.External,
           recursive: recursive,
         })
         logger.info('删除成功（使用rmdir）', { path: sanitizedPath, recursive })
@@ -384,7 +384,7 @@ async function deleteWithNativeApi(sanitizedPath, recursive = true) {
     try {
       await Filesystem.deleteFile({
         path: sanitizedPath,
-        directory: Directory.Documents,
+        directory: Directory.External,
       })
       logger.info('删除成功（使用deleteFile）', { path: sanitizedPath })
       return true
@@ -433,7 +433,7 @@ async function deleteDirectoryInternal(currentPath, options = {}) {
       try {
         await Filesystem.rmdir({
           path: currentPath,
-          directory: Directory.Documents,
+          directory: Directory.External,
           recursive: true,
         })
         logger.info('原生递归删除成功', { path: currentPath })
@@ -449,40 +449,26 @@ async function deleteDirectoryInternal(currentPath, options = {}) {
 
     // 先删除所有文件
     for (const item of items) {
-      if (item.type === 'file') {
-        const filePath = `${currentPath}/${item.name}`
-        try {
-          await Filesystem.deleteFile({
-            path: filePath,
-            directory: Directory.Documents,
-          })
-          logger.debug('删除文件成功', { path: filePath })
-        } catch (err) {
-          if (!force) {
-            logger.warn('删除文件失败', { path: filePath, error: err.message })
-          }
+      const filePath = `${currentPath}/${item.name}`
+      try {
+        await Filesystem.deleteFile({
+          path: filePath,
+          directory: Directory.External,
+        })
+        logger.debug('删除文件成功', { path: filePath })
+      } catch (err) {
+        if (!force) {
+          logger.warn('删除文件失败', { path: filePath, error: err.message })
         }
       }
     }
 
-    // 递归删除所有子目录
-    for (const item of items) {
-      if (item.type === 'directory') {
-        const dirPath = `${currentPath}/${item.name}`
-        await deleteDirectoryInternal(dirPath, {
-          deleteSelf: true,
-          maxDepth: maxDepth - 1,
-          force,
-        })
-      }
-    }
-
-    // 删除目录本身（如果需要）
+    // 如果需要删除目录本身
     if (deleteSelf) {
       try {
         await Filesystem.rmdir({
           path: currentPath,
-          directory: Directory.Documents,
+          directory: Directory.External,
           recursive: false, // 内容已清空，不需要递归
         })
         logger.debug('删除目录本身成功', { path: currentPath })
@@ -613,22 +599,6 @@ export async function listFilesRecursive(path, maxDepth = MAX_RECURSION_DEPTH) {
 
   await walk(sanitizedPath, maxDepth)
   return results
-}
-
-/**
- * 确保 no-media 标记存在，防止系统媒体扫描
- * @param {string} basePath - 相对于 Documents 的目录
- * @returns {Promise<void>}
- */
-export async function ensureNoMedia(basePath) {
-  const markerPath = `${basePath}/.nomedia`
-  try {
-    await writeFile(markerPath, '', { encoding: 'utf8' })
-    logger.debug('创建.nomedia标记', { path: markerPath })
-  } catch (e) {
-    // 忽略错误，这不是关键操作
-    logger.debug('创建.nomedia标记失败（可忽略）', { path: markerPath, error: e.message })
-  }
 }
 
 /**

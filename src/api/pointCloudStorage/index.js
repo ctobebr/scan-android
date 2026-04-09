@@ -35,7 +35,7 @@
  * // 会话管理
  * const folders = await storage.session.listFolders()
  * await storage.session.rename('oldName', 'newName')
- * await storage.session.deleteFolder('folderName')
+ * await storage.session.deleteFoldersBatch(['folderName'])
  *
  * // 批次管理
  * await storage.batch.save(sessionId, batchId, dataLines, photos)
@@ -50,8 +50,6 @@
  * ```
  *
  * @module @/api/pointCloudStorage
- * @version 3.1.0
- * @since 2026-03-26
  */
 
 // ============================================
@@ -59,11 +57,11 @@
 // ============================================
 
 import {
-  listPointCloudFolders as sessionListFolders,
-  renameSession as sessionRename,
-  deleteSession as sessionDelete,
-  deletePointCloudFolder as sessionDeleteFolder,
-  deleteFoldersBatch as sessionDeleteFoldersBatch,
+  listPointCloudFolders,
+  renameSession,
+  deleteSession,
+  deleteFoldersBatch,
+  dispatchFolderUpdate,
 } from '@/services/storage/pointCloud'
 
 /**
@@ -72,15 +70,15 @@ import {
  */
 export const session = {
   /** 列出点云文件夹（带解析信息） */
-  listFolders: sessionListFolders,
+  listFolders: listPointCloudFolders,
   /** 重命名会话 */
-  rename: sessionRename,
+  rename: renameSession,
   /** 删除会话 */
-  delete: sessionDelete,
-  /** 删除点云文件夹 */
-  deleteFolder: sessionDeleteFolder,
+  delete: deleteSession,
   /** 批量删除文件夹（触发一次局部更新事件） */
-  deleteFoldersBatch: sessionDeleteFoldersBatch,
+  deleteFoldersBatch,
+  /** 触发文件夹更新事件（用于局部更新） */
+  dispatchFolderUpdate,
 }
 
 // ============================================
@@ -88,10 +86,10 @@ export const session = {
 // ============================================
 
 import {
-  saveBatch as batchSave,
-  listBatches as batchList,
-  readBatch as batchRead,
-  deleteBatch as batchDelete,
+  saveBatch,
+  listBatches,
+  readBatch,
+  deleteBatch,
 } from '@/services/storage/pointCloud'
 
 /**
@@ -100,13 +98,13 @@ import {
  */
 export const batch = {
   /** 保存批次数据 */
-  save: batchSave,
+  save: saveBatch,
   /** 列出会话下的所有批次 */
-  list: batchList,
+  list: listBatches,
   /** 读取批次数据 */
-  read: batchRead,
+  read: readBatch,
   /** 删除批次 */
-  delete: batchDelete,
+  delete: deleteBatch,
 }
 
 // ============================================
@@ -114,13 +112,12 @@ export const batch = {
 // ============================================
 
 import {
-  stat as fileStat,
-  readdir as fileReadDir,
-  ensureDir as fileEnsureDir,
-  deleteDirectory as fileDeleteDirectory,
-  listFilesRecursive as fileListRecursive,
-  ensureNoMedia as fileEnsureNoMedia,
-  exists as fileExists,
+  stat,
+  readdir,
+  ensureDir,
+  deleteDirectory,
+  listFilesRecursive,
+  exists,
 } from '@/services/storage/fileSystem'
 
 /**
@@ -129,19 +126,17 @@ import {
  */
 export const file = {
   /** 获取文件状态 */
-  stat: fileStat,
+  stat,
   /** 读取目录 */
-  readDir: fileReadDir,
+  readDir: readdir,
   /** 确保目录存在 */
-  ensureDir: fileEnsureDir,
+  ensureDir,
   /** 删除目录（支持选项参数） */
-  deleteDirectory: fileDeleteDirectory,
+  deleteDirectory,
   /** 递归列出文件 */
-  listRecursive: fileListRecursive,
-  /** 确保 .nomedia 标记存在 */
-  ensureNoMedia: fileEnsureNoMedia,
+  listRecursive: listFilesRecursive,
   /** 检查文件是否存在 */
-  exists: fileExists,
+  exists,
 }
 
 // ============================================
@@ -149,9 +144,9 @@ export const file = {
 // ============================================
 
 import {
-  zipSessionToFile as exportToZip,
-  getProjectThumbnail as exportGetThumbnail,
-  getProjectBatchInfo as exportGetBatchInfo,
+  zipSessionToFile,
+  getProjectThumbnail,
+  getProjectBatchInfo,
 } from '@/services/storage/pointCloud'
 
 /**
@@ -160,11 +155,11 @@ import {
  */
 export const exportData = {
   /** 将会话打包为 ZIP 文件 */
-  toZip: exportToZip,
+  toZip: zipSessionToFile,
   /** 获取项目缩略图 */
-  getThumbnail: exportGetThumbnail,
+  getThumbnail: getProjectThumbnail,
   /** 获取项目批次信息 */
-  getBatchInfo: exportGetBatchInfo,
+  getBatchInfo: getProjectBatchInfo,
 }
 
 // ============================================
@@ -172,8 +167,8 @@ export const exportData = {
 // ============================================
 
 import {
-  parseFolderName as pathParseFolderName,
-  getTempSessionName as pathGetTempSessionName,
+  parseFolderName,
+  getTempSessionName,
 } from '@/utils/storage/path'
 
 /**
@@ -182,9 +177,9 @@ import {
  */
 export const path = {
   /** 解析文件夹名称 */
-  parseFolderName: pathParseFolderName,
+  parseFolderName,
   /** 获取临时会话名称 */
-  getTempSessionName: pathGetTempSessionName,
+  getTempSessionName,
 }
 
 // ============================================
@@ -216,8 +211,9 @@ export {
 
 /**
  * API 版本号
+ * 与 package.json 版本保持一致
  */
-export const VERSION = '3.2.0'
+export const VERSION = '1.0.0'
 
 /**
  * 构建日期

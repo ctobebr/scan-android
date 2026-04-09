@@ -4,8 +4,6 @@
  * 提供蓝牙相关的自定义错误类和错误处理工具。
  *
  * @module @/services/bluetooth/utils/errors
- * @version 1.0.0
- * @since 2026-03-24
  */
 
 // ========== 错误码定义 ==========

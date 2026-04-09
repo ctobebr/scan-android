@@ -42,7 +42,6 @@ import {
   ensureDir,
   deleteDirectory,
   listFilesRecursive,
-  ensureNoMedia,
   rename,
   exists,
 } from './fileSystem'
@@ -114,7 +113,6 @@ export async function ensureSessionDir(sessionId) {
 
   const path = sessionFolder(sessionId)
   await ensureDir(path)
-  await ensureNoMedia(path)
   return path
 }
 
@@ -132,7 +130,6 @@ export async function ensureBatchDir(sessionId, batchId) {
   await ensureSessionDir(sessionId)
   const path = batchFolder(sessionId, batchId)
   await ensureDir(path)
-  await ensureNoMedia(path)
   return path
 }
 
@@ -191,7 +188,7 @@ export async function listPointCloudFolders(includeAll = false) {
   } catch (error) {
     logger.error('读取文件夹列表失败', { error: error.message })
     if (error.message.includes('ENOENT')) {
-      logger.warn(`文件夹 Documents/${POINTCLOUD_ROOT} 不存在或路径错误`)
+      logger.warn(`文件夹 ${POINTCLOUD_ROOT} 不存在或路径错误`)
       return []
     }
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `读取文件夹列表失败: ${error.message}`)
@@ -288,55 +285,6 @@ export async function deleteSession(sessionId) {
   } catch (e) {
     logger.error('删除会话失败', { sessionId, error: e.message })
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除会话失败: ${e.message}`)
-  }
-}
-
-/**
- * 删除 pointcloud 下的指定文件夹
- * 业务层删除函数，负责验证、事件通知和错误处理
- * 实际文件系统操作委托给 fileSystem.deleteDirectory
- *
- * @param {string} folderOrRel - 文件夹名或相对路径
- * @returns {Promise<boolean>} 删除是否成功
- * @throws {FilePathError} 当删除失败时抛出
- */
-export async function deletePointCloudFolder(folderOrRel) {
-  // 步骤1: 参数验证
-  const sanitizedPath = sanitizePath(folderOrRel)
-  if (!sanitizedPath) {
-    throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '需要提供有效的文件夹名称')
-  }
-
-  // 步骤2: 路径标准化（移除 POINTCLOUD_ROOT 前缀）
-  let rel = sanitizedPath
-  if (rel.startsWith(`${POINTCLOUD_ROOT}/`)) {
-    rel = rel.replace(`${POINTCLOUD_ROOT}/`, '')
-  }
-
-  // 步骤3: 解析文件夹信息（用于日志和事件）
-  const folderInfo = parseFolderName(rel)
-  logger.info('删除文件夹', { folder: rel, type: folderInfo.type })
-
-  // 步骤4: 构建完整路径
-  const folderPath = `${POINTCLOUD_ROOT}/${rel}`
-
-  // 步骤5: 调用文件系统服务执行删除
-  try {
-    await deleteDirectory(folderPath, {
-      recursive: true,      // 递归删除所有内容
-      includeSelf: true,    // 删除目录本身
-      force: false,         // 不强制删除，遇到错误抛出
-      maxDepth: 10,         // 最大递归深度
-    })
-
-    // 步骤6: 触发文件夹更新事件
-    dispatchFolderUpdate('delete', { folder: rel, type: folderInfo.type })
-
-    logger.info('文件夹删除成功', { folder: rel })
-    return true
-  } catch (e) {
-    logger.error('删除文件夹失败', { error: e.message, folderPath })
-    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除文件夹失败: ${e.message}`)
   }
 }
 
@@ -752,62 +700,67 @@ export async function reindexBatches(sessionId) {
 
 /**
  * 获取项目缩略图
- * 选择策略：按批次号升序，找到第一个有照片的批次，选择最新的照片
+ * thumbnail选择策略：按批次号升序，找到第一个有照片的批次，选择其中最新的照片
  * @param {string} sessionId - 会话ID
- * @returns {Promise<{uri:string|null,path:string|null,hasPhoto:boolean,batchInfo:string}>}
+ * @param {number} [retries=2] - 重试次数
+ * @returns {Promise<{uri:string|null,hasPhoto:boolean}>}
  * @throws {FilePathError} 当会话ID无效时抛出
  */
-export async function getProjectThumbnail(sessionId) {
+export async function getProjectThumbnail(sessionId, retries = 2) {
   validateSessionId(sessionId)
 
   const folderInfo = parseFolderName(sessionId)
   if (!folderInfo.shouldShow) {
     logger.debug('跳过自定义文件夹', { sessionId })
-    return { uri: null, path: null, hasPhoto: false, batchInfo: '' }
+    return { uri: null, hasPhoto: false }
   }
 
   const folderPath = sessionFolder(sessionId)
 
-  try {
-    // 获取所有批次文件夹
-    const items = await readdir(folderPath)
-    const batchFolders = items.files
-      .filter((f) => f.type === 'directory' && f.name.startsWith('Batch_'))
-      .map((f) => ({
-        name: f.name,
-        batchNum: extractBatchNumber(f.name) || 999,
-      }))
-      .sort((a, b) => a.batchNum - b.batchNum)
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const items = await readdir(folderPath)
+      const batchFolders = items.files
+        .filter((f) => f.type === 'directory' && f.name.startsWith('Batch_'))
+        .map((f) => ({
+          name: f.name,
+          batchNum: extractBatchNumber(f.name) || 999,
+        }))
+        .sort((a, b) => a.batchNum - b.batchNum)
 
-    if (batchFolders.length === 0) {
-      return { uri: null, path: null, hasPhoto: false, batchInfo: '' }
-    }
+      if (batchFolders.length === 0) {
+        return { uri: null, hasPhoto: false }
+      }
 
-    // 查找第一个有照片的批次
-    for (const batch of batchFolders) {
-      const thumbnail = await findThumbnailInBatch(folderPath, batch.name)
-      if (thumbnail) {
-        return {
-          uri: thumbnail.uri,
-          path: thumbnail.path,
-          hasPhoto: true,
-          batchInfo: batch.name,
+      for (const batch of batchFolders) {
+        const thumbnail = await findThumbnailInBatch(folderPath, batch.name)
+        if (thumbnail) {
+          return {
+            uri: thumbnail.uri,
+            hasPhoto: true,
+          }
         }
       }
-    }
 
-    return { uri: null, path: null, hasPhoto: false, batchInfo: '' }
-  } catch (e) {
-    logger.warn('获取项目缩略图失败', { sessionId, error: e.message })
-    return { uri: null, path: null, hasPhoto: false, batchInfo: '' }
+      return { uri: null, hasPhoto: false }
+    } catch (e) {
+      if (attempt < retries) {
+        logger.warn(`获取项目缩略图失败，剩余重试次数 ${retries - attempt}:`, e.message)
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
+      } else {
+        logger.warn('获取项目缩略图最终失败', { sessionId, error: e.message })
+        return { uri: null, hasPhoto: false }
+      }
+    }
   }
 }
 
 /**
  * 在批次文件夹中查找缩略图
+ * 选择批次中最早拍摄的第一张照片（按文件名排序）
  * @param {string} folderPath - 会话文件夹路径
  * @param {string} batchName - 批次名称
- * @returns {Promise<{uri:string,path:string}|null>}
+ * @returns {Promise<{uri:string}|null>}
  */
 async function findThumbnailInBatch(folderPath, batchName) {
   const batchPath = `${folderPath}/${batchName}`
@@ -827,23 +780,13 @@ async function findThumbnailInBatch(folderPath, batchName) {
       return null
     }
 
-    // 获取修改时间并排序
-    const photosWithStats = await Promise.all(
-      photoFiles.map(async (photo) => {
-        try {
-          const fileStat = await stat(photo.path)
-          return { ...photo, mtime: fileStat.mtime || 0 }
-        } catch (e) {
-          return { ...photo, mtime: 0 }
-        }
-      }),
-    )
-
-    photosWithStats.sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
-    const selectedPhoto = photosWithStats[0]
+    // 按文件名排序（最早拍摄的照片排在最前面）
+    // 照片文件名通常包含序号或时间戳，如 dataBatch_000_0.00_0.00====1.jpg
+    photoFiles.sort((a, b) => a.name.localeCompare(b.name))
+    const selectedPhoto = photoFiles[0]
 
     const uriResult = await getUri(selectedPhoto.path)
-    return { uri: uriResult?.uri || null, path: selectedPhoto.path }
+    return { uri: uriResult?.uri || null }
   } catch (e) {
     logger.warn('读取批次文件夹失败', { batchPath, error: e.message })
     return null
@@ -896,16 +839,6 @@ export async function getProjectBatchInfo(sessionId) {
     logger.warn('获取项目批次信息失败', { sessionId, error: e.message })
     return []
   }
-}
-
-/**
- * 获取第一张照片的URI（向后兼容）
- * @param {string} sessionId - 会话ID
- * @returns {Promise<string|null>}
- */
-export async function getFirstPhotoUri(sessionId) {
-  const thumbnail = await getProjectThumbnail(sessionId)
-  return thumbnail.hasPhoto ? thumbnail.uri : null
 }
 
 // ========== 压缩和导出 - 拆分后的函数 ==========

@@ -4,10 +4,11 @@ import { ref, computed, onScopeDispose, watch } from 'vue'
 import * as storage from '@/api/pointCloudStorage'
 import { Capacitor } from '@capacitor/core'
 import noImg from '@/assets/img/noImg.png'
-import { createLogger } from '@/utils/logger' // MODIFIED: 使用全局统一的日志工具
-import { parseSessionIdToDate } from '@/utils/format/sessionId' // MODIFIED: 导入会话ID解析函数
+import { createLogger } from '@/utils/logger' // 使用全局统一的日志工具
+import { parseSessionIdToDate } from '@/utils/format/sessionId' // 导入会话ID解析函数
+import { parseFolderName } from '@/utils/storage/path' // 导入路径解析函数
 
-// MODIFIED: 创建模块级日志记录器
+// 创建模块级日志记录器
 const logger = createLogger('FoldersStore')
 
 export const useFoldersStore = defineStore('folders', () => {
@@ -31,7 +32,7 @@ export const useFoldersStore = defineStore('folders', () => {
       window.removeEventListener('pointcloud-updated', pointcloudUpdatedHandler)
     }
 
-    pointcloudUpdatedHandler = (e) => {
+    pointcloudUpdatedHandler = async (e) => {
       const detail = e?.detail || {}
       logger.debug('收到 pointcloud-updated 事件', detail)
 
@@ -39,9 +40,70 @@ export const useFoldersStore = defineStore('folders', () => {
         const { folders, action } = detail
         if (folders && folders.length > 0) {
           logger.info('执行局部更新', { action, count: folders.length })
-          projectFolders.value = projectFolders.value.filter(
-            (f) => !folders.includes(f.name),
-          )
+          if (action === 'add') {
+            // 异步获取新文件夹的完整详情
+            const newFoldersDetails = await Promise.all(
+              folders.map(async (name) => {
+                const info = parseFolderName(name)
+                // 创建临时文件夹对象，用于获取详情
+                const tempFolder = {
+                  name,
+                  info: {
+                    projectName: info.projectName || info.displayName,
+                    sessionId: info.sessionId || name,
+                    displayName: info.displayName,
+                    displayDate: '',
+                    type: info.type,
+                  },
+                }
+                // 获取完整详情（包括缩略图、文件状态等）
+                return await getFolderDetails(tempFolder)
+              })
+            )
+            projectFolders.value = [...newFoldersDetails, ...projectFolders.value]
+          } else if (action === 'delete') {
+            projectFolders.value = projectFolders.value.filter(
+              (f) => !folders.includes(f.name),
+            )
+          } else if (action === 'rename') {
+            const { oldName, newName } = detail
+            const index = projectFolders.value.findIndex((f) => f.name === oldName)
+            if (index !== -1) {
+              const folderInfo = parseFolderName(newName)
+              const oldFolder = projectFolders.value[index]
+              projectFolders.value[index] = {
+                ...oldFolder,
+                name: newName,
+                projectName: folderInfo.projectName || folderInfo.displayName,
+                sessionId: folderInfo.sessionId || newName,
+                displayName: folderInfo.displayName,
+                // 保留原来的 displayDate（如果有文件则保留时间，否则保留空）
+                displayDate: oldFolder.hasFiles ? oldFolder.displayDate : '',
+                type: folderInfo.type,
+                isTemp: folderInfo.isTemp,
+              }
+            }
+          } else if (action === 'refresh') {
+            // 刷新指定文件夹的详情（如照片保存后更新缩略图）
+            for (const folderName of folders) {
+              const index = projectFolders.value.findIndex((f) => f.name === folderName)
+              if (index !== -1) {
+                const folder = projectFolders.value[index]
+                const updatedDetails = await getFolderDetails({
+                  name: folder.name,
+                  info: {
+                    projectName: folder.projectName,
+                    sessionId: folder.sessionId || folder.name,
+                    displayName: folder.displayName,
+                    displayDate: folder.displayDate,
+                    type: folder.type,
+                  },
+                })
+                projectFolders.value[index] = updatedDetails
+                logger.debug('文件夹详情已刷新', { folderName })
+              }
+            }
+          }
         }
         return
       }
@@ -75,194 +137,79 @@ export const useFoldersStore = defineStore('folders', () => {
   const foldersCount = computed(() => projectFolders.value.length)
 
   /**
-   * 文件列表项
-   * 用于文件列表组件的数据格式
-   * @returns {Array} 文件列表项数组
+   * 统一的文件夹列表项
+   * 包含 FileList 和 ProjectList 组件所需的字段
+   * @returns {Array} 文件夹列表项数组
    */
-  const fileListItems = computed(() => {
+  const folderItems = computed(() => {
     return projectFolders.value
       .map((folder) => {
-        const title =
-          folder.projectName && folder.projectName !== folder.sessionId
-            ? folder.projectName
-            : folder.sessionId || folder.name
-        const displayDate = folder.hasFiles ? folder.displayDate : '空'
-
-        // MODIFIED: 使用会话ID解析的时间进行排序
-        let sortTime = folder.lastModified || 0
-        if (folder.sessionId) {
-          const sessionDate = parseSessionIdToDate(folder.sessionId)
-          if (sessionDate) {
-            sortTime = sessionDate.getTime()
-          }
-        }
+        const sessionDate = parseSessionIdToDate(folder.sessionId)
+        const sortTime = sessionDate?.getTime() || 0
 
         return {
+          // FileList 组件字段
           folderName: folder.name,
+          displayName: folder.displayName,
+          timeStr: folder.hasFiles ? folder.displayDate : '空',
           projectName: folder.projectName || folder.name,
           sessionId: folder.sessionId || folder.name,
-          displayName: title,
-          timeStr: displayDate,
-          hasFiles: folder.hasFiles,
-          sortTime: sortTime,
-        }
-      })
-      .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0))
-  })
+          sortTime,
 
-  /**
-   * 项目列表项
-   * 用于 ProjectList 组件的数据格式
-   * @returns {Array} 项目列表项数组
-   */
-  const projectListItems = computed(() => {
-    return projectFolders.value
-      .map((folder) => {
-        // 使用会话ID解析的时间进行排序（与fileListItems保持一致）
-        let sortTime = folder.lastModified || 0
-        if (folder.sessionId) {
-          const sessionDate = parseSessionIdToDate(folder.sessionId)
-          if (sessionDate) {
-            sortTime = sessionDate.getTime()
-          }
-        }
-
-        return {
+          // ProjectList 组件字段
           id: folder.name,
           name: folder.projectName || folder.name,
           thumbnail: folder.thumbnail || noImg,
           date: folder.displayName || folder.sessionId || '',
           source: '云台',
-          original: folder,
-          sortTime: sortTime,
-          hasPhoto: folder.hasPhoto || false,
-          batchInfo: folder.batchInfo || '',
-          batchStats: folder.batchStats || [], // 批次统计信息，默认空数组
-          totalPhotoCount: folder.totalPhotoCount || 0, // 照片总数
         }
       })
       .sort((a, b) => (b.sortTime || 0) - (a.sortTime || 0))
   })
 
-  // MODIFIED: 提取获取缩略图逻辑为单独函数
+  // 直接调用 API 获取缩略图（API层已包含重试逻辑）
   /**
-   * 获取文件夹缩略图和批次信息
+   * 获取文件夹缩略图
    * @param {string} folderName - 文件夹名称
-   * @param {number} [retries=2] - 重试次数
-   * @returns {Promise<Object>} 包含缩略图和批次信息的对象
+   * @returns {Promise<Object>} 包含缩略图信息的对象
    */
-  async function getFolderThumbnail(folderName, retries = 2) {
-    let thumbnail = null
-    let hasPhoto = false
-    let batchInfo = ''
-    let batchStats = []
-    let totalPhotoCount = 0
+  async function getFolderThumbnail(folderName) {
+    const thumbResult = await storage.exportData.getThumbnail(folderName)
 
-    for (let i = 0; i <= retries; i++) {
-      try {
-        // 使用新的缩略图选择函数
-        const thumbResult = await storage.exportData.getThumbnail(folderName)
-        hasPhoto = thumbResult.hasPhoto
-        batchInfo = thumbResult.batchInfo
-
-        if (hasPhoto && thumbResult.uri) {
-          thumbnail = Capacitor.convertFileSrc(thumbResult.uri)
-          logger.debug(`为项目 ${folderName} 选择缩略图: ${thumbResult.batchInfo}`)
-        }
-
-        // 获取批次统计信息
-        batchStats = await storage.exportData.getBatchInfo(folderName)
-        totalPhotoCount = batchStats.reduce((sum, batch) => sum + batch.photoCount, 0)
-
-        // 成功获取，跳出循环
-        break
-      } catch (e) {
-        if (i < retries) {
-          logger.warn(`获取文件夹 ${folderName} 缩略图失败，${retries - i} 次重试机会:`, e)
-          // 等待一段时间后重试
-          await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)))
-        } else {
-          logger.warn(`获取文件夹 ${folderName} 缩略图最终失败:`, e)
-        }
-      }
+    return {
+      thumbnail: thumbResult.hasPhoto ? Capacitor.convertFileSrc(thumbResult.uri) : null,
     }
-
-    return { thumbnail, hasPhoto, batchInfo, batchStats, totalPhotoCount }
   }
 
-  // MODIFIED: 提取获取文件信息逻辑为单独函数
+  // 直接调用 API（API层已有重试逻辑）
   /**
-   * 获取文件夹内文件信息
+   * 检查文件夹是否包含文件
+   * 通过递归扫描获取文件夹的文件状态信息，用于判断项目是否为空
    * @param {string} folderName - 文件夹名称
-   * @param {number} [retries=2] - 重试次数
-   * @returns {Promise<Object>} 包含文件信息的对象
+   * @returns {Promise<Object>} 包含文件状态信息的对象
    */
-  async function getFolderFileInfo(folderName, retries = 2) {
-    let lastModified = 0
-    let hasFiles = false
-    let fileCount = 0
-
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const folderPath = `pointcloud/${folderName}`
-
-        // 先检查目录是否有内容（包括子目录和文件）
-        const directoryContent = await storage.file.readDir(folderPath)
-        const hasContent = directoryContent.files && directoryContent.files.length > 0
-
-        // 然后检查是否有文件
-        const allPaths = await storage.file.listRecursive(folderPath)
-        hasFiles = hasContent || (allPaths && allPaths.length > 0)
-        fileCount = allPaths.length
-
-        if (hasFiles) {
-          const stats = []
-          for (const p of allPaths) {
-            try {
-              const st = await storage.file.stat(p)
-              stats.push({ path: p, mtime: st.mtime || 0 })
-            } catch (e) {
-              // 忽略单个文件的失败
-            }
-          }
-          if (stats.length > 0) {
-            stats.sort((a, b) => b.mtime - a.mtime)
-            lastModified = stats[0].mtime
-          } else if (hasContent) {
-            // 如果有子目录但没有文件，使用当前时间
-            lastModified = Date.now()
-          }
-        }
-
-        // 成功获取，跳出循环
-        break
-      } catch (e) {
-        if (i < retries) {
-          logger.warn(`获取文件夹 ${folderName} 文件信息失败，${retries - i} 次重试机会:`, e)
-          // 等待一段时间后重试
-          await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)))
-        } else {
-          logger.warn(`获取文件夹 ${folderName} 文件信息最终失败:`, e)
-        }
-      }
+  async function checkFolderFileStatus(folderName) {
+    const folderPath = `pointcloud/${folderName}`
+    const directoryContent = await storage.file.readDir(folderPath)
+    const directoryHasItems = directoryContent.files && directoryContent.files.length > 0
+    if (directoryHasItems) {
+      return { hasFiles: true }
     }
-
-    return { lastModified, hasFiles, fileCount }
+    const allFilePaths = await storage.file.listRecursive(folderPath)
+    return { hasFiles: allFilePaths && allFilePaths.length > 0 }
   }
 
-  // MODIFIED: 提取文件夹详情获取逻辑为单独函数
+  // 提取文件夹详情获取逻辑为单独函数
   /**
    * 获取文件夹详细信息
    * @param {Object} folder - 文件夹对象
-   * @param {number} [retries=2] - 重试次数
    * @returns {Promise<Object>} 包含详细信息的文件夹对象
    */
-  async function getFolderDetails(folder, retries = 2) {
+  async function getFolderDetails(folder) {
     try {
       const folderInfo = folder.info
-
-      // 获取项目缩略图和批次信息
-      const { thumbnail, hasPhoto, batchInfo, batchStats, totalPhotoCount } = await getFolderThumbnail(folder.name, retries)
+      // 获取项目缩略图
+      const { thumbnail } = await getFolderThumbnail(folder.name)
 
       // 解析项目名与 sessionId
       let projectName = folderInfo.projectName || folderInfo.displayName
@@ -270,47 +217,44 @@ export const useFoldersStore = defineStore('folders', () => {
       let displayName = folderInfo.displayName
       let displayDate = folderInfo.displayDate
 
-      // 获取文件夹内文件信息（用于排序）
-      const { lastModified, hasFiles, fileCount } = await getFolderFileInfo(folder.name, retries)
+      // 使用 sessionId 解析获取时间作为 lastModified
+      const sessionDate = parseSessionIdToDate(sessionId)
+      const lastModified = sessionDate?.getTime() || 0
 
-      // MODIFIED: 确保即使没有会话ID也能显示日期
-      if (!displayDate && hasFiles && lastModified) {
+      // 检查文件夹是否包含文件
+      const { hasFiles } = await checkFolderFileStatus(folder.name)
+
+      // 确保显示日期：有文件时显示实际时间，无文件时显示空
+      if (hasFiles && lastModified) {
         displayDate = new Date(lastModified).toLocaleString()
+      } else {
+        displayDate = ''
       }
 
       return {
         name: folder.name,
         thumbnail,
-        hasPhoto,
-        totalPhotoCount,
-        batchInfo,
-        batchStats,
         projectName,
         sessionId,
         displayName,
         lastModified,
         displayDate,
         hasFiles,
-        fileCount,
         type: folderInfo.type,
       }
     } catch (e) {
       logger.error(`获取文件夹 ${folder.name} 详情失败:`, e)
-      // 返回基础信息，确保即使出错也能返回数据
+      const sessionDate = parseSessionIdToDate(folder.info?.sessionId || folder.name)
+      const lastModified = sessionDate?.getTime() || 0
       return {
         name: folder.name,
         thumbnail: null,
-        hasPhoto: false,
-        totalPhotoCount: 0,
-        batchInfo: '',
-        batchStats: [],
         projectName: folder.info?.projectName || folder.info?.displayName || folder.name,
         sessionId: folder.info?.sessionId || folder.name,
         displayName: folder.info?.displayName || folder.name,
-        lastModified: 0,
-        displayDate: folder.info?.displayDate || '未知',
+        lastModified,
+        displayDate: '',
         hasFiles: false,
-        fileCount: 0,
         type: folder.info?.type || 'unknown',
       }
     }
@@ -341,15 +285,18 @@ export const useFoldersStore = defineStore('folders', () => {
       try {
         logger.info('开始加载项目文件夹')
         const folders = await storage.session.listFolders()
-
         const withDetails = await Promise.all(
           folders.map(async (folder) => {
             return getFolderDetails(folder)
           }),
         )
 
-        // 按最后修改时间倒序排列
-        withDetails.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
+        // 按 sessionId 解析的时间倒序排列（使用项目创建时间排序）
+        withDetails.sort((a, b) => {
+          const dateA = parseSessionIdToDate(a.sessionId)
+          const dateB = parseSessionIdToDate(b.sessionId)
+          return (dateB?.getTime() || 0) - (dateA?.getTime() || 0)
+        })
         projectFolders.value = withDetails
         lastFetched.value = Date.now()
 
@@ -383,7 +330,7 @@ export const useFoldersStore = defineStore('folders', () => {
    * @param {Object} updates - 要更新的信息
    */
   function updateFolder(folderName, updates) {
-    // MODIFIED: 添加参数验证
+    // 添加参数验证
     if (!folderName || typeof folderName !== 'string') {
       logger.warn('updateFolder: folderName 必须是字符串')
       return
@@ -410,7 +357,7 @@ export const useFoldersStore = defineStore('folders', () => {
    * @param {string} folderName - 文件夹名称
    */
   function removeFolder(folderName) {
-    // MODIFIED: 添加参数验证
+    // 添加参数验证
     if (!folderName || typeof folderName !== 'string') {
       logger.warn('removeFolder: folderName 必须是字符串')
       return
@@ -463,7 +410,7 @@ export const useFoldersStore = defineStore('folders', () => {
    * @param {Object} folderData - 文件夹数据
    */
   function addFolder(folderData) {
-    // MODIFIED: 添加参数验证
+    // 添加参数验证
     if (!folderData || typeof folderData !== 'object') {
       logger.warn('addFolder: folderData 必须是对象')
       return
@@ -499,14 +446,11 @@ export const useFoldersStore = defineStore('folders', () => {
     loading,
     lastFetched,
     foldersCount,
-    fileListItems,
-    projectListItems,
+    folderItems,
     loadProjectFolders,
     refreshFolders,
     updateFolder,
     removeFolder,
-    // waitForRefresh,
-    addFolder,
     clearFolders,
     cleanupEventListeners,
   }

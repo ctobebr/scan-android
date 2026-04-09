@@ -1,4 +1,4 @@
-package com.example.app;
+package com.pointCloud.app;
 
 import android.os.Build;
 import android.view.View;
@@ -9,11 +9,11 @@ import android.webkit.JavascriptInterface;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 添加一个简单的 JS 接口，供 Web 层直接调用，以切换沉浸式模式
         try {
             getBridge().getWebView().addJavascriptInterface(new Object() {
                 @JavascriptInterface
@@ -36,12 +36,12 @@ public class MainActivity extends BridgeActivity {
                                     View decorView = getWindow().getDecorView();
                                     if (immersive) {
                                         decorView.setSystemUiVisibility(
-                                            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                                            | View.SYSTEM_UI_FLAG_FULLSCREEN
-                                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                                         );
                                     } else {
                                         decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);

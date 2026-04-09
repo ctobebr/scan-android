@@ -79,49 +79,47 @@ const cameraHelper = {
           base64 = base64.split(',')[1]
         }
 
-        // 1. 同步创建目录和.nomedia文件（防止照片被系统相册扫描）
+        // 1. 同步创建目录
         try {
-          // 确保目录存在（忽略已存在错误）
-          try {
-            await Filesystem.mkdir({
-              path: targetDir,
-              directory: Directory.Documents,
-              recursive: true,
-            })
-          } catch (mkdirErr) {
-            // 忽略目录已存在的错误，更宽松的错误处理
-            const errorMessage = String(mkdirErr.message || mkdirErr)
-            if (!errorMessage.toLowerCase().includes('exist')) {
-              throw mkdirErr
-            }
-          }
-
-          // 创建 .nomedia 标记文件（在保存照片前创建，防止被系统相册扫描）
-          try {
-            await Filesystem.writeFile({
-              path: `${targetDir}/.nomedia`,
-              data: '',
-              directory: Directory.Documents,
-            })
-            // logger.info('.nomedia标记已创建', { targetDir })
-          } catch (nomediaErr) {
-            // .nomedia创建失败不是致命错误，继续保存照片
-            logger.warn('.nomedia标记创建失败（可忽略）', nomediaErr)
-          }
+          await Filesystem.mkdir({
+            path: targetDir,
+            directory: Directory.External,
+            recursive: true,
+          })
         } catch (err) {
-          logger.warn('创建目录或.nomedia文件失败', err)
+          logger.warn('创建目录失败', err)
         }
 
-        // 2. 后台异步保存文件（不阻塞主线程）
+        // 2. 后台异步保存文件
         setTimeout(async () => {
           try {
             // 写入文件
             await Filesystem.writeFile({
               path: filePath,
               data: base64,
-              directory: Directory.Documents,
+              directory: Directory.External,
             })
             logger.info('照片已后台保存', { filePath })
+
+            // 检查是否是第一张照片（文件名以 ====1.jpg 结尾）
+            const isFirstPhoto = filePath.endsWith('====1.jpg')
+            if (isFirstPhoto) {
+              // 触发文件夹更新事件，通知列表刷新缩略图
+              const sessionId = filePath.split('/')[1]
+              if (sessionId) {
+                window.dispatchEvent(
+                  new CustomEvent('pointcloud-updated', {
+                    detail: {
+                      type: 'partial_update',
+                      action: 'refresh',
+                      folders: [sessionId],
+                      timestamp: Date.now(),
+                    },
+                  })
+                )
+                logger.debug('第一张照片保存后触发文件夹刷新', { sessionId })
+              }
+            }
           } catch (err) {
             logger.error('后台保存照片失败', err)
           }

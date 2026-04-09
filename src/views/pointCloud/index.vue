@@ -498,11 +498,13 @@ function performSave(folderName) {
       try {
         await storage.file.stat(`pointcloud/${tempName}`)
 
-        if (tempName !== targetName) {  // 之前新建的临时项目文件夹名称与用户输入自定义项目名称不同
+        if (tempName !== targetName) {
           await storage.session.rename(tempName, targetName)
-          // 优化：直接更新 store 中的文件夹信息，不刷新整个列表
-          updateFolderInStore(tempName, targetName)
-          logger.debug('[PointCloud] 项目重命名完成，已更新 store 数据')
+          storage.session.dispatchFolderUpdate('rename', {
+            oldName: tempName,
+            newName: targetName,
+          })
+          logger.debug('[PointCloud] 项目重命名完成，已派发事件')
         }
       } catch (e) {
         logger.warn('[PointCloud] 临时文件夹不存在', tempName)
@@ -525,34 +527,6 @@ function performSave(folderName) {
       saving.value = false
     }
   })
-}
-
-/**
- * 更新 store 中的文件夹信息
- * @param {string} oldName - 旧文件夹名称
- * @param {string} newName - 新文件夹名称
- */
-function updateFolderInStore(oldName, newName) {
-  try {
-    // 解析新的文件夹名称，提取项目名和会话ID
-    const folderInfo = storage.path.parseFolderName(newName)
-
-    // 构建更新对象，只更新与名称相关的属性
-    const updates = {
-      name: newName,
-      projectName: folderInfo.projectName || newName,
-      sessionId: folderInfo.sessionId || newName,
-      displayName: folderInfo.displayName
-    }
-
-    // 直接更新 store 中的文件夹信息
-    folderStore.updateFolder(oldName, updates)
-
-    logger.debug(`[PointCloud] 已更新 store 中的文件夹信息: ${oldName} -> ${newName}`)
-    logger.debug(`[PointCloud] 解析后的信息: projectName=${folderInfo.projectName}, sessionId=${folderInfo.sessionId}, displayName=${folderInfo.displayName}`)
-  } catch (error) {
-    logger.error('[PointCloud] 更新 store 文件夹信息失败', error)
-  }
 }
 
 /**
@@ -1111,14 +1085,19 @@ async function startDataStream() {
     return
   }
 
-  // 首次点击开始采集时，创建会话根目录和.nomedia标记
+  // 首次点击开始采集时，创建会话根目录
   if (!hasStarted) {
     try {
       const tempFolderName = storage.path.getTempSessionName(currentSessionId)
       const rootDir = `pointcloud/${tempFolderName}`
       await storage.file.ensureDir(rootDir)
-      await storage.file.ensureNoMedia(rootDir)
       logger.debug('[PointCloud] 会话根目录已创建:', rootDir)
+      //优化： 通知其他页面新增了文件夹（局部更新）
+      //存在问题： 当处于拍照阶段未结束时，滑动屏幕返回（无法监听这个事件）导致数据列表项展示有问题，无法识别保存的照片等效果（暂时不用解决）
+      storage.session.dispatchFolderUpdate('partial_update', {
+        action: 'add',
+        folders: [tempFolderName],
+      })
     } catch (e) {
       logger.warn('[PointCloud] 创建会话根目录失败:', e)
       showToast({ message: '创建存储目录失败', position: 'bottom' })

@@ -4,8 +4,6 @@
  * 提供协议帧构建、数据转换等辅助功能。
  *
  * @module @/services/bluetooth/utils/helpers
- * @version 1.0.0
- * @since 2026-03-24
  */
 
 import {

@@ -4,8 +4,6 @@
  * 负责蓝牙设备的扫描、发现和列表管理等功能。
  *
  * @module @/services/bluetooth/core/scanner
- * @version 1.0.0
- * @since 2026-03-24
  */
 
 import { BluetoothLe, BleClient } from '@capacitor-community/bluetooth-le'

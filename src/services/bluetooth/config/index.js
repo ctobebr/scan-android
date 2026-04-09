@@ -4,8 +4,6 @@
  * 集中管理蓝牙服务的配置项，支持自定义配置和运行时调整。
  *
  * @module @/services/bluetooth/config
- * @version 1.0.0
- * @since 2026-03-24
  */
 
 // 导入协议常量，避免重复定义

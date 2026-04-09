@@ -11,6 +11,7 @@
           <img
             :src="item.thumbnail || noImg"
             :alt="`Project  ${index + 1} Thumbnail`"
+            @error="handleImageError($event, item, index)"
           />
         </div>
         <div class="info">
@@ -38,6 +39,14 @@ import { useFoldersStore } from '@/stores/folders'
 import noImg from '@/assets/img/noImg.png'
 
 const folderStore = useFoldersStore()
+
+// 处理图片加载失败
+const handleImageError = (event, item, index) => {
+  console.error(`图片加载失败 [${index}]:`, item.name, item.thumbnail)
+  // 切换到默认图片
+  event.target.src = noImg
+}
+
 // 直接从 store 获取项目列表数据
 const projectListItems = computed(() => {
   if (folderStore.loading) {
@@ -62,18 +71,20 @@ const projectListItems = computed(() => {
       },
     ]
   }
-  return folderStore.projectListItems.map((item) => ({ ...item, isSkeleton: false }))
+  return folderStore.folderItems.map((item) => ({ ...item, isSkeleton: false }))
 })
 
 // 初始化时，onMounted和onActivated都会执行
 onMounted(() => {
-  // 组件挂载时，如果 store 还没有数据，则加载
-  if (folderStore.projectFolders.length === 0) {
-    //  folderStore.loadProjectFolders()   //MainView中在挂载时会加载文件夹，而projectlist作为MainView的默认动态组件，此处应该可以暂时不再去重新加载文件夹
-  }
+  console.log('ProjectList onMounted 执行')
+  console.log('projectListItems 值:', JSON.stringify(projectListItems.value))
+  console.log('folderStore.folderItems:',JSON.stringify( folderStore.folderItems))
+  setTimeout(() => {
+    console.log('projectListItems1122', JSON.stringify(projectListItems.value))
+
+  },1000)
 })
 onActivated(() => {
-  // folderStore.loadProjectFolders()
 })
 // 响应 props.projects 的变化
 // watch(
@@ -128,6 +139,8 @@ onActivated(() => {
   display: flex;
   flex-direction: column;
   background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 内容区域 - 可滚动 */

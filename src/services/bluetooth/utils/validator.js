@@ -4,8 +4,6 @@
  * 提供蓝牙相关的参数验证函数，确保输入数据的正确性和安全性。
  *
  * @module @/services/bluetooth/utils/validator
- * @version 1.0.0
- * @since 2026-03-24
  */
 
 import {

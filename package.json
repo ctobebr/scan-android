@@ -1,6 +1,6 @@
 {
-  "name": "scan",
-  "version": "0.0.0",
+  "name": "scan-android",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {

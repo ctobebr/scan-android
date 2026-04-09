@@ -1,26 +1,28 @@
 <template>
   <div class="favorites-list">
     <main class="list-container">
-      <div v-if="sessions.length === 0 && !folderStore.loading" class="empty-state">
+      <div v-if="folderItems.length === 0 && !folderStore.loading" class="empty-state">
         <p>暂无历史数据文件</p>
       </div>
       <div v-else class="list">
         <div
-          v-for="session in sessions"
-          :key="session.folderName"
+          v-for="item in folderItems"
+          :key="item.folderName"
           class="list-item"
-          :class="{ 'list-item-selected': isMultiSelectMode && selectedItems.includes(session.folderName) }"
-          @click="handleItemClick(session)"
-          @touchstart.passive="handleTouchStart(session.folderName)"
+          :class="{
+            'list-item-selected': isMultiSelectMode && selectedItems.includes(item.folderName),
+          }"
+          @click="handleItemClick(item)"
+          @touchstart.passive="handleTouchStart(item.folderName)"
           @touchend="handleTouchEnd"
           @touchcancel="handleTouchCancel"
         >
           <div class="info">
             <!-- title 显示 projectName 或 sessionId -->
-            <div class="title">{{ session.displayName }}</div>
+            <div class="title">{{ item.displayName }}</div>
             <!-- date 显示：如果有文件则显示时间，否则显示"空" -->
             <div class="date">
-              <span>{{ session.timeStr }}</span>
+              <span>{{ item.timeStr }}</span>
             </div>
           </div>
 
@@ -28,13 +30,13 @@
           <div v-if="!isMultiSelectMode" class="action-icons">
             <img
               src="@/assets/img/share.png"
-              @click.stop="onShareClick(session.folderName, session.projectName, session.sessionId)"
+              @click.stop="onShareClick(item.folderName, item.projectName, item.sessionId)"
               class="icon-share"
               alt="Share"
             />
             <img
               src="@/assets/img/delete.png"
-              @click.stop="onDeleteClick('pointcloud/' + session.folderName)"
+              @click.stop="onDeleteClick('pointcloud/' + item.folderName)"
               class="icon-delete"
               alt="Delete"
             />
@@ -44,9 +46,9 @@
           <div v-else class="selection-indicator">
             <div
               class="selection-circle"
-              :class="{ selected: selectedItems.includes(session.folderName) }"
+              :class="{ selected: selectedItems.includes(item.folderName) }"
             >
-              <van-icon v-if="selectedItems.includes(session.folderName)" name="success" />
+              <van-icon v-if="selectedItems.includes(item.folderName)" name="success" />
             </div>
           </div>
         </div>
@@ -80,6 +82,7 @@ import { ref, computed, onMounted, onActivated, onUnmounted, watch } from 'vue'
 import { showLoadingToast, closeToast, showToast, showConfirmDialog  } from 'vant'
 import { parseSessionIdToFormattedTime } from '@/utils/format/sessionId'
 import { Share } from '@capacitor/share'
+import { StatusBar } from '@capacitor/status-bar'
 import { useFoldersStore } from '@/stores/folders'
 import * as storage from '@/api/pointCloudStorage'
 
@@ -90,6 +93,29 @@ const isMultiSelectMode = ref(false)
 const selectedItems = ref([])
 const longPressTimer = ref(null)
 const longPressDuration = 800 // 长按阈值（毫秒）
+
+/**
+ * 显示确认对话框（带沉浸式状态栏控制）
+ * @param {Object} options - showConfirmDialog 的配置选项
+ * @returns {Promise<boolean>} 用户是否确认
+ */
+async function showImmersiveConfirmDialog(options) {
+  try {
+    // 显示对话框时：进入沉浸式，让遮罩层覆盖状态栏
+    await StatusBar.setBackgroundColor({ color: '#80000000' }) // 透明背景上用亮色文字
+
+    const result = await showConfirmDialog(options)
+
+    // 关闭对话框时：恢复普通模式
+    await StatusBar.setBackgroundColor({ color: '#e6f7ff' }) // 浅色背景上用深色文字
+
+    return result
+  } catch (error) {
+    // 用户取消或发生错误时也要恢复状态栏
+    await StatusBar.setBackgroundColor({ color: '#e6f7ff' }) // 浅色背景上用深色文字
+    throw error
+  }
+}
 
 // --- 新增：组件卸载时强制关闭 Toast ---
 // 防止页面跳转了 Toast 还在转
@@ -111,14 +137,11 @@ onActivated(() => {
   console.log('激活filelist')
   // folderStore.loadProjectFolders()
 })
-// 直接从 store 的计算属性获取会话列表
-const sessions = computed(() => {
-  return folderStore.fileListItems
-})
+const folderItems = computed(() => folderStore.folderItems)
 
 // 是否全部选中
 const isAllSelected = computed(() => {
-  return sessions.value.length > 0 && selectedItems.value.length === sessions.value.length
+  return folderItems.value.length > 0 && selectedItems.value.length === folderItems.value.length
 })
 
 // 长按开始
@@ -153,9 +176,9 @@ const exitMultiSelectMode = () => {
 }
 
 // 处理列表项点击
-const handleItemClick = (session) => {
+const handleItemClick = (item) => {
   if (isMultiSelectMode.value) {
-    toggleItemSelection(session.folderName)
+    toggleItemSelection(item.folderName)
   }
 }
 
@@ -178,7 +201,7 @@ const toggleSelectAll = () => {
   if (isAllSelected.value) {
     selectedItems.value = []
   } else {
-    selectedItems.value = sessions.value.map(s => s.folderName)
+    selectedItems.value = folderItems.value.map(s => s.folderName)
   }
 }
 
@@ -186,9 +209,9 @@ const toggleSelectAll = () => {
 const deleteSelectedItems = async () => {
   if (selectedItems.value.length === 0) return
 
-  const confirmed = await showConfirmDialog({
-    title: '提示',
-    message: `确定要删除选中的 ${selectedItems.value.length} 个项目吗？此操作不可撤销。`,
+  const confirmed = await showImmersiveConfirmDialog({
+    title: '确认删除',
+    message: `确定要删除选中的 ${selectedItems.value.length} 个项目吗？`,
     confirmButtonText: '删除',
     cancelButtonText: '取消',
   }).catch(() => false)
@@ -309,7 +332,7 @@ const onShareClick = async (folderName, projectName, sessionId) => {
       const folderInfo = storage.path.parseFolderName(folderName)
       const displayName = folderInfo.displayName || folderName
 
-      const confirmed = await showConfirmDialog({
+      const confirmed = await showImmersiveConfirmDialog({
         title: '提示',
         message: `项目 "${displayName}" 为空，是否删除该项目？`,
         confirmButtonText: '删除',
@@ -319,17 +342,16 @@ const onShareClick = async (folderName, projectName, sessionId) => {
       if (confirmed) {
         try {
           showLoadingToast({
-            message: '加载中...',
+            message: '删除中...',
             forbidClick: true,
           })
 
-          await storage.session.deleteFolder(folderName)
+          // 使用批量删除接口，自动触发局部更新
+          const result = await storage.session.deleteFoldersBatch([folderName])
 
-          // 手动刷新文件夹列表
-          await folderStore.refreshFolders()
-
-          // 使用统一的等待刷新函数
-          await waitForRefresh(15000)
+          if (result.failed.length > 0) {
+            throw new Error(result.failed[0].error)
+          }
 
           closeToast()
           showToast({ message: '删除成功', position: 'bottom' })
@@ -356,7 +378,7 @@ const onShareClick = async (folderName, projectName, sessionId) => {
       const folderInfo = storage.path.parseFolderName(folderName)
       const displayName = folderInfo.displayName || folderName
 
-      const confirmed = await showConfirmDialog({
+      const confirmed = await showImmersiveConfirmDialog({
         title: '提示',
         message: `项目 "${displayName}" 为空（只有空文件夹），是否删除该项目？`,
         confirmButtonText: '删除',
@@ -366,19 +388,14 @@ const onShareClick = async (folderName, projectName, sessionId) => {
       if (confirmed) {
         try {
           showLoadingToast({
-            message: '加载中...',
+            message: '删除中...',
             forbidClick: true,
           })
-
-          await storage.session.deleteFolder(folderName)
-
-          // 手动刷新文件夹列表
-          await folderStore.refreshFolders()
-
-          // 使用统一的等待刷新函数
-          await waitForRefresh(15000)
-
-          closeToast()
+          // 使用批量删除接口，自动触发局部更新
+          const result = await storage.session.deleteFoldersBatch([folderName])
+          if (result.failed.length > 0) {
+            throw new Error(result.failed[0].error)
+          }
           showToast({ message: '删除成功', position: 'bottom' })
         } catch (e) {
           closeToast()
@@ -478,9 +495,9 @@ const showMoreOptions = async (filename) => {
   const folderInfo = storage.path.parseFolderName(rel)
   const displayName = folderInfo.displayName || rel
 
-  const confirmed = await showConfirmDialog({
+  const confirmed = await showImmersiveConfirmDialog({
     title: '提示',
-    message: `确定要删除 "${displayName}" 项目吗？此操作不可撤销。`,
+    message: `确定要删除 "${displayName}" 项目吗？`,
     confirmButtonText: '删除',
     cancelButtonText: '取消',
   }).catch(() => false)
@@ -526,18 +543,16 @@ const deleteFile = async (folderPath) => {
     }
 
     showLoadingToast({
-      message: '加载中...',
+      message: '删除中...',
       forbidClick: true,
     })
 
-    // 1. 执行删除
-    await storage.session.deleteFolder(relativePath)
+    // 执行删除（使用批量删除接口，自动触发局部更新）
+    const result = await storage.session.deleteFoldersBatch([relativePath])
 
-    // 2. 手动刷新文件夹列表
-    await folderStore.refreshFolders()
-
-    // 3. 等待刷新完成
-    await waitForRefresh(15000)
+    if (result.failed.length > 0) {
+      throw new Error(result.failed[0].error)
+    }
 
     closeToast()
     showToast({ message: '删除成功', position: 'bottom' })
@@ -575,6 +590,8 @@ const formatFileSize = (bytes) => {
   flex-direction: column;
   height: 100%;
   background-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .list-container {
