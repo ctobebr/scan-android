@@ -973,13 +973,12 @@ async function subscribeToBluetoothNotifications(deviceId) {
           })
           currentBatchData.pointCount += points.length
 
-          // 达到上限时停止采集并提示
+          // 达到上限时只提示，不停止订阅和采集
+          // 后续的点云数据会在接收时被丢弃（见上面的检查）
           if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
             logger.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
             showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
-            stopSessionParser() // 这里会取消订阅
-            isCollecting.value = false
-            bluetoothStore.handleSendEnd()
+            // 注意：不停止订阅，蓝牙继续接收数据，但点云数据会被丢弃
           }
         }
       } catch (e) {

@@ -213,7 +213,7 @@ export {
  * API 版本号
  * 与 package.json 版本保持一致
  */
-export const VERSION = '1.0.2'
+export const VERSION = '1.0.3'
 
 /**
  * 构建日期
