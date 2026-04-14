@@ -3,7 +3,7 @@
     <!-- 全局页面包装器：为所有页面保留左右间距并在大屏上居中 -->
     <div class="page-wrapper">
     <router-view v-slot="{ Component }">
-      <keep-alive :include="['MainView']">
+      <keep-alive :include="keepAliveStore.includeList">
         <component :is="Component"/>
       </keep-alive>
     </router-view>
@@ -13,7 +13,10 @@
 
 <script setup>
 import { onMounted } from 'vue'
+import { useKeepAliveStore } from '@/stores/keepAlive'
 import * as storage from '@/api/pointCloudStorage'
+
+const keepAliveStore = useKeepAliveStore()
 
 async function cleanupOrphanedSessions() {
   try {

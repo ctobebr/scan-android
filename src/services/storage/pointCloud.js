@@ -104,31 +104,30 @@ export function dispatchFolderUpdate(type, data) {
 
 /**
  * 确保会话目录存在
- * @param {string} sessionId - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @returns {Promise<string>} 会话目录路径
- * @throws {FilePathError} 当会话ID无效或创建失败时抛出
+ * @throws {FilePathError} 当文件夹名无效或创建失败时抛出
  */
-export async function ensureSessionDir(sessionId) {
-  validateSessionId(sessionId)
+export async function ensureSessionDir(folderName) {
+  validateSessionId(folderName)
 
-  const path = sessionFolder(sessionId)
+  const path = sessionFolder(folderName)
   await ensureDir(path)
   return path
 }
 
 /**
  * 确保批次目录存在
- * @param {string} sessionId - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {string|number} batchId - 批次ID
  * @returns {Promise<string>} 批次目录路径
  * @throws {FilePathError} 当参数无效或创建失败时抛出
  */
-export async function ensureBatchDir(sessionId, batchId) {
-  validateSessionId(sessionId)
+export async function ensureBatchDir(folderName, batchId) {
+  validateSessionId(folderName)
   validateBatchId(batchId)
-
-  await ensureSessionDir(sessionId)
-  const path = batchFolder(sessionId, batchId)
+  await ensureSessionDir(folderName)
+  const path = batchFolder(folderName, batchId)
   await ensureDir(path)
   return path
 }
@@ -265,18 +264,18 @@ export async function renameSession(oldName, newName) {
  * 业务层删除函数，负责验证、事件通知和错误处理
  * 实际文件系统操作委托给 fileSystem.deleteDirectory
  *
- * @param {string} sessionId - 要删除的会话ID
+ * @param {string} folderName - 要删除的文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @returns {Promise<void>}
  * @throws {FilePathError} 当删除失败时抛出
  */
-export async function deleteSession(sessionId) {
-  // 步骤1: 验证会话ID
-  validateSessionId(sessionId)
+export async function deleteSession(folderName) {
+  // 步骤1: 验证文件夹名
+  validateSessionId(folderName)
 
   // 步骤2: 构建完整路径
-  const path = `${POINTCLOUD_ROOT}/${sessionId}`
+  const path = `${POINTCLOUD_ROOT}/${folderName}`
 
-  logger.info('开始删除会话', { sessionId, path })
+  logger.info('开始删除会话', { folderName, path })
 
   // 步骤3: 调用文件系统服务执行删除
   try {
@@ -290,12 +289,12 @@ export async function deleteSession(sessionId) {
     // 步骤4: 触发文件夹更新事件
     dispatchFolderUpdate('partial_update', {
       action: 'folder_deleted',
-      folders: [sessionId],
+      folders: [folderName],
     })
 
-    logger.info('会话删除成功', { sessionId })
+    logger.info('会话删除成功', { folderName })
   } catch (e) {
-    logger.error('删除会话失败', { sessionId, error: e.message })
+    logger.error('删除会话失败', { folderName, error: e.message })
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除会话失败: ${e.message}`)
   }
 }
@@ -355,13 +354,13 @@ export async function deleteFoldersBatch(folders) {
 
 /**
  * 验证保存批次的参数
- * @param {string} sessionID - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {number|string} batchId - 批次ID
  * @param {string[]} dataLines - 数据行数组
  * @param {Array} photos - 照片数组
  */
-function validateSaveBatchParams(sessionID, batchId, dataLines, photos) {
-  validateSessionId(sessionID)
+function validateSaveBatchParams(folderName, batchId, dataLines, photos) {
+  validateSessionId(folderName)
   validateBatchId(batchId)
   validateDataLines(dataLines)
   validatePhotosArray(photos)
@@ -369,13 +368,13 @@ function validateSaveBatchParams(sessionID, batchId, dataLines, photos) {
 
 /**
  * 准备批次保存路径
- * @param {string} sessionID - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {string} normalizedBatchId - 规范化后的批次ID
  * @returns {Promise<Object>} 路径信息对象
  */
-async function prepareBatchPaths(sessionID, normalizedBatchId) {
-  const sessionPath = await ensureSessionDir(sessionID)
-  await ensureBatchDir(sessionID, normalizedBatchId)
+async function prepareBatchPaths(folderName, normalizedBatchId) {
+  const sessionPath = sessionFolder(folderName)
+  await ensureBatchDir(folderName, normalizedBatchId)
   const batchFolderName = `Batch_${normalizedBatchId}`
 
   return {
@@ -476,7 +475,7 @@ async function savePhotos(sessionPath, batchFolderName, photos) {
  * @param {Object} paths - 路径信息
  * @param {Object} dataResult - 数据保存结果
  * @param {string[]} photoUris - 照片URI列表
- * @param {string} sessionID - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {string} normalizedBatchId - 批次ID
  * @param {number} lineCount - 数据行数
  * @returns {Object} 完整的保存结果
@@ -485,7 +484,7 @@ function buildSaveBatchResult(
   paths,
   dataResult,
   photoUris,
-  sessionID,
+  folderName,
   normalizedBatchId,
   lineCount,
 ) {
@@ -496,26 +495,26 @@ function buildSaveBatchResult(
     fullUri: dataResult.uri,
     photoPaths: photoUris,
     lineCount,
-    sessionId: sessionID,
+    folderName: folderName,
     batchId: normalizedBatchId,
   }
 }
 
 /**
  * 保存单批次的数据行和照片
- * @param {string} sessionID - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {number|string} batchId - 批次ID
  * @param {string[]} dataLines - 数据行数组
  * @param {Array} photos - 照片信息数组
  * @returns {Promise<Object>} 保存结果
  * @throws {FilePathError} 当参数无效或保存失败时抛出
  */
-export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
+export async function saveBatch(folderName, batchId, dataLines, photos = []) {
   // 步骤1: 验证参数
-  validateSaveBatchParams(sessionID, batchId, dataLines, photos)
+  validateSaveBatchParams(folderName, batchId, dataLines, photos)
 
   logger.info('开始保存批次', {
-    sessionID,
+    folderName,
     batchId,
     lineCount: dataLines.length,
     photoCount: photos.length,
@@ -525,8 +524,7 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
 
   try {
     // 步骤2: 准备路径
-    const paths = await prepareBatchPaths(sessionID, normalizedBatchId)
-
+    const paths = await prepareBatchPaths(folderName, normalizedBatchId)
     // 步骤3: 保存数据文件
     const dataResult = await saveBatchDataFile(paths.txtFilePath, dataLines)
 
@@ -538,7 +536,7 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
     // 步骤5: 触发事件
     dispatchFolderUpdate('partial_update', {
       action: 'batch_added',
-      folders: [sessionID],
+      folders: [folderName],
     })
 
     // 步骤6: 返回结果
@@ -546,12 +544,12 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
       paths,
       dataResult,
       photoUris,
-      sessionID,
+      folderName,
       normalizedBatchId,
       dataLines.length,
     )
   } catch (error) {
-    logger.error('批次保存失败', { sessionID, batchId, error: error.message })
+    logger.error('批次保存失败', { folderName, batchId, error: error.message })
     throw error instanceof FilePathError
       ? error
       : new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `保存批次失败: ${error.message}`)
@@ -562,12 +560,12 @@ export async function saveBatch(sessionID, batchId, dataLines, photos = []) {
  * 列出指定会话下的所有批次
  * @param {string} sessionId - 会话ID
  * @returns {Promise<string[]>} 批次名称数组
- * @throws {FilePathError} 当会话ID无效时抛出
+ * @throws {FilePathError} 当文件夹名无效时抛出
  */
-export async function listBatches(sessionId) {
-  validateSessionId(sessionId)
+export async function listBatches(folderName) {
+  validateSessionId(folderName)
 
-  const path = sessionFolder(sessionId)
+  const path = sessionFolder(folderName)
   try {
     const res = await readdir(path)
     const dirs = (res.files || [])
@@ -577,7 +575,7 @@ export async function listBatches(sessionId) {
     return dirs
   } catch (e) {
     if (e.message && e.message.includes('Directory does not exist')) {
-      logger.debug('会话目录不存在，返回空批次列表', { sessionId })
+      logger.debug('会话目录不存在，返回空批次列表', { folderName })
       return []
     }
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `列出批次失败: ${e.message}`)
@@ -591,75 +589,75 @@ export async function listBatches(sessionId) {
  * @returns {Promise<{lines:string[], photos:string[]}>}
  * @throws {FilePathError} 当参数无效时抛出
  */
-export async function readBatch(sessionId, batchId) {
-  validateSessionId(sessionId)
-  validateBatchId(batchId)
+// export async function readBatch(sessionId, batchId) {
+//   validateSessionId(sessionId)
+//   validateBatchId(batchId)
 
-  const folderName = batchFolder(sessionId, batchId)
-  const result = { lines: [], photos: [] }
+//   const folderName = batchFolder(sessionId, batchId)
+//   const result = { lines: [], photos: [] }
 
-  try {
-    const allFiles = await listFilesRecursive(folderName)
+//   try {
+//     const allFiles = await listFilesRecursive(folderName)
 
-    for (const p of allFiles) {
-      if (p.endsWith('.txt')) {
-        try {
-          const read = await readFile(p, { encoding: 'utf8' })
-          if (read && read.data) {
-            result.lines = read.data.split('\n').filter((l) => l)
-          }
-        } catch (e) {
-          logger.warn('读取数据文件失败', { path: p, error: e.message })
-        }
-      } else if (isImageFile(p)) {
-        try {
-          const uri = await getUri(p)
-          result.photos.push(uri.uri)
-        } catch (e) {
-          // fallback to base64
-          try {
-            const read = await readFile(p)
-            if (read && read.data) {
-              const lower = p.toLowerCase()
-              const mime = lower.endsWith('.png')
-                ? 'image/png'
-                : lower.endsWith('.webp')
-                  ? 'image/webp'
-                  : 'image/jpeg'
-              result.photos.push(`data:${mime};base64,${read.data}`)
-            }
-          } catch (e2) {
-            logger.warn('读取照片失败', { path: p, error: e2.message })
-          }
-        }
-      }
-    }
-  } catch (e) {
-    logger.warn('读取批次失败', { sessionId, batchId, error: e.message })
-  }
+//     for (const p of allFiles) {
+//       if (p.endsWith('.txt')) {
+//         try {
+//           const read = await readFile(p, { encoding: 'utf8' })
+//           if (read && read.data) {
+//             result.lines = read.data.split('\n').filter((l) => l)
+//           }
+//         } catch (e) {
+//           logger.warn('读取数据文件失败', { path: p, error: e.message })
+//         }
+//       } else if (isImageFile(p)) {
+//         try {
+//           const uri = await getUri(p)
+//           result.photos.push(uri.uri)
+//         } catch (e) {
+//           // fallback to base64
+//           try {
+//             const read = await readFile(p)
+//             if (read && read.data) {
+//               const lower = p.toLowerCase()
+//               const mime = lower.endsWith('.png')
+//                 ? 'image/png'
+//                 : lower.endsWith('.webp')
+//                   ? 'image/webp'
+//                   : 'image/jpeg'
+//               result.photos.push(`data:${mime};base64,${read.data}`)
+//             }
+//           } catch (e2) {
+//             logger.warn('读取照片失败', { path: p, error: e2.message })
+//           }
+//         }
+//       }
+//     }
+//   } catch (e) {
+//     logger.warn('读取批次失败', { sessionId, batchId, error: e.message })
+//   }
 
-  return result
-}
+//   return result
+// }
 
 /**
  * 删除指定批次并自动重排其他批次
  * 业务层删除函数，负责验证、事件通知和重索引
  * 实际文件系统操作委托给 fileSystem.deleteDirectory
  *
- * @param {string} sessionId - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {number|string} batchId - 批次ID
  * @returns {Promise<void>}
  * @throws {FilePathError} 当参数无效时抛出
  */
-export async function deleteBatch(sessionId, batchId) {
+export async function deleteBatch(folderName, batchId) {
   // 步骤1: 验证参数
-  validateSessionId(sessionId)
+  validateSessionId(folderName)
   validateBatchId(batchId)
 
   // 步骤2: 构建批次文件夹路径
-  const folder = batchFolder(sessionId, batchId)
+  const folder = batchFolder(folderName, batchId)
 
-  logger.info('开始删除批次', { sessionId, batchId, folder })
+  logger.info('开始删除批次', { folderName, batchId, folder })
 
   // 步骤3: 调用文件系统服务执行删除
   try {
@@ -673,35 +671,37 @@ export async function deleteBatch(sessionId, batchId) {
     // 步骤4: 触发批次删除事件
     dispatchFolderUpdate('partial_update', {
       action: 'batch_deleted',
-      folders: [sessionId],
+      folders: [folderName],
     })
 
     // 步骤5: 重索引其余批次
-    await reindexBatches(sessionId)
+    await reindexBatches(folderName)
 
-    logger.info('批次删除成功', { sessionId, batchId })
+    logger.info('批次删除成功', { folderName, batchId })
   } catch (e) {
-    logger.error('删除批次失败', { sessionId, batchId, error: e.message })
+    logger.error('删除批次失败', { folderName, batchId, error: e.message })
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除批次失败: ${e.message}`)
   }
 }
 
 /**
  * 按顺序重命名批次，保持连续编号
- * @param {string} sessionId - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @returns {Promise<void>}
- * @throws {FilePathError} 当会话ID无效时抛出
+ * @throws {FilePathError} 当文件夹名无效时抛出
  */
-export async function reindexBatches(sessionId) {
-  validateSessionId(sessionId)
+export async function reindexBatches(folderName) {
+  validateSessionId(folderName)
 
-  const batches = await listBatches(sessionId)
+  const batches = await listBatches(folderName)
 
   for (let i = 0; i < batches.length; i++) {
-    const desired = `Batch_${String(i + 1).padStart(3, '0')}`
+    // 批次编号从 0 开始：Batch_000, Batch_001, Batch_002...
+    const desired = `Batch_${String(i).padStart(3, '0')}`
     if (batches[i] !== desired) {
-      const oldPath = `${POINTCLOUD_ROOT}/${sessionFolder(sessionId)}/${batches[i]}`
-      const newPath = `${POINTCLOUD_ROOT}/${sessionFolder(sessionId)}/${desired}`
+      // sessionFolder 已经包含 POINTCLOUD_ROOT，不需要重复拼接
+      const oldPath = `${sessionFolder(folderName)}/${batches[i]}`
+      const newPath = `${sessionFolder(folderName)}/${desired}`
       try {
         await rename(oldPath, newPath)
         logger.info('重命名批次', { oldName: batches[i], newName: desired })
@@ -713,7 +713,7 @@ export async function reindexBatches(sessionId) {
 
   dispatchFolderUpdate('partial_update', {
     action: 'batch_reindexed',
-    folders: [sessionId],
+    folders: [folderName],
   })
 }
 
@@ -722,21 +722,21 @@ export async function reindexBatches(sessionId) {
 /**
  * 获取项目缩略图
  * thumbnail选择策略：按批次号升序，找到第一个有照片的批次，选择其中最新的照片
- * @param {string} sessionId - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @param {number} [retries=2] - 重试次数
  * @returns {Promise<{uri:string|null,hasPhoto:boolean}>}
- * @throws {FilePathError} 当会话ID无效时抛出
+ * @throws {FilePathError} 当文件夹名无效时抛出
  */
-export async function getProjectThumbnail(sessionId, retries = 2) {
-  validateSessionId(sessionId)
+export async function getProjectThumbnail(folderName, retries = 2) {
+  validateSessionId(folderName)
 
-  const folderInfo = parseFolderName(sessionId)
+  const folderInfo = parseFolderName(folderName)
   if (!folderInfo.shouldShow) {
-    logger.debug('跳过自定义文件夹', { sessionId })
+    logger.debug('跳过自定义文件夹', { folderName })
     return { uri: null, hasPhoto: false }
   }
 
-  const folderPath = sessionFolder(sessionId)
+  const folderPath = sessionFolder(folderName)
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -769,7 +769,7 @@ export async function getProjectThumbnail(sessionId, retries = 2) {
         logger.warn(`获取项目缩略图失败，剩余重试次数 ${retries - attempt}:`, e.message)
         await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
       } else {
-        logger.warn('获取项目缩略图最终失败', { sessionId, error: e.message })
+        logger.warn('获取项目缩略图最终失败', { folderName, error: e.message })
         return { uri: null, hasPhoto: false }
       }
     }
@@ -816,14 +816,14 @@ async function findThumbnailInBatch(folderPath, batchName) {
 
 /**
  * 获取项目所有批次的信息
- * @param {string} sessionId - 会话ID
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
  * @returns {Promise<Array>} 批次信息数组
- * @throws {FilePathError} 当会话ID无效时抛出
+ * @throws {FilePathError} 当文件夹名无效时抛出
  */
-export async function getProjectBatchInfo(sessionId) {
-  validateSessionId(sessionId)
+export async function getProjectBatchInfo(folderName) {
+  validateSessionId(folderName)
 
-  const folderPath = sessionFolder(sessionId)
+  const folderPath = sessionFolder(folderName)
   const result = []
 
   try {
@@ -857,7 +857,7 @@ export async function getProjectBatchInfo(sessionId) {
 
     return result
   } catch (e) {
-    logger.warn('获取项目批次信息失败', { sessionId, error: e.message })
+    logger.warn('获取项目批次信息失败', { folderName, error: e.message })
     return []
   }
 }

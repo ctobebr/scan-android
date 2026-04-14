@@ -38,8 +38,8 @@
  * await storage.session.deleteFoldersBatch(['folderName'])
  *
  * // 批次管理
- * await storage.batch.save(sessionId, batchId, dataLines, photos)
- * const batches = await storage.batch.list(sessionId)
+ * await storage.batch.save(folderName, batchId, dataLines, photos)
+ * const batches = await storage.batch.list(folderName)
  *
  * // 文件操作
  * const exists = await storage.file.exists('path/to/file')
@@ -88,7 +88,7 @@ export const session = {
 import {
   saveBatch,
   listBatches,
-  readBatch,
+  // readBatch,
   deleteBatch,
 } from '@/services/storage/pointCloud'
 
@@ -102,7 +102,7 @@ export const batch = {
   /** 列出会话下的所有批次 */
   list: listBatches,
   /** 读取批次数据 */
-  read: readBatch,
+  // read: readBatch,
   /** 删除批次 */
   delete: deleteBatch,
 }
@@ -213,7 +213,7 @@ export {
  * API 版本号
  * 与 package.json 版本保持一致
  */
-export const VERSION = '1.0.3'
+export const VERSION = '1.0.4'
 
 /**
  * 构建日期

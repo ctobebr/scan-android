@@ -63,11 +63,21 @@ export class parseBleData {
       },
       // 用于合并XYZ和极坐标数据的暂存区
       pendingMergeData: {
-        xyz: null, // 暂存的XYZ数据
-        polar: null, // 暂存的极坐标数据
+        format: null, // 当前暂存的数据格式: 'xyz' | 'polar' | null
+        points: null, // 暂存的点数据
         timeoutId: null, // 超时定时器ID
       },
     }
+
+    // 输出格式模式管理
+    // 设计思路: 前N帧用于检测当前输出模式,确定后后续帧直接按确定模式处理,避免重复判断
+    this.outputMode = {
+      current: 'detecting', // 当前模式: 'detecting' | 'xyz' | 'polar' | 'dual'
+      detectionCount: 0, // 检测阶段已接收的帧数
+      DETECTION_FRAMES: 5, // 检测阶段需要的帧数
+      detectedFormats: new Set(), // 检测阶段已发现的格式集合
+    }
+
     this.cameraReadyPromise = null
 
     this.isProcessingPhoto = false // 标记是否正在处理拍照
@@ -77,12 +87,9 @@ export class parseBleData {
     this.cameraCmdCount = 0
     this.cameraCallbackCount = 0
     this.enableDebugLogging = !!options.enableDebug
-    this.MERGE_TIMEOUT_MS = 150 // 合并等待超时时间（毫秒），平衡合并成功率和渲染延迟
+    this.MERGE_TIMEOUT_MS = 150 // 双格式模式下合并等待超时时间(毫秒)
 
-    // 用于区分单格式和双格式模式
-    this.receivedFormat = null // null | 'xyz' | 'polar' | 'both'
-
-    // 照片重命名标志，用于生成唯一文件名
+    // 照片重命名标志,用于生成唯一文件名
     this.reNameFlag = 0
   }
   // 验证数据包
@@ -724,11 +731,14 @@ export class parseBleData {
   //     ' CMD_SET_ACCEL (0x' + CONTROL_COMMANDS.CMD_SET_ACCEL.toString(16) + ') received',
   //   )
   // }
-  // 传递的xyz坐标是毫米单位
+  /**
+   * 处理XYZ格式点云数据 (CMD_OUTPUT_XYZ: 0xA1)
+   * 设计思路: 统一调用_processPointData处理,避免重复逻辑
+   */
   _handlePointData(data) {
-    // 如果处于拍照会话，忽略点云数据
+    // 如果处于拍照会话,忽略点云数据
     if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
-      logger.debug('处于拍照会话，忽略点云数据')
+      logger.debug('处于拍照会话,忽略点云数据')
       return
     }
 
@@ -737,33 +747,22 @@ export class parseBleData {
       return
     }
 
-    // 记录接收到的格式
-    if (this.receivedFormat === null) {
-      this.receivedFormat = 'xyz'
-    } else if (this.receivedFormat === 'polar') {
-      this.receivedFormat = 'both'
-    }
-
     // 解析XYZ数据
     const points = this.parseBinaryPointDataXYZ(data)
     if (!points || points.length === 0) return
 
-    // 检查是否有待处理的极坐标数据
-    if (this.protocolState.pendingMergeData.polar) {
-      // 有极坐标数据等待合并，执行合并
-      // 合并后使用XYZ的坐标，避免重复渲染
-      this._mergeAndOutputPoints(points, this.protocolState.pendingMergeData.polar)
-      this._clearPendingMergeData()
-    } else {
-      // 没有待处理的极坐标数据，暂存XYZ数据等待合并
-      this._storePendingXYZ(points)
-    }
+    // 统一处理点数据
+    this._processPointData('xyz', points)
   }
 
+  /**
+   * 处理极坐标格式点云数据 (CMD_OUTPUT_POLAR: 0xA2)
+   * 设计思路: 统一调用_processPointData处理,避免重复逻辑
+   */
   _handleRawPointData(data) {
-    // 如果处于拍照会话，忽略点云数据
+    // 如果处于拍照会话,忽略点云数据
     if (this.protocolState.photoSession && this.protocolState.photoSession.active) {
-      logger.debug('处于拍照会话，忽略点云数据')
+      logger.debug('处于拍照会话,忽略点云数据')
       return
     }
 
@@ -772,123 +771,186 @@ export class parseBleData {
       return
     }
 
-    // 记录接收到的格式
-    if (this.receivedFormat === null) {
-      this.receivedFormat = 'polar'
-    } else if (this.receivedFormat === 'xyz') {
-      this.receivedFormat = 'both'
-    }
-
     // 解析极坐标数据
     const points = this.parseBinaryPointData(data)
     if (!points || points.length === 0) return
 
-    // 检查是否有待处理的XYZ数据
-    if (this.protocolState.pendingMergeData.xyz) {
-      // 有XYZ数据等待合并，执行合并
-      // 合并后使用XYZ的坐标，避免重复渲染
-      this._mergeAndOutputPoints(this.protocolState.pendingMergeData.xyz, points)
+    // 统一处理点数据
+    this._processPointData('polar', points)
+  }
+
+  /**
+   * 统一处理点数据的入口函数
+   * 核心逻辑:
+   * 1. 检测阶段: 前N帧用于确定当前是单格式还是双格式模式
+   * 2. 单格式模式: 直接输出,无需等待合并
+   * 3. 双格式模式: 等待配对数据,超时丢弃
+   *
+   * @param {string} format - 当前数据格式: 'xyz' | 'polar'
+   * @param {Array} points - 解析后的点数据
+   */
+  _processPointData(format, points) {
+    // 检测阶段: 收集格式信息,确定输出模式
+    if (this.outputMode.current === 'detecting') {
+      this._detectOutputMode(format)
+    }
+
+    // 根据当前模式选择处理方式
+    switch (this.outputMode.current) {
+      case 'xyz':
+      case 'polar':
+        // 单格式模式: 直接输出,不等待合并
+        this.protocolState.accumulatedPoints.push(...points)
+        // logger.debug(`[SingleMode] ${format} 直接输出`)
+        break
+
+      case 'dual':
+        // 双格式模式: 需要配对合并
+        this._handleDualFormatData(format, points)
+        break
+
+      default:
+        // 检测阶段: 按双格式逻辑处理(暂存等待)-------丢弃旧的,存储新的，如果是单格式输出，在检测阶段丢弃前几帧数据
+        this._handleDualFormatData(format, points)
+    }
+  }
+
+  /**
+   * 检测输出模式
+   * 通过前N帧的数据格式分布来判断:
+   * - 只有1种格式 -> 单格式模式
+   * - 有2种格式 -> 双格式模式
+   *
+   * @param {string} format - 当前帧的数据格式
+   */
+  _detectOutputMode(format) {
+    this.outputMode.detectedFormats.add(format)
+    this.outputMode.detectionCount++
+
+    // 达到检测帧数或已检测到两种格式,确定模式
+    if (
+      this.outputMode.detectionCount >= this.outputMode.DETECTION_FRAMES ||
+      this.outputMode.detectedFormats.size >= 2
+    ) {
+      if (this.outputMode.detectedFormats.size === 1) {
+        // 单格式模式
+        const singleFormat = Array.from(this.outputMode.detectedFormats)[0]
+        this.outputMode.current = singleFormat
+        logger.debug(`[ModeDetect] 确定为单格式模式: ${singleFormat}`)
+
+        // 重要: 清理检测阶段可能启动的定时器,避免后续触发超时回调
+        this._clearPendingMergeData()
+      } else {
+        // 双格式模式
+        this.outputMode.current = 'dual'
+        logger.debug('[ModeDetect] 确定为双格式模式')
+        // 双格式模式下保持检测阶段的数据,继续等待配对
+      }
+    }
+  }
+
+  /**
+   * 处理双格式模式下的数据
+   * 逻辑: 收到格式A后,等待格式B进行合并;如果收到格式A时已有格式A,则丢弃旧的
+   *
+   * @param {string} format - 当前数据格式
+   * @param {Array} points - 点数据
+   */
+  _handleDualFormatData(format, points) {
+    const pending = this.protocolState.pendingMergeData
+
+    // 清除之前的超时定时器
+    if (pending.timeoutId) {
+      clearTimeout(pending.timeoutId)
+      pending.timeoutId = null
+    }
+
+    // 情况1: 有待处理数据且格式匹配 -> 合并输出
+    if (pending.format && pending.format !== format) {
+      // 格式不同,可以合并
+      if (format === 'xyz') {
+        // 当前是XYZ,待处理的是极坐标
+        this._mergeAndOutputPoints(points, pending.points)
+      } else {
+        // 当前是极坐标,待处理的是XYZ
+        this._mergeAndOutputPoints(pending.points, points)
+      }
       this._clearPendingMergeData()
-    } else {
-      // 没有待处理的XYZ数据，暂存极坐标数据等待合并
-      this._storePendingPolar(points)
-    }
-  }
-
-  // 暂存XYZ数据，启动超时定时器
-  _storePendingXYZ(points) {
-    // 清除之前的超时
-    if (this.protocolState.pendingMergeData.timeoutId) {
-      clearTimeout(this.protocolState.pendingMergeData.timeoutId)
+      return
     }
 
-    this.protocolState.pendingMergeData.xyz = points
+    // 情况2: 有待处理数据但格式相同 -> 丢弃旧的,存储新的   --- 如果是单格式输出，在检测阶段丢弃前几帧数据
+    if (pending.format === format) {
+      logger.debug(`[DualMode] 收到相同格式 ${format},丢弃旧数据`)
+    }
 
-    // 启动超时定时器
-    this.protocolState.pendingMergeData.timeoutId = setTimeout(() => {
+    // 情况3: 没有待处理数据 -> 存储当前数据,启动超时
+    pending.format = format
+    pending.points = points
+    pending.timeoutId = setTimeout(() => {
       this._handleMergeTimeout()
     }, this.MERGE_TIMEOUT_MS)
   }
 
-  // 暂存极坐标数据，启动超时定时器
-  _storePendingPolar(points) {
-    // 清除之前的超时
-    if (this.protocolState.pendingMergeData.timeoutId) {
-      clearTimeout(this.protocolState.pendingMergeData.timeoutId)
-    }
-
-    this.protocolState.pendingMergeData.polar = points
-
-    // 启动超时定时器
-    this.protocolState.pendingMergeData.timeoutId = setTimeout(() => {
-      this._handleMergeTimeout()
-    }, this.MERGE_TIMEOUT_MS)
-  }
-
-  // 合并并输出数据
-  // 关键：合并后的点只使用一套XYZ坐标（来自XYZ数据），避免重复渲染
-  // 注意：每帧蓝牙数据包只包含一个点数据，因此两个数组长度都为1
+  /**
+   * 合并XYZ和极坐标数据并输出
+   * 注意: 合并后的点使用XYZ的坐标(更精确),同时保留极坐标的原始数据用于保存
+   *
+   * @param {Array} xyzPoints - XYZ格式的点数据
+   * @param {Array} polarPoints - 极坐标格式的点数据
+   */
   _mergeAndOutputPoints(xyzPoints, polarPoints) {
-    // 单帧单点场景，直接取第一个元素合并
+    // 单帧单点场景,直接取第一个元素合并
     const xyz = xyzPoints[0]
     const polar = polarPoints[0]
 
-    // logger.debug('[MergeSuccess] XYZ和极坐标数据合并成功')
-
-    // 合并后的点：使用XYZ的坐标（更精确，避免重复渲染）
-    // 加上极坐标的原始数据用于保存到文件
+    // 合并后的点: 使用XYZ的坐标(更精确,避免重复渲染)
+    // 同时保留极坐标的原始数据用于保存到文件
     const mergedPoint = {
-      x: xyz.x, // 来自XYZ数据（更精确）
+      x: xyz.x,
       y: xyz.y,
       z: xyz.z,
-      pitch: polar.pitch, // 来自极坐标数据
+      pitch: polar.pitch,
       yaw: polar.yaw,
       distanceM: polar.distanceM,
-      // 保留其他可能需要的数据
       intensity: polar.intensity,
       pitchDeg: polar.pitchDeg,
       yawDeg: polar.yawDeg,
     }
 
-    // 将合并后的点添加到累积缓冲区
-    // 注意：这里只添加了一套XYZ坐标，不会导致重复渲染
     this.protocolState.accumulatedPoints.push(mergedPoint)
+    // logger.debug('[DualMode] XYZ和极坐标数据合并成功')
   }
 
-  // 超时处理：根据接收到的格式判断是单格式还是双格式模式
+  /**
+   * 双格式模式下的超时处理
+   * 超时说明: 只收到了一种格式的数据,另一种格式丢失
+   * 处理策略: 丢弃不完整的数据(不保存到txt)
+   */
   _handleMergeTimeout() {
     const pending = this.protocolState.pendingMergeData
 
-    if (this.receivedFormat === 'both') {
-      // 双格式模式，但合并超时，丢弃数据（不保存到txt）
-      logger.debug('[MergeTimeout] 双格式模式，数据超时未合并，丢弃')
-    } else if (pending.xyz) {
-      // 单格式模式（XYZ），正常输出
-      logger.debug('[SingleMode] XYZ单独输出')
-      this.protocolState.accumulatedPoints.push(...pending.xyz)
-    } else if (pending.polar) {
-      // 单格式模式（极坐标），正常输出
-      logger.debug('[SingleMode] 极坐标单独输出')
-      this.protocolState.accumulatedPoints.push(...pending.polar)
+    if (pending.format) {
+      logger.debug(`[DualMode] 双格式模式数据超时未合并,丢弃 ${pending.format} 数据`)
     }
 
     this._clearPendingMergeData()
   }
 
-  // 清空暂存区
+  /**
+   * 清空数据暂存区
+   * 用于: 数据合并完成后、超时处理后、重置状态时
+   */
   _clearPendingMergeData() {
-    if (this.protocolState.pendingMergeData.timeoutId) {
-      clearTimeout(this.protocolState.pendingMergeData.timeoutId)
+    const pending = this.protocolState.pendingMergeData
+
+    if (pending.timeoutId) {
+      clearTimeout(pending.timeoutId)
     }
 
-    this.protocolState.pendingMergeData = {
-      xyz: null,
-      polar: null,
-      timeoutId: null,
-    }
-
-    // 注意：receivedFormat 不清空，保持为 'both' 以便后续帧知道是双格式模式
-    // 如果是单格式模式（'xyz' 或 'polar'），也可以不清空，保持一致性
+    pending.format = null
+    pending.points = null
+    pending.timeoutId = null
   }
   /**
    * 处理读取标定参数的响应
@@ -1150,6 +1212,14 @@ export class parseBleData {
     // 重置数据合并状态
     this._clearPendingMergeData();
 
+    // 重置输出模式检测状态
+    this.outputMode = {
+      current: 'detecting',
+      detectionCount: 0,
+      DETECTION_FRAMES: 5,
+      detectedFormats: new Set(),
+    };
+
     // 重置其他状态
     this.isProcessingPhoto = false;
     this.pendingEndRequests = [];
@@ -1159,9 +1229,6 @@ export class parseBleData {
     // 重置调试计数器
     this.cameraCmdCount = 0;
     this.cameraCallbackCount = 0;
-
-    // 重置数据格式标记
-    this.receivedFormat = null;
 
     // 重置照片重命名标志
     this.reNameFlag = 0;

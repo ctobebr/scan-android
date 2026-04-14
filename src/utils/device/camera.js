@@ -105,15 +105,24 @@ const cameraHelper = {
           base64 = base64.split(',')[1]
         }
 
-        // 1. 同步创建目录
+        // 1. 同步创建目录（如果不存在）
         try {
-          await Filesystem.mkdir({
+          // 先检查目录是否存在
+          await Filesystem.stat({
             path: targetDir,
             directory: Directory.External,
-            recursive: true,
           })
         } catch (err) {
-          logger.warn('创建目录失败', err)
+          // 目录不存在，创建它
+          try {
+            await Filesystem.mkdir({
+              path: targetDir,
+              directory: Directory.External,
+              recursive: true,
+            })
+          } catch (mkdirErr) {
+            logger.warn('创建目录失败', mkdirErr)
+          }
         }
 
         // 2. 后台异步保存文件
@@ -131,13 +140,13 @@ const cameraHelper = {
             const isFirstPhoto = filePath.endsWith('====1.jpg')
             if (isFirstPhoto) {
               // 触发文件夹更新事件，通知列表刷新缩略图
-              const sessionId = filePath.split('/')[1]
-              if (sessionId) {
+              const folderName = filePath.split('/')[1]
+              if (folderName) {
                 dispatchFolderUpdate('partial_update', {
                   action: 'folder_refreshed',
-                  folders: [sessionId],
+                  folders: [folderName],
                 })
-                logger.debug('第一张照片保存后触发文件夹刷新', { sessionId })
+                logger.debug('第一张照片保存后触发文件夹刷新', { folderName })
               }
             }
           } catch (err) {

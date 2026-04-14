@@ -76,13 +76,6 @@ const projectListItems = computed(() => {
 
 // 初始化时，onMounted和onActivated都会执行
 onMounted(() => {
-  console.log('ProjectList onMounted 执行')
-  console.log('projectListItems 值:', JSON.stringify(projectListItems.value))
-  console.log('folderStore.folderItems:',JSON.stringify( folderStore.folderItems))
-  setTimeout(() => {
-    console.log('projectListItems1122', JSON.stringify(projectListItems.value))
-
-  },1000)
 })
 onActivated(() => {
 })

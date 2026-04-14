@@ -88,7 +88,7 @@ import { createLogger } from '@/utils/logger'
 const router = useRouter()
 const route = useRoute()
 
-const sessionId = route.params.session
+const currentSessionId = route.params.currentSessionId
 const batchNum = route.params.bid
 const isDeleteConfirm = ref(false)
 const logger = createLogger('BatchDetailView')
@@ -114,21 +114,21 @@ onUnmounted(async () => {
 })
 
 async function init() {
-    try {
-    await StatusBar.setOverlaysWebView({ overlay: true })
-    await StatusBar.setBackgroundColor({ color: '#0e1420' })
-    await StatusBar.setStyle({ style: 'LIGHT' })
-    logger.debug('成功设置')
-  } catch (err) {
-    logger.warn('StatusBar overlay set failed', err)
-  }
-  try {
-    await setImmersive(true)
-    logger.debug('成功设置')
+  //   try {
+  //   await StatusBar.setOverlaysWebView({ overlay: true })
+  //   await StatusBar.setBackgroundColor({ color: '#0e1420' })
+  //   await StatusBar.setStyle({ style: 'LIGHT' })
+  //   logger.debug('成功设置')
+  // } catch (err) {
+  //   logger.warn('StatusBar overlay set failed', err)
+  // }
+  // try {
+  //   await setImmersive(true)
+  //   logger.debug('成功设置')
 
-  } catch (err) {
-    logger.warn('setImmersive initial calls failed', err)
-  }
+  // } catch (err) {
+  //   logger.warn('setImmersive initial calls failed', err)
+  // }
 }
 
 async function cleanupResourcesForExit(params) {
@@ -206,8 +206,11 @@ function cancelDelete() {
 
 async function confirmDelete() {
   try {
-    //点位1的文件夹是Batch_000 依次类推
-    await storage.batch.delete(sessionId, batchNum-1)
+    // 使用临时文件夹名删除批次
+    // batchNum 是显示的点位编号（1,2,3...），需要转换为 batchId（0,1,2...）
+    const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+    const batchId = batchNum - 1
+    await storage.batch.delete(tempFolderName, batchId)
     showToast({ message: '删除成功', position: 'bottom' })
     router.back()
   } catch (e) {

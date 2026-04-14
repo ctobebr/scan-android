@@ -161,7 +161,9 @@ export class DataIO {
         }
         this._notificationListeners.get(deviceId).set(characteristicUUID, callback)
 
-        logger.withContext({ deviceId, serviceUUID, characteristicUUID }).info('已订阅通知')
+        logger
+          .withContext({ deviceId, serviceUUID, characteristicUUID })
+          .info('订阅通知成功，等待数据接收...')
         return true
       },
       BluetoothErrorCode.NOTIFICATION_FAILED,

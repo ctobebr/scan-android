@@ -95,10 +95,11 @@ defineOptions({
   name: 'PointCloudView',
 })
 
-import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick, onActivated, onDeactivated } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
+import { useKeepAliveStore } from '@/stores/keepAlive'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'
 import { StatusBar } from '@capacitor/status-bar'
 import { setImmersive } from '@/utils/device/immersive'
@@ -125,6 +126,7 @@ import { showLoadingToast, closeToast, showToast } from 'vant'
 
 const bluetoothStore = useBluetoothStore()
 const folderStore = useFoldersStore()
+const keepAliveStore = useKeepAliveStore()
 const router = useRouter()
 
 const container = ref(null)
@@ -155,6 +157,12 @@ let parser = null
 const accumulationBuffer = []
 const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
 const MAX_POINTS_PER_BATCH = 500000 // 单个点位最大点云数
+/**
+ * setInterval定时器，每33检查一次缓冲区====缓冲区最多10000个点，超出这个上限时，丢弃缓冲区中旧的点数据
+ * 如果正在采集 && 缓冲区至少有3个点
+ * 则批量取出数据（最多1000个）
+ * 一次性渲染到threejs
+ */
 let accumulationTimer = null
 const ACCUMULATION_INTERVAL = 33
 const MIN_BATCH_SIZE = 3 //  进行渲染一次最少需要点数
@@ -266,7 +274,7 @@ const goBack = async () => {
  */
 const handleOverivew = () => {
   let testID = 1
-  router.push({ name: 'BatchDetail', params: { session: currentSessionId, bid: testID } })
+  router.push({ name: 'BatchDetail', params: { currentSessionId: currentSessionId, bid: testID } })
 }
 
 /**
@@ -274,9 +282,15 @@ const handleOverivew = () => {
  * @param {number} idx - 点位索引
  */
 function goToBatch(idx) {
+  // 检查是否正在采集中
+  if (isCollecting.value) {
+    showToast({ message: '正在采集中...', position: 'bottom' })
+    return
+  }
+
   if (!currentSessionId) return
   const bid = idx + 1
-  router.push({ name: 'BatchDetail', params: { session: currentSessionId, bid } })
+  router.push({ name: 'BatchDetail', params: { currentSessionId: currentSessionId, bid } })
 }
 
 /**
@@ -430,7 +444,7 @@ function resetForNewProject() {
  */
 function resetForNewBatch() {
   currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
-  accumulationBuffer.length = 0
+  clearAccumulationBuffer()
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
     pointCount.value = 0
@@ -696,6 +710,7 @@ async function cleanupResourcesForPause() {
  * @param {boolean} options.disableImmersive - 是否禁用沉浸模式
  * @param {boolean} options.restoreStatusBar - 是否恢复状态栏设置
  * @param {boolean} options.resetState - 是否重置状态变量
+ * @param {boolean} options.cleanupRenderer - 是否清理渲染器资源（默认true）
  */
 async function cleanupResourcesForExit(options = {}) {
   const {
@@ -703,7 +718,8 @@ async function cleanupResourcesForExit(options = {}) {
     disableKeepAwake = true,
     disableImmersive = true,
     restoreStatusBar = true,
-    resetState = true
+    resetState = true,
+    cleanupRenderer: shouldCleanupRenderer = true
   } = options
 
   if (_hasCleaned) {
@@ -712,14 +728,18 @@ async function cleanupResourcesForExit(options = {}) {
   }
 
   _hasCleaned = true
-  logger.debug('[PointCloud] cleanupResourcesForExit 开始执行')
+  logger.debug('[PointCloud] cleanupResourcesForExit 开始执行', { shouldCleanupRenderer })
 
   try {
     // 1. 清理定时器和事件监听器
     cleanupTimersAndListeners()
 
-    // 2. 清理渲染器资源
-    await cleanupRenderer()
+    // 2. 根据选项决定是否清理渲染器资源
+    if (shouldCleanupRenderer) {
+      await cleanupRenderer()
+    } else {
+      logger.debug('[PointCloud] 跳过渲染器清理，保持点云数据')
+    }
 
     // 3. 清理蓝牙会话
     await cleanupBluetoothSession()
@@ -744,6 +764,7 @@ async function cleanupResourcesForExit(options = {}) {
 
 /**
  * 清理积累定时器
+ * 点云渲染定时器（渲染相关的缓冲区函数）
  */
 function cleanupAccumulationTimer() {
   if (accumulationTimer) {
@@ -1103,7 +1124,7 @@ async function startDataStream() {
 
   // 重置当前点位数据
   currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
-  accumulationBuffer.length = 0
+  clearAccumulationBuffer()
 
   isCollecting.value = true
 
@@ -1157,6 +1178,7 @@ async function init() {
       window.addEventListener('resize', renderer.onResize)
 
       if (!currentSessionId) {
+        console.log('!currentSessionId')
         currentSessionId = generateOptimizedSessionId()
         resetForNewProject()
       } else {
@@ -1243,7 +1265,7 @@ watch(
  */
 onMounted(async () => {
   await init()
-
+  console.log('PointCloudPage mounted')
   // --- 注册断开监听 ---
   registerDisconnectListener()
 
@@ -1270,8 +1292,10 @@ onMounted(async () => {
   // 注册批次变化回调，由 Pinia store 统一管理
   unsubscribeBatchChange = folderStore.onBatchChange(async (folders, action) => {
     // 当当前会话的批次发生变化时，刷新批次按钮
-    const currentFolder = currentSessionId || storage.path.getTempSessionName(currentSessionId)
-    if (folders.includes(currentFolder) || folders.includes(currentSessionId)) {
+    // folders 中传递的是 folderName（临时文件夹名或正式文件夹名）
+    // 需要生成当前会话的临时文件夹名来匹配
+    const tempFolderName = storage.path.getTempSessionName(currentSessionId)  // error（错误）继续编辑项目时，这个获取临时文件夹逻辑不一定适用，因为项目名不一定时临时前缀
+    if (folders.includes(tempFolderName)) {
       await loadBatchButtons()
     }
   })
@@ -1299,6 +1323,30 @@ onUnmounted(async () => {
 })
 
 /**
+ * 组件被 keep-alive 缓存时调用
+ * 完全保持状态，只暂停后台渲染定时器
+ */
+onDeactivated(() => {
+  logger.debug('[PointCloud] onDeactivated - 组件被缓存，完全保持状态')
+
+  // 所有状态完全保持
+})
+
+/**
+ * 组件从 keep-alive 缓存中激活时调用
+ * 从 BatchDetail 返回时，状态完全保持，无需恢复
+ *
+ * 注意：由于 goToBatch 阻止了采集状态下的跳转
+ * 从 BatchDetail 返回时一定不在采集状态，无需恢复采集定时器
+ */
+onActivated(async () => {
+  logger.debug('[PointCloud] onActivated - 组件被激活，状态完全保持')
+
+  // 所有状态完全保持，无需任何恢复操作
+  // - 所有数据状态保持
+})
+
+/**
  * 路由离开守卫
  * 根据目标路由执行不同的清理策略
  */
@@ -1314,18 +1362,13 @@ onBeforeRouteLeave(async (to, from, next) => {
 
     // 根据目标路由执行不同的清理策略
     if (to.name === 'BatchDetail') {
-      logger.debug('[PointCloud] 导航到 BatchDetail 页面，保持横屏等设置')
-      logger.debug('to.name', to.name)
-      await cleanupResourcesForExit({
-        restorePortrait: false,      // 保持横屏
-        disableKeepAwake: false,      // 保持屏幕常亮
-        disableImmersive: false,      // 保持沉浸模式
-        restoreStatusBar: false,      // 保持状态栏设置
-        resetState: false             // 不重置状态变量
-      })
+      logger.debug('[PointCloud] 导航到 BatchDetail 页面，完全保持状态')
+      // 添加 PointCloudView 到 keep-alive 缓存
+      keepAliveStore.addCache('PointCloudView')
     } else {
-      logger.debug('to.name111', to.name)
-      logger.debug('[PointCloud] 导航到其他页面，执行完整清理')
+      logger.debug('[PointCloud] 导航到其他页面，移除 keep-alive 缓存并执行完整清理')
+      // 从 keep-alive 缓存中移除
+      keepAliveStore.removeCache('PointCloudView')
       await cleanupResourcesForExit()
     }
 

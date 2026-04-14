@@ -16,7 +16,7 @@ const routes = [
     component: () => import('@/views/pointCloud/index.vue'),
   },
   {
-    path: '/batchdetail/:session/:bid',
+    path: '/batchdetail/:currentSessionId/:bid',
     name: 'BatchDetail',
     component: () => import('@/views/batchDetail/index.vue'),
     props: true,
