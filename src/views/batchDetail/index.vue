@@ -185,7 +185,10 @@ function goBack() {
 }
 
 function handleManualSplice() {
-  showToast({ message: '手动拼接功能开发中', position: 'bottom' })
+  // 跳转到拼接页面
+  router.push({
+    name: 'Alignment'
+  })
 }
 
 function handleMosaic() {

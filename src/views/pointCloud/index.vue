@@ -6,7 +6,7 @@
       <!-- 将按钮和统计信息放在 three-container 内部 -->
       <div class="overlay-controls">
         <button class="back-btn" @click="goBack" aria-label="Back">
-          <img src="@/assets/img/back.png" alt="返回" />
+          <img src="@/assets/img/back-gray.png" alt="返回" />
         </button>
 
         <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
@@ -20,10 +20,10 @@
         </button>
 
         <div class="right-button-group">
-          <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick" alt="编辑" />
+          <img src="@/assets/img/edit-gray.png" class="editIcon" @click="handleEditClick" alt="编辑" />
           <button class="capture-btn" @click="startDataStream"></button>
           <img
-            src="@/assets/img/setting.png"
+            src="@/assets/img/setting-gray.png"
             class="setIcon"
             @click="handleSettingClick"
             alt="设置"
@@ -60,12 +60,12 @@
         <!-- 内存调试按钮（仅开发环境显示） -->
         <!-- <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button> -->
         <!-- 设备断开提示层 -->
-        <div v-if="deviceDisconnected" class="disconnect-overlay">
+        <!-- <div v-if="deviceDisconnected" class="disconnect-overlay">
           <div class="disconnect-message">
             <span>设备已断开连接</span>
             <button class="disconnect-back-btn" @click="goBack">返回</button>
           </div>
-        </div>
+        </div> -->
         <!-- 保存对话框 -->
         <div v-if="showSaveDialog" class="save-dialog-overlay">
           <div class="save-dialog-content">
@@ -1334,13 +1334,13 @@ onDeactivated(() => {
 
 /**
  * 组件从 keep-alive 缓存中激活时调用
- * 从 BatchDetail 返回时，状态完全保持，无需恢复
+ * 从 BatchDetail 返回时，重新加载批次按钮状态以反映可能的删除操作
  *
  * 注意：由于 goToBatch 阻止了采集状态下的跳转
  * 从 BatchDetail 返回时一定不在采集状态，无需恢复采集定时器
  */
 onActivated(async () => {
-  logger.debug('[PointCloud] onActivated - 组件被激活，状态完全保持')
+  logger.debug('[PointCloud] onActivated - 组件被激活，重新加载批次状态')
 
   // 所有状态完全保持，无需任何恢复操作
   // - 所有数据状态保持
@@ -1459,11 +1459,14 @@ const handleSettingClick = () => {
   -webkit-touch-callout: none;
 }
 
+/**
+幕布画板背景色 - 浅蓝白渐变风格
+*/
 .three-container {
   flex: 1;
   width: 100%;
   position: relative;
-  background: radial-gradient(#223344, #001122);
+  background: linear-gradient(180deg, #f0f4f8 0%, #e8eef5 100%);
   overflow: hidden;
 }
 
@@ -1769,6 +1772,7 @@ const handleSettingClick = () => {
   -ms-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+  color: #8a8a8a;
 }
 
 .bottom-left-stat span {

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { closeToast, showToast } from 'vant'
+import { closeToast, showToast, showDialog, showConfirmDialog } from 'vant'
 import { bluetoothService } from '@/services/bluetooth'
 import { NUS_SERVICE_UUID, NUS_WRITE_CHAR_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 // 导入全局日志工具
@@ -54,7 +54,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
       logger.debug('检查蓝牙和位置权限')
       if (!(await this.requestRequirePermissions())) {
         logger.warn('权限请求被拒绝')
-        showToast({ message: '需要蓝牙和位置权限才能扫描设备', position: 'bottom' })
+        showToast({
+          message: '需要蓝牙和位置权限才能扫描设备',
+          position: 'bottom',
+          duration: 3000,
+        })
         return
       }
 
@@ -65,7 +69,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
         logger.info('蓝牙初始化成功')
       } catch (err) {
         logger.error('蓝牙初始化失败', err)
-        alert('蓝牙初始化失败，请重试')
+        await showDialog({
+          title: '提示',
+          message: '蓝牙初始化失败，请重试',
+          theme: 'round-button',
+        })
         return
       }
 
@@ -74,7 +82,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
       const enabled = await bluetoothService.isBluetoothEnabled()
       if (!enabled) {
         logger.warn('蓝牙未开启')
-        alert('请先打开手机蓝牙')
+        await showDialog({
+          title: '提示',
+          message: '请先打开手机蓝牙',
+          theme: 'round-button',
+        })
         return
       }
 
@@ -87,7 +99,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
         this.devices = found
       } catch (err) {
         logger.error('扫描异常', err)
-        alert('扫描过程中出错')
+        await showDialog({
+          title: '提示',
+          message: '扫描过程中出错',
+          theme: 'round-button',
+        })
       } finally {
         this.scanning = false
         logger.debug('扫描结束')
@@ -120,7 +136,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
       // 非手动断开才显示提示
       if (!isManualDisconnect) {
-        showToast({ message: '设备已断开连接', position: 'bottom' })
+        showToast({
+          message: '设备已断开连接',
+          position: 'bottom',
+          duration: 2000,
+        })
       }
     },
 
@@ -170,7 +190,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
       // 参数验证
       if (!device || !device.deviceId) {
         logger.error('连接失败：设备信息无效', { device })
-        showToast({ message: '设备信息无效', position: 'bottom' })
+        showToast({
+          message: '设备信息无效',
+          position: 'bottom',
+          duration: 2000,
+        })
         return
       }
 
@@ -186,13 +210,23 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
         this.connectionStatus = 2 // 已连接
         closeToast()
-        showToast({ message: '连接成功', position: 'bottom' })
+        showToast({
+          message: '连接成功',
+          position: 'bottom',
+          duration: 2000,
+          type: 'success',
+        })
       } catch (err) {
         logger.error('连接失败', err)
         this.connectionStatus = 0 // 回到未连接
         this.connectedDeviceId = null
         closeToast()
-        showToast({ message: '连接失败，请重试', position: 'bottom' })
+        showToast({
+          message: '连接失败，请重试',
+          position: 'bottom',
+          duration: 3000,
+          type: 'fail',
+        })
       }
     },
 
@@ -221,7 +255,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
         if (!this.connectedDeviceId) {
           const error = new Error('未连接设备')
           logger.error(errorMsg, error)
-          showToast({ message: '请先连接设备', position: 'bottom' })
+          showToast({
+            message: '请先连接设备',
+            position: 'bottom',
+            duration: 2000,
+          })
           if (throwError) {
             throw error
           }
@@ -242,7 +280,12 @@ export const useBluetoothStore = defineStore('bluetooth', {
         logger.error(errorMsg, err)
         // 提供友好的错误提示
         if (!throwError) {
-          showToast({ message: '操作失败，请重试', position: 'bottom' })
+          showToast({
+            message: '操作失败，请重试',
+            position: 'bottom',
+            duration: 2000,
+            type: 'fail',
+          })
         }
         if (throwError) {
           throw err
@@ -257,7 +300,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
 
       if (!device || !device.deviceId) {
         logger.error('断开连接失败：设备信息无效', { device })
-        showToast({ message: '设备信息无效', position: 'bottom' })
+        showToast({
+          message: '设备信息无效',
+          position: 'bottom',
+          duration: 2000,
+        })
         return
       }
 
@@ -282,7 +329,12 @@ export const useBluetoothStore = defineStore('bluetooth', {
       } catch (e) {
         this.connectionStatus = 2
         logger.error('断开连接失败', e)
-        showToast({ message: '断开连接失败，请重试', position: 'bottom' })
+        showToast({
+          message: '断开连接失败，请重试',
+          position: 'bottom',
+          duration: 2000,
+          type: 'fail',
+        })
       }
     },
     async handleSendStart() {
