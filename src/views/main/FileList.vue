@@ -415,6 +415,7 @@ const onShareClick = async (folderName, projectName, sessionId) => {
     showLoadingToast({
       message: '加载中...',
       forbidClick: true,
+      duration: 0, // 0 表示不自动关闭，需手动调用 closeToast()
     })
 
     const timeStr = parseSessionIdToFormattedTime(sessionId) || sessionId

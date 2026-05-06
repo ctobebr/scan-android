@@ -38,6 +38,7 @@ export function createBufferManager(config) {
       'color',
       new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage),
     )
+    logger.debug('[createBuffers] 初始缓冲区创建完成', { capacity: cap, positionCount: pointsGeometry.attributes.position.count })
   }
 
   /**
@@ -65,6 +66,9 @@ export function createBufferManager(config) {
     try {
       const oldPos = pointsGeometry.attributes.position.array
       const oldCol = pointsGeometry.attributes.color.array
+      const oldCount = pointsGeometry.attributes.position.count
+
+      logger.debug('[ensureCapacity] 开始扩容', { oldCapacity: capacity, newCapacity: newCap, oldCount, oldArrayLength: oldPos.length })
 
       // 新建扩容区域 && 存储旧点位信息
       const newPos = new Float32Array(newCap * 3)
@@ -72,11 +76,18 @@ export function createBufferManager(config) {
       newPos.set(oldPos)
       newCol.set(oldCol)
 
-      // 直接替换buffer而不是创建新的Attribute，减少GC--虽然这样会导致新旧点位全量更新，但是给GPU带来的副作用小于一次性分配超大内存空间
-      pointsGeometry.attributes.position.array = newPos
-      pointsGeometry.attributes.color.array = newCol
-      pointsGeometry.attributes.position.needsUpdate = true
-      pointsGeometry.attributes.color.needsUpdate = true
+      // Three.js 不支持直接替换 BufferAttribute.array 来改变缓冲区大小
+      // 必须使用 setAttribute 重新创建 BufferAttribute，让 Three.js 内部创建新的 WebGLBuffer
+      pointsGeometry.setAttribute(
+        'position',
+        new THREE.BufferAttribute(newPos, 3).setUsage(THREE.DynamicDrawUsage),
+      )
+      pointsGeometry.setAttribute(
+        'color',
+        new THREE.BufferAttribute(newCol, 3).setUsage(THREE.DynamicDrawUsage),
+      )
+
+      logger.debug('[ensureCapacity] 扩容完成', { newCapacity: newCap, newCount: pointsGeometry.attributes.position.count, newArrayLength: newPos.length })
 
       capacity = newCap
       return true

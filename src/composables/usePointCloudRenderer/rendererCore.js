@@ -126,6 +126,13 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
       const geometry = bufferManager.getGeometry()
       if (!geometry) return
 
+      // 前置检查 WebGL 上下文有效性
+      if (!isWebGLContextValid()) {
+        logger.error('[addPoints] WebGL 上下文已失效，跳过添加')
+        showToast({ message: '3D 渲染上下文丢失，请刷新页面', position: 'bottom' })
+        return
+      }
+
       // 首次添加时添加到场景
       if (currentPointCount === 0 && !scene.children.includes(pointCloud)) {
         scene.add(pointCloud)
@@ -136,12 +143,14 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
         showToast({ message: `点云数量已达上限 ${config.maxPoints} 点`, position: 'bottom' })
         return
       }
-
       bufferManager.ensureCapacity(newPoints.length, currentPointCount)
       colorCalculator.updateYRange(newPoints)
 
-      const posArr = geometry.attributes.position.array
-      const colArr = geometry.attributes.color.array
+      // 扩容后必须重新获取 geometry.attributes，因为 BufferAttribute 已被替换
+      const positionAttr = geometry.attributes.position
+      const colorAttr = geometry.attributes.color
+      const posArr = positionAttr.array
+      const colArr = colorAttr.array
       let offset = currentPointCount * 3
 
       for (let i = 0; i < newPoints.length; i++) {
@@ -160,10 +169,9 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
 
       currentPointCount += newPoints.length
 
-      geometry.attributes.position.needsUpdate = true
-      geometry.attributes.color.needsUpdate = true
+      positionAttr.needsUpdate = true
+      colorAttr.needsUpdate = true
       bufferManager.updateDrawRange(currentPointCount)
-
       markNeedsRender()
     } catch (err) {
       logger.error('addPoints failed', err)
@@ -249,7 +257,18 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
 
       lastFrameTime = time
     } catch (err) {
-      logger.error('渲染循环崩溃', err)
+      const gl = renderer ? renderer.getContext() : null
+      const glError = gl ? gl.getError() : 'N/A'
+      logger.error('[animate] 渲染循环崩溃', {
+        errorName: err?.name,
+        errorMessage: err?.message,
+        errorStack: err?.stack,
+        currentPointCount,
+        webglError: glError,
+        sceneChildren: scene ? scene.children.length : 'N/A',
+        geometryCount: pointCloud?.geometry?.attributes?.position?.count,
+        drawRange: pointCloud?.geometry?.drawRange,
+      })
       showToast({ message: '3D 渲染异常，请重启应用', position: 'bottom' })
       if (animationId) {
         cancelAnimationFrame(animationId)
