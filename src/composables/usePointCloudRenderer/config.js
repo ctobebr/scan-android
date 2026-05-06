@@ -15,12 +15,13 @@
  * @property {number} maxBufferSize - accumulationBuffer 最大缓冲区大小
  */
 
-// 设置初始缓冲区容量的目的是：一次性分配大内存的副作用确实大于 GPU 全量更新的开销 ，这就是我们选择动态扩容策略的原因
+// 初始容量直接设为最大点数，避免运行时扩容带来的性能问题和 Three.js 限制
+// 50万点 * 3(float) * 4(字节) * 2(位置+颜色) ≈ 12MB，现代移动端设备完全可承受
 
 /** @type {RendererConfig} */
 export const DEFAULT_RENDERER_CONFIG = Object.freeze({
   maxPoints: 500000,
-  initialCapacity: 50000,
+  initialCapacity: 500000,
   targetFps: 30,
   pixelRatioMax: 2,
   cameraFov: 70,
