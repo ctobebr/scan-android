@@ -3,6 +3,39 @@
     <div ref="container" class="three-container">
       <!-- 摄像头预览容器（供 CameraPreview.attach 使用） -->
       <div id="cameraPreview" class="camera-preview-overlay"></div>
+
+      <!-- 采集进度卡片 -->
+      <div v-if="collectionProgress.isCollecting" class="collection-progress-card">
+        <div class="progress-icon">
+          <svg class="radar-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="3" fill="#2a7aff"/>
+            <circle cx="12" cy="12" r="6" stroke="#2a7aff" stroke-width="1.5" opacity="0.6"/>
+            <circle cx="12" cy="12" r="9" stroke="#2a7aff" stroke-width="1" opacity="0.3"/>
+            <path d="M12 3L12 6" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
+            <path d="M12 18L12 21" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
+            <path d="M3 12L6 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
+            <path d="M18 12L21 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="progress-title">采集中...</div>
+        <div class="progress-bar-container">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
+          </div>
+          <div class="progress-percentage">{{ Math.round(progressPercentage) }}%</div>
+        </div>
+        <div class="progress-stats">
+          <div class="stat-row">
+            <span class="stat-label">已采集:</span>
+            <span class="stat-value">{{ collectionProgress.currentPoints.toLocaleString() }} 点</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">剩余:</span>
+            <span class="stat-value">{{ collectionProgress.remainingTime }} 秒</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 将按钮和统计信息放在 three-container 内部 -->
       <div class="overlay-controls">
         <button class="back-btn" @click="goBack" aria-label="Back">
@@ -95,7 +128,7 @@ defineOptions({
   name: 'PointCloudView',
 })
 
-import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick, onActivated, onDeactivated } from 'vue'
+import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick, onActivated, onDeactivated, computed } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
@@ -187,6 +220,23 @@ let _hasCleaned = false
 // 开发环境标志
 // const isDev = ref(import.meta.env.DEV)
 const isDev = true
+
+// ==============================================
+// 采集进度相关状态
+// ==============================================
+const collectionProgress = ref({
+  isCollecting: false,
+  currentPoints: 0,
+  scanTimeSeconds: 30, // 从设备读取的扫描时间，默认30秒
+  elapsedTime: 0,      // 已采集时间（秒）
+  remainingTime: 0     // 剩余时间（秒）
+})
+
+// 倒计时定时器
+let countdownTimer = null
+
+// 是否已获取扫描时间
+const hasScanTime = ref(false)
 
 // ==============================================
 // 辅助函数
@@ -932,6 +982,9 @@ function createSessionParser() {
     onEndPreview: async () => {
       return cameraHelper.stopPreview()
     },
+    onScanTimeResponse: (data) => {
+      handleScanTimeResponse(data)
+    },
     onPhotoSessionEnded: async () => {
       // 当前点位拍照结束，保存点位数据
       await saveCurrentBatch()
@@ -944,6 +997,9 @@ function createSessionParser() {
       batchButtons.value.push(dataBatchCounter.value)
       isCollecting.value = false
       logger.debug('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
+
+      // 停止采集进度显示
+      stopCollectionProgress()
 
       // 停止会话解析器，清理资源但保持 parser 实例
       await stopSessionParser()
@@ -993,6 +1049,9 @@ async function subscribeToBluetoothNotifications(deviceId) {
             }
           })
           currentBatchData.pointCount += points.length
+
+          // 更新采集进度中的点云计数
+          collectionProgress.value.currentPoints = currentBatchData.pointCount
 
           // 达到上限时只提示，不停止订阅和采集
           // 后续的点云数据会在接收时被丢弃（见上面的检查）
@@ -1129,10 +1188,117 @@ async function startDataStream() {
   isCollecting.value = true
 
   // 先重置状态  再去发送开始指令
-  startSessionParser()
+  await startSessionParser()
+
+  // 发送读取扫描时间指令（在蓝牙订阅建立后）
+  await readScanTimeFromDevice()
+
+  // 等待扫描时间读取完成后再启动进度显示
+  // 给设备响应时间，最多等待2秒
+  let waitCount = 0
+  while (!hasScanTime.value && waitCount < 20) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    waitCount++
+  }
+
+  // 启动采集进度显示
+  startCollectionProgress()
+
   bluetoothStore.handleSendStart()
   logger.debug('startDataStream click', '开始新点位采集，点位编号:', dataBatchCounter.value + 1)
 }
+
+// ==============================================
+// 扫描时间相关函数
+// ==============================================
+
+/**
+ * 从设备读取扫描时间
+ */
+async function readScanTimeFromDevice() {
+  try {
+    if (bluetoothStore.connectionStatus !== 2) {
+      logger.debug('设备未连接，使用默认扫描时间 30 秒')
+      collectionProgress.value.scanTimeSeconds = 30
+      hasScanTime.value = true
+      return
+    }
+
+    logger.debug('发送读取扫描时间指令')
+    await bluetoothStore.handleReadScanTime()
+    // 响应通过蓝牙数据回调处理
+  } catch (error) {
+    logger.error('读取扫描时间失败', error)
+    // 使用默认扫描时间 30 秒
+    collectionProgress.value.scanTimeSeconds = 30
+    hasScanTime.value = true
+  }
+}
+
+/**
+ * 处理扫描时间响应
+ * @param {Object|number} data - 扫描时间数据
+ */
+function handleScanTimeResponse(data) {
+  if (data && typeof data === 'object' && data.seconds !== undefined) {
+    collectionProgress.value.scanTimeSeconds = parseInt(data.seconds)
+  } else if (typeof data === 'number') {
+    collectionProgress.value.scanTimeSeconds = parseInt(data)
+  } else {
+    collectionProgress.value.scanTimeSeconds = 30
+  }
+  hasScanTime.value = true
+  logger.debug('[PointCloud] 扫描时间设置:', collectionProgress.value.scanTimeSeconds)
+}
+
+// ==============================================
+// 采集进度相关函数
+// ==============================================
+
+/**
+ * 启动采集进度倒计时
+ */
+function startCollectionProgress() {
+  // 初始化进度状态
+  collectionProgress.value.isCollecting = true
+  collectionProgress.value.currentPoints = 0
+  collectionProgress.value.elapsedTime = 0
+  collectionProgress.value.remainingTime = collectionProgress.value.scanTimeSeconds
+
+  // 启动倒计时定时器，每秒更新一次
+  countdownTimer = setInterval(() => {
+    collectionProgress.value.elapsedTime++
+    collectionProgress.value.remainingTime = Math.max(0, collectionProgress.value.scanTimeSeconds - collectionProgress.value.elapsedTime)
+
+    // 倒计时结束，清理定时器
+    if (collectionProgress.value.remainingTime <= 0) {
+      clearInterval(countdownTimer)
+      countdownTimer = null
+    }
+  }, 1000)
+}
+
+/**
+ * 停止采集进度倒计时
+ */
+function stopCollectionProgress() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+  collectionProgress.value.isCollecting = false
+  collectionProgress.value.elapsedTime = 0
+  collectionProgress.value.remainingTime = 0
+}
+
+/**
+ * 计算进度百分比
+ */
+const progressPercentage = computed(() => {
+  if (collectionProgress.value.scanTimeSeconds === 0) return 0
+  const percentage = (collectionProgress.value.elapsedTime / collectionProgress.value.scanTimeSeconds) * 100
+  return Math.min(percentage, 100)
+})
 
 // ==============================================
 // 初始化和设置函数
@@ -2101,6 +2267,137 @@ const handleSettingClick = () => {
   border-color: rgba(255, 255, 255, 0.08);
 }
 
+/* ========== 采集进度卡片 ========== */
+.collection-progress-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 280px;
+  background: rgba(16, 22, 32, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -40%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+.progress-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radar-icon {
+  width: 100%;
+  height: 100%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+.progress-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.progress-bar-container {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2a7aff, #4d9eff);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px rgba(42, 122, 255, 0.5);
+  animation: shimmer 2s linear infinite;
+  background-size: 200% 100%;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.progress-percentage {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 40px;
+  text-align: right;
+}
+
+.progress-stats {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.stat-value {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
 /* ========== 移动端适配 ========== */
 @media (max-width: 768px) {
   .overlay-controls {
@@ -2178,6 +2475,35 @@ const handleSettingClick = () => {
     padding: 10px 20px;
     min-width: 80px;
     font-size: 14px;
+  }
+
+  /* 移动端采集进度卡片适配 */
+  .collection-progress-card {
+    width: 240px;
+    padding: 20px;
+  }
+
+  .progress-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .progress-title {
+    font-size: 16px;
+  }
+
+  .progress-bar {
+    height: 6px;
+  }
+
+  .progress-percentage {
+    font-size: 12px;
+    min-width: 36px;
+  }
+
+  .stat-label,
+  .stat-value {
+    font-size: 12px;
   }
 }
 </style>
