@@ -239,6 +239,11 @@ let countdownTimer = null
 const hasScanTime = ref(false)
 
 // ==============================================
+// 点云拼接相关状态
+// ==============================================
+const isStitching = ref(false)
+
+// ==============================================
 // 辅助函数
 // ==============================================
 
@@ -451,6 +456,94 @@ const confirmSave = async () => {
 // ==============================================
 // 数据管理函数
 // ==============================================
+
+/**
+ * 从文件加载点云数据
+ * @param {string} folderName - 文件夹名
+ * @param {number} batchId - 点位ID
+ * @returns {Promise<Array>} 点云数据数组
+ */
+async function loadPointCloudFromFile(folderName, batchId) {
+  try {
+    const filePath = `pointcloud/${folderName}/Batch_${String(batchId).padStart(3, '0')}/pointcloud.txt`
+    const content = await storage.file.read(filePath)
+    if (!content) return []
+
+    // 解析点云文件内容
+    const lines = content.split('\n').filter(line => line.trim())
+    // 跳过文件头
+    const dataLines = lines[0]?.includes('x(m)') ? lines.slice(1) : lines
+
+    const points = []
+    dataLines.forEach(line => {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length >= 3) {
+        const x = parseFloat(parts[0])
+        const y = parseFloat(parts[1])
+        const z = parseFloat(parts[2])
+        if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+          // 转换单位：米 → 分米（与现有渲染逻辑一致）
+          points.push({ x: x * 10, y: y * 10, z: z * 10 })
+        }
+      }
+    })
+
+    return points
+  } catch (e) {
+    logger.warn(`读取点云文件失败: ${folderName}/Batch_${batchId}`, e)
+    return []
+  }
+}
+
+/**
+ * 调用点云拼接算法（占位函数，等待算法实现）
+ * @param {Array} batchesData - 各站位的点云数据
+ * @returns {Promise<Array>} 拼接后的点云
+ */
+async function callStitchingAlgorithm(batchesData) {
+  // TODO: 算法同事实现拼接逻辑
+  // 目前简单合并所有点云数据
+  const allPoints = []
+  batchesData.forEach(batch => {
+    if (batch.points && batch.points.length > 0) {
+      allPoints.push(...batch.points)
+    }
+  })
+  return allPoints
+}
+
+/**
+ * 拼接所有站位的点云数据
+ * @returns {Promise<Array>} 拼接后的点云数据
+ */
+async function stitchAllPointClouds() {
+  if (!currentSessionId || dataBatchCounter.value === 0) {
+    return []
+  }
+
+  // 1. 收集所有站位的点云数据
+  const allBatchesData = []
+  const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+
+  for (let i = 1; i <= dataBatchCounter.value; i++) {
+    try {
+      const batchData = await loadPointCloudFromFile(tempFolderName, i)
+      if (batchData && batchData.length > 0) {
+        allBatchesData.push({
+          batchId: i,
+          points: batchData
+        })
+      }
+    } catch (e) {
+      logger.warn(`加载点位 ${i} 点云数据失败`, e)
+    }
+  }
+
+  // 2. 调用算法进行拼接
+  const stitchedPoints = await callStitchingAlgorithm(allBatchesData)
+
+  return stitchedPoints
+}
 
 /**
  * 加载现有批次按钮（如果存在）
@@ -937,6 +1030,23 @@ function createSessionParser() {
         )
         throw new Error('Device disconnected before starting camera preview.')
       }
+
+      // ===== 新增：启动后台点云拼接 =====
+      // 在拍照阶段后台进行点云拼接，不阻塞拍照流程
+      if (dataBatchCounter.value > 0) {
+        logger.debug('[PointCloud] 拍照阶段启动后台点云拼接')
+        isStitching.value = true
+        // 启动后台拼接，不等待
+        stitchAllPointClouds().then(stitchedData => {
+          logger.debug('[PointCloud] 后台点云拼接完成，等待拍照结束显示')
+          // 将拼接结果暂存，等待拍照结束后显示
+          window._stitchedPointCloudData = stitchedData
+        }).catch(error => {
+          logger.error('后台点云拼接失败', error)
+          window._stitchedPointCloudData = null
+        })
+      }
+
       return cameraHelper.startPreview('cameraPreview')
     },
     onSendCameraReady: async () => {
@@ -1003,6 +1113,42 @@ function createSessionParser() {
 
       // 停止会话解析器，清理资源但保持 parser 实例
       await stopSessionParser()
+
+      // ===== 新增：显示后台拼接结果 =====
+      // 等待后台拼接完成（如果还在进行中）
+      const waitForStitching = async () => {
+        let attempts = 0
+        const maxAttempts = 100 // 最多等待10秒（100 * 100ms）
+
+        while (window._stitchedPointCloudData === undefined && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+          attempts++
+        }
+
+        return window._stitchedPointCloudData
+      }
+
+      try {
+        // 等待后台拼接完成
+        const stitchedData = await waitForStitching()
+
+        // 清空渲染器并显示拼接结果
+        if (renderer && typeof renderer.resetPointCloud === 'function') {
+          renderer.resetPointCloud()
+        }
+        if (stitchedData && stitchedData.length > 0) {
+          renderer.addPoints(stitchedData)
+          pointCount.value = stitchedData.length
+          logger.debug('[PointCloud] 显示拼接结果，总点数:', stitchedData.length)
+        }
+      } catch (error) {
+        logger.error('显示拼接结果失败', error)
+        showToast({ message: '点云显示失败', position: 'bottom' })
+      } finally {
+        isStitching.value = false
+        // 清理暂存数据
+        window._stitchedPointCloudData = undefined
+      }
     },
   })
 
@@ -1082,7 +1228,8 @@ function initAndStartRenderingTimer () {
     if (accumulationBuffer.length >= MIN_BATCH_SIZE) {
       const toRender = accumulationBuffer.splice(0, Math.min(accumulationBuffer.length, 1000))
       if (toRender.length > 0) {
-        renderer.addPoints(toRender)
+        // 新需求：采集过程不实时渲染点云，仅更新计数
+        // renderer.addPoints(toRender)
         pointCount.value += toRender.length
       }
     }
