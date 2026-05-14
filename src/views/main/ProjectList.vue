@@ -22,7 +22,7 @@
             </span>
           </div> -->
           <div class="title">{{ item.name }}</div>
-          <div class="date">{{ formatDate(item.sortTime) }} | {{ item.source }}</div>
+          <div class="date">{{ item.date }} | {{ item.source }}</div>
         </div>
         <!-- <div class="actions">
           <i class="icon-share" title="分享"></i>
@@ -40,20 +40,6 @@ import noImg from '@/assets/img/noImg.png'
 
 const folderStore = useFoldersStore()
 
-/**
- * 格式化时间戳为日期字符串
- * @param {number} timestamp - 时间戳（毫秒）
- * @returns {string} 格式化后的日期，如：2024-01-15 14:30
- */
-const formatDate = (timestamp) => {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 // 处理图片加载失败
 const handleImageError = (event, item, index) => {
   console.error(`图片加载失败 [${index}]:`, item.name, item.thumbnail)
@@ -68,19 +54,19 @@ const projectListItems = computed(() => {
       {
         name: '加载中...',
         thumbnail: noImg,
-        sortTime: Date.now(),
+        date: '项目1',
         source: '云台',
       },
       {
         name: '加载中...',
         thumbnail: noImg,
-        sortTime: Date.now(),
+        date: '项目2',
         source: '云台',
       },
       {
         name: '加载中...',
         thumbnail: noImg,
-        sortTime: Date.now(),
+        date: '项目3',
         source: '云台',
       },
     ]
@@ -89,7 +75,8 @@ const projectListItems = computed(() => {
 })
 
 // 初始化时，onMounted和onActivated都会执行
-onMounted(() => {})
+onMounted(() => {
+})
 onActivated(() => {
 })
 // 响应 props.projects 的变化
@@ -195,17 +182,12 @@ onActivated(() => {
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   margin-bottom: 12px;
-  position: relative;
-  min-height: 180px;
 }
 
 .thumbnail {
   width: 100%;
   height: 180px;
   overflow: hidden;
-  position: absolute;
-  top: 0;
-  left: 0;
 }
 
 .thumbnail img {
@@ -216,21 +198,6 @@ onActivated(() => {
 
 .info {
   padding: 16px;
-  border-radius: 20px;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 50%, transparent 100%);
-  position: relative;
-  z-index: 1;
-  min-height: 180px;
-}
-
-.info .title {
-  color: white;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
-}
-
-.info .date {
-  color: rgba(255,255,255,0.9);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 
 .status-bar {

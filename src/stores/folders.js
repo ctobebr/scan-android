@@ -244,6 +244,7 @@ export const useFoldersStore = defineStore('folders', () => {
           id: folder.name,
           name: folder.projectName || folder.name,
           thumbnail: folder.thumbnail || noImg,
+          date: folder.displayName || folder.sessionId || '',
           source: '云台',
         }
       })
