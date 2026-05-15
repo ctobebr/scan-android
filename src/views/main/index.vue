@@ -29,7 +29,7 @@
       <button class="connect-button" @click="toggleConnectionDialog">
         <img :src="getConnectIconSrc()" alt="Connection Status" class="connect-icon" />
       </button>
-      <button class="btn-start" @click="handleStartRecord">开始采集</button>
+      <button class="btn-start" :disabled="_isNavigating" @click="handleStartRecord">开始采集</button>
       <!-- <button class="btn-start" @click="handleOverivew">全景预览</button> -->
     </div>
 
@@ -127,7 +127,7 @@ onMounted(async () => {
   await lockToPortrait()
   await StatusBar.setOverlaysWebView({ overlay: false })
   await StatusBar.setBackgroundColor({ color: '#e6f7ff' })
-  bluetoothStore.autoScanOnEnter()
+  bluetoothStore.initBluetoothOnly()
 
   // 使用 store 加载项目文件夹列表，MainView作为容器，负责整体数据管理和初始化，逻辑上看不放在其下的动态组件中去做会更好一点
   await folderStore.loadProjectFolders()
@@ -146,13 +146,11 @@ onActivated(async () => {
   await lockToPortrait()
   await StatusBar.setOverlaysWebView({ overlay: false })
   await StatusBar.setBackgroundColor({ color: '#e6f7ff' })
-  // 重新扫描以获取最新的设备状态
+  _isNavigating.value = false
+  await folderStore.loadProjectFolders()
   if (showConnectionDialog.value) {
     bluetoothStore.autoScanOnEnter()
   }
-
-  // 页面激活时刷新项目列表，确保获取最新数据
-  // await folderStore.refreshFolders()
 })
 
 onBeforeUnmount(() => {
@@ -160,6 +158,8 @@ onBeforeUnmount(() => {
 // const handleOverivew = () => {
 //   router.push('/overview')
 // }
+const _isNavigating = ref(false)
+
 const handleStartRecord = () => {
   if (connectionStatus.value != 2) {
     showToast({
@@ -168,11 +168,18 @@ const handleStartRecord = () => {
     })
     return
   }
+  if (_isNavigating.value) return
+  _isNavigating.value = true
+
   closeConnectionDialog()
-  router.push({ name: 'PointCloud' })
   showToast({
     message: '请旋转手机，并放置在云台上',
     position: 'bottom',
+    duration: 2000,
+  })
+  router.push({
+    name: 'PointCloud',
+    query: { mode: 'collect' }
   })
 }
 

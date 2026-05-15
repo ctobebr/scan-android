@@ -25,6 +25,8 @@ export const TEMP_PREFIX = 'a7f3c9d1-'
  */
 export const BATCH_PREFIX = 'Batch_'
 
+export const PICTURE_FOLDER = 'allPicture'
+
 /**
  * 批次编号长度（补零后的位数）
  * @constant {number}

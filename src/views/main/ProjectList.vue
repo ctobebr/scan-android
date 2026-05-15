@@ -1,50 +1,58 @@
 <template>
   <div class="project-list-container">
-    <!-- 项目列表内容区域 (可滚动) -->
-    <div class="content-area">
-      <div v-if="projectListItems.length === 0 && !folderStore.loading" class="empty-state">
+    <div
+      class="content-area"
+      ref="contentAreaRef"
+    >
+      <div v-if="showEmptyState" class="empty-state">
         <p>暂无项目</p>
       </div>
 
-      <div v-for="(item, index) in projectListItems" :key="item.id || index" class="list-item">
-        <div class="thumbnail">
-          <img
-            :src="item.thumbnail || noImg"
-            :alt="`Project  ${index + 1} Thumbnail`"
-            @error="handleImageError($event, item, index)"
-          />
+      <div
+        v-else
+        class="virtual-container"
+        :style="{ height: effectiveTotalHeight + 'px', position: 'relative' }"
+      >
+        <div
+          class="virtual-list"
+          :style="{ transform: `translateY(${effectiveOffsetY}px)` }"
+        >
+          <div
+            v-for="(item, index) in visibleProjectItems"
+            :key="item._virtualIndex"
+            class="list-item"
+            :class="{ 'is-skeleton': item.isSkeleton }"
+            @click="handleItemClick(item)"
+          >
+            <div class="thumbnail">
+              <img
+                :data-src="item.thumbnail || noImg"
+                :src="isVirtualMode ? undefined : (item.thumbnail || noImg)"
+                :alt="`Project ${item._virtualIndex + 1} Thumbnail`"
+                @error="handleImageError($event, item, item._virtualIndex)"
+              />
+            </div>
+            <div class="info">
+              <div class="title">{{ item.name }}</div>
+              <div class="date">{{ formatDate(item.sortTime) }} | {{ item.source }}</div>
+            </div>
+          </div>
         </div>
-        <div class="info">
-          <!-- <div class="status-bar">
-            <span class="status-label">{{ item.status }}</span>
-            <span class="action-link" @click="toggleStatus(index)">
-              {{ item.status === '未活跃' ? '设为活跃' : '设为未活跃' }} >
-            </span>
-          </div> -->
-          <div class="title">{{ item.name }}</div>
-          <div class="date">{{ formatDate(item.sortTime) }} | {{ item.source }}</div>
-        </div>
-        <!-- <div class="actions">
-          <i class="icon-share" title="分享"></i>
-          <i class="icon-more" title="更多"></i>
-        </div> -->
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, onActivated } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { useFoldersStore } from '@/stores/folders'
+import { useVirtualList } from '@/composables/useVirtualList'
 import noImg from '@/assets/img/noImg.png'
 
 const folderStore = useFoldersStore()
+const router = useRouter()
 
-/**
- * 格式化时间戳为日期字符串
- * @param {number} timestamp - 时间戳（毫秒）
- * @returns {string} 格式化后的日期，如：2024-01-15 14:30
- */
 const formatDate = (timestamp) => {
   if (!timestamp) return ''
   const date = new Date(timestamp)
@@ -54,87 +62,169 @@ const formatDate = (timestamp) => {
   return `${year}-${month}-${day}`
 }
 
-// 处理图片加载失败
+const contentAreaRef = ref(null)
+let observer = null
+let attachedCount = 0
+
+const resolveUrl = (url) => {
+  try {
+    return new URL(url, window.location.origin).href
+  } catch {
+    return url
+  }
+}
+
+const normalizeSrc = (src) => {
+  if (!src) return src
+  try {
+    return new URL(src, window.location.origin).href
+  } catch {
+    return src
+  }
+}
+
 const handleImageError = (event, item, index) => {
   console.error(`图片加载失败 [${index}]:`, item.name, item.thumbnail)
-  // 切换到默认图片
+  event.target.dataset.src = noImg
   event.target.src = noImg
 }
 
-// 直接从 store 获取项目列表数据
-const projectListItems = computed(() => {
-  if (folderStore.loading) {
-    return [
-      {
-        name: '加载中...',
-        thumbnail: noImg,
-        sortTime: Date.now(),
-        source: '云台',
+const observeListItems = () => {
+  nextTick(() => {
+    if (!contentAreaRef.value) return
+    if (observer) observer.disconnect()
+
+    attachedCount = 0
+
+    observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const img = entry.target.querySelector('img')
+          if (!img) return
+
+          if (entry.isIntersecting) {
+            const dataSrc = img.getAttribute('data-src')
+            if (dataSrc) {
+              const expectedSrc = resolveUrl(dataSrc)
+              const currentSrc = normalizeSrc(img.src)
+              if (currentSrc !== expectedSrc) {
+                img.src = dataSrc
+                attachedCount++
+              }
+            }
+          }
+        })
       },
       {
-        name: '加载中...',
-        thumbnail: noImg,
-        sortTime: Date.now(),
-        source: '云台',
+        root: contentAreaRef.value,
+        rootMargin: '300px 0px',
+        threshold: 0.01,
       },
-      {
-        name: '加载中...',
-        thumbnail: noImg,
-        sortTime: Date.now(),
-        source: '云台',
-      },
-    ]
+    )
+
+    const items = contentAreaRef.value.querySelectorAll('.list-item')
+    items.forEach((el) => observer.observe(el))
+  })
+}
+
+const handleItemClick = (item) => {
+  if (!item.sessionId) {
+    console.warn('项目缺少 sessionId，无法跳转:', item)
+    return
   }
-  return folderStore.folderItems.map((item) => ({ ...item, isSkeleton: false }))
+  router.push({
+    name: 'PointCloud',
+    query: {
+      mode: 'view',
+      currentSessionId: item.sessionId,
+    },
+  })
+}
+
+const folderDataItems = computed(() => folderStore.folderItems)
+
+const skeletonItems = [
+  { name: '加载中...', thumbnail: noImg, sortTime: Date.now(), source: '云台', isSkeleton: true },
+  { name: '加载中...', thumbnail: noImg, sortTime: Date.now(), source: '云台', isSkeleton: true },
+  { name: '加载中...', thumbnail: noImg, sortTime: Date.now(), source: '云台', isSkeleton: true },
+]
+
+const showEmptyState = computed(
+  () => folderDataItems.value.length === 0 && !folderStore.loading,
+)
+
+const isVirtualMode = computed(
+  () => !folderStore.loading && folderDataItems.value.length > 0,
+)
+
+const {
+  visibleItems: virtualItems,
+  totalHeight,
+  offsetY,
+} = useVirtualList(folderDataItems, contentAreaRef)
+
+const visibleProjectItems = computed(() => {
+  if (!isVirtualMode.value) {
+    return skeletonItems.map((item, i) => ({ ...item, _virtualIndex: i }))
+  }
+  return virtualItems.value
 })
 
-// 初始化时，onMounted和onActivated都会执行
-onMounted(() => {})
+// 骨架屏模式下覆盖 totalHeight，确保容器有足够高度展示占位项
+// 使用固定 ITEM_HEIGHT = 192（与 useVirtualList 中保持一致）
+const SKELETON_ITEM_HEIGHT = 192
+
+const effectiveTotalHeight = computed(() => {
+  if (!isVirtualMode.value) {
+    return skeletonItems.length * SKELETON_ITEM_HEIGHT
+  }
+  return totalHeight.value
+})
+
+const effectiveOffsetY = computed(() => {
+  if (!isVirtualMode.value) return 0
+  return offsetY.value
+})
+
+onMounted(() => {
+  observeListItems()
+})
+
 onActivated(() => {
+  observeListItems()
 })
-// 响应 props.projects 的变化
-// watch(
-//   () => props.projects,
-//   (newVal) => {
-//     const arr = Array.isArray(newVal) ? newVal : (newVal && newVal.value) || []
-//     if (arr && Array.isArray(arr)) {
-//       const mapped = arr.map((p, idx) => ({
-//         id: idx + 1,
-//         name: p.projectName || p.name || p.folderName || `项目 ${idx + 1}`,
-//         thumbnail: p.thumbUri || p.thumbnail || noImg,
-//         status: '已保存',
-//         date: p.displayName || p.sessionId || '',
-//         source: p.projectName || '手机',
-//       }))
 
-//       // 按照 date 字段进行排序，最新的在前
-//       const sortedMapped = mapped.sort((a, b) => {
-//         // 尝试将 a.date 和 b.date 转换为 Date 对象进行比较
-//         // 如果转换失败 (isNaN)，则将其视为最早的时间 (负无穷)
-//         const dateA = new Date(a.date)
-//         const dateB = new Date(b.date)
+onBeforeUnmount(() => {
+  if (observer) {
+    observer.disconnect()
+    observer = null
+  }
+})
 
-//         // 如果 a 的日期更晚（更大），则返回负数，a 排在 b 前面
-//         if (dateA > dateB) return -1
-//         // 如果 a 的日期更早（更小），则返回正数，b 排在 a 前面
-//         if (dateA < dateB) return 1
-//         // 如果相等，则保持原有顺序
-//         return 0
-//       })
+let lastRenderStart = -1
+let lastRenderEnd = -1
 
-//       projectListItems.value = sortedMapped
-//     }
-//     // 调试：输出接收到的项目数组，便于诊断缩略图路径问题
-//   },
-//   { immediate: true },
-// )
+watch(visibleProjectItems, (items) => {
+  if (items.length === 0) return
+  const s = items[0]._virtualIndex
+  const e = items[items.length - 1]._virtualIndex + 1
+  if (s !== lastRenderStart || e !== lastRenderEnd) {
+    lastRenderStart = s
+    lastRenderEnd = e
+    observeListItems()
+  }
+})
 
-// 切换项目状态
-// const toggleStatus = (index) => {
-//   const item = projectListItems.value[index]
-//   item.status = item.status === '未活跃' ? '活跃' : '未活跃'
-// }
-</script>
+watch(
+  () => folderStore.loading,
+  (newVal, oldVal) => {
+    if (oldVal && !newVal) {
+      lastRenderStart = -1
+      lastRenderEnd = -1
+      observeListItems()
+    }
+  },
+)</script>
 
 <!-- 注意：这里使用了 scoped 样式，它只会影响当前组件 -->
 <style scoped>
@@ -231,6 +321,28 @@ onActivated(() => {
 .info .date {
   color: rgba(255,255,255,0.9);
   text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+/* 骨架屏加载动画 */
+.list-item.is-skeleton .thumbnail img {
+  opacity: 0.6;
+}
+
+.list-item.is-skeleton {
+  animation: skeletonPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* 加载中的文字样式 */
+.list-item.is-skeleton .info .title {
+  font-size: 16px;
+  font-weight: 400;
+  opacity: 0.8;
+  letter-spacing: 2px;
 }
 
 .status-bar {

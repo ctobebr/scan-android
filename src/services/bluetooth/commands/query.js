@@ -26,13 +26,18 @@ export class QueryCommands {
    */
   async sendReadPitchOffset(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送读取俯仰角零偏指令')
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_PITCH_OFFSET,
-      null,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_PITCH_OFFSET,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_PITCH_OFFSET' }).error('发送读取俯仰角零偏指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -58,7 +63,12 @@ export class QueryCommands {
     ) {
       logger.withContext({ readCommand }).warn('Command might not be a standard read command')
     }
-    await this.parent.sendCommand(deviceId, serviceUUID, characteristicUUID, readCommand, null)
+    try {
+      await this.parent.sendCommand(deviceId, serviceUUID, characteristicUUID, readCommand, null)
+    } catch (error) {
+      logger.withContext({ deviceId, command: `0x${readCommand.toString(16)}` }).error('发送读取参数指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -69,12 +79,17 @@ export class QueryCommands {
    */
   async sendReadRotateSpeed(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送读取转动速度指令')
-    await this.sendReadCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_ROTATE_SPEED,
-    )
+    try {
+      await this.sendReadCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_ROTATE_SPEED,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_ROTATE_SPEED' }).error('发送读取转动速度指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -85,12 +100,17 @@ export class QueryCommands {
    */
   async sendReadScanCycles(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送读取扫描时间指令')
-    await this.sendReadCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_SCAN_TIME,
-    )
+    try {
+      await this.sendReadCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_SCAN_TIME,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_SCAN_TIME' }).error('发送读取扫描时间指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -101,12 +121,17 @@ export class QueryCommands {
    */
   async sendReadPitchLimit(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送读取俯仰角上下限指令')
-    await this.sendReadCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_PITCH_LIMIT,
-    )
+    try {
+      await this.sendReadCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_PITCH_LIMIT,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_PITCH_LIMIT' }).error('发送读取俯仰角上下限指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -117,12 +142,17 @@ export class QueryCommands {
    */
   async sendReadCalibParam(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送读取标定参数指令')
-    await this.sendReadCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_CALIB_PARAM,
-    )
+    try {
+      await this.sendReadCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_CALIB_PARAM,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_CALIB_PARAM' }).error('发送读取标定参数指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -133,13 +163,18 @@ export class QueryCommands {
    */
   async sendReadOutputXYZ(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送查询输出XYZ状态指令')
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ,
-      null,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_OUTPUT_XYZ' }).error('发送查询输出XYZ状态指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -150,13 +185,18 @@ export class QueryCommands {
    */
   async sendReadOutputPolar(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送查询输出极坐标状态指令')
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR,
-      null,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_OUTPUT_POLAR' }).error('发送查询输出极坐标状态指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -176,13 +216,18 @@ export class QueryCommands {
     const buffer = new ArrayBuffer(1) // 1 byte axis
     const view = new Uint8Array(buffer)
     view[0] = axis === 'x' ? 0 : 1 // 轴值：x=0, y=1
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_V_PID,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_V_PID,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_V_PID' }).error('发送读取速度环PID指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -202,12 +247,17 @@ export class QueryCommands {
     const buffer = new ArrayBuffer(1) // 1 byte axis
     const view = new Uint8Array(buffer)
     view[0] = axis === 'x' ? 0 : 1 // 轴值：x=0, y=1
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      DEVICE_DATA_COMMANDS.CMD_READ_A_PID,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_A_PID,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_A_PID' }).error('发送读取角度环PID指令失败', error)
+      throw error
+    }
   }
 }

@@ -50,31 +50,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
     async autoScanOnEnter() {
       logger.info('开始自动扫描流程')
 
-      // 权限
-      logger.debug('检查蓝牙和位置权限')
-      if (!(await this.requestRequirePermissions())) {
-        logger.warn('权限请求被拒绝')
-        showToast({ message: '需要蓝牙和位置权限才能扫描设备', position: 'bottom' })
-        return
-      }
-
-      // 初始化
-      logger.debug('初始化蓝牙服务')
-      try {
-        await bluetoothService.initBluetooth()
-        logger.info('蓝牙初始化成功')
-      } catch (err) {
-        logger.error('蓝牙初始化失败', err)
-        alert('蓝牙初始化失败，请重试')
-        return
-      }
-
-      // 蓝牙状态
-      logger.debug('检查蓝牙状态')
-      const enabled = await bluetoothService.isBluetoothEnabled()
-      if (!enabled) {
-        logger.warn('蓝牙未开启')
-        alert('请先打开手机蓝牙')
+      // 权限 + 初始化 + 蓝牙状态（不扫描）
+      const ready = await this.initBluetoothOnly()
+      if (!ready) {
         return
       }
 
@@ -92,6 +70,44 @@ export const useBluetoothStore = defineStore('bluetooth', {
         this.scanning = false
         logger.debug('扫描结束')
       }
+    },
+
+    /**
+     * 仅初始化蓝牙（不扫描）
+     * @returns {Promise<boolean>} 是否准备好进行蓝牙操作
+     * @description 权限检查 → 蓝牙初始化 → 蓝牙状态检查，不触发设备扫描
+     */
+    async initBluetoothOnly() {
+      // 权限
+      logger.debug('检查蓝牙和位置权限')
+      if (!(await this.requestRequirePermissions())) {
+        logger.warn('权限请求被拒绝')
+        showToast({ message: '需要蓝牙和位置权限才能扫描设备', position: 'bottom' })
+        return false
+      }
+
+      // 初始化
+      logger.debug('初始化蓝牙服务')
+      try {
+        await bluetoothService.initBluetooth()
+        logger.info('蓝牙初始化成功')
+      } catch (err) {
+        logger.error('蓝牙初始化失败', err)
+        alert('蓝牙初始化失败，请重试')
+        return false
+      }
+
+      // 蓝牙状态
+      logger.debug('检查蓝牙状态')
+      const enabled = await bluetoothService.isBluetoothEnabled()
+      if (!enabled) {
+        logger.warn('蓝牙未开启')
+        alert('请先打开手机蓝牙')
+        return false
+      }
+
+      logger.info('蓝牙初始化完成，状态正常')
+      return true
     },
 
     // ========== 统一处理设备断开 ==========

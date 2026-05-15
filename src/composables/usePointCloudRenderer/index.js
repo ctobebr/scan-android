@@ -46,8 +46,8 @@ export function usePointCloudRenderer(container, options = {}) {
   })
 
   // 初始化
-  function init() {
-    rendererCore.init()
+  function init(customCameraConfig = null) {
+    rendererCore.init(customCameraConfig) //  传递参数到底层
   }
 
   // 返回统一的接口
@@ -61,6 +61,10 @@ export function usePointCloudRenderer(container, options = {}) {
     markNeedsRender: rendererCore.markNeedsRender,
     getMemoryStats: resourceManager.getMemoryStats,
     isWebGLContextValid: rendererCore.isWebGLContextValid,
+    // 暴露场景和相机访问方法
+    getScene: rendererCore.getScene,
+    getCamera: rendererCore.getCamera,
+    getCurrentPointCount: rendererCore.getCurrentPointCount,
   }
 }
 

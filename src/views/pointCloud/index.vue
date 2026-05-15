@@ -7,14 +7,19 @@
       <!-- 采集进度卡片 -->
       <div v-if="collectionProgress.isCollecting" class="collection-progress-card">
         <div class="progress-icon">
-          <svg class="radar-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="12" cy="12" r="3" fill="#2a7aff"/>
-            <circle cx="12" cy="12" r="6" stroke="#2a7aff" stroke-width="1.5" opacity="0.6"/>
-            <circle cx="12" cy="12" r="9" stroke="#2a7aff" stroke-width="1" opacity="0.3"/>
-            <path d="M12 3L12 6" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
-            <path d="M12 18L12 21" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
-            <path d="M3 12L6 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
-            <path d="M18 12L21 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round"/>
+          <svg
+            class="radar-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle cx="12" cy="12" r="3" fill="#2a7aff" />
+            <circle cx="12" cy="12" r="6" stroke="#2a7aff" stroke-width="1.5" opacity="0.6" />
+            <circle cx="12" cy="12" r="9" stroke="#2a7aff" stroke-width="1" opacity="0.3" />
+            <path d="M12 3L12 6" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
+            <path d="M12 18L12 21" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
+            <path d="M3 12L6 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
+            <path d="M18 12L21 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
           </svg>
         </div>
         <div class="progress-title">采集中...</div>
@@ -27,7 +32,9 @@
         <div class="progress-stats">
           <div class="stat-row">
             <span class="stat-label">已采集:</span>
-            <span class="stat-value">{{ collectionProgress.currentPoints.toLocaleString() }} 点</span>
+            <span class="stat-value"
+              >{{ collectionProgress.currentPoints.toLocaleString() }} 点</span
+            >
           </div>
           <div class="stat-row">
             <span class="stat-label">剩余:</span>
@@ -48,13 +55,24 @@
         <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
           预览
         </button>
+        <button
+          @click="handleStitch('cloud0')"
+          class="stitch-btn"
+          :disabled="saving || !enableSave || isStitching"
+        >
+          {{ isStitching ? stitchProgressText || '拼接中...' : '拼接' }}
+        </button>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
 
         <div class="right-button-group">
           <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick" alt="编辑" />
-          <button class="capture-btn" @click="startDataStream"></button>
+          <button
+            class="capture-btn"
+            :disabled="bluetoothStore.connectionStatus !== 2 || isCollecting.value"
+            @click="startDataStream"
+          ></button>
           <img
             src="@/assets/img/setting.png"
             class="setIcon"
@@ -92,13 +110,7 @@
         </div>
         <!-- 内存调试按钮（仅开发环境显示） -->
         <!-- <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button> -->
-        <!-- 设备断开提示层 -->
-        <div v-if="deviceDisconnected" class="disconnect-overlay">
-          <div class="disconnect-message">
-            <span>设备已断开连接</span>
-            <button class="disconnect-back-btn" @click="goBack">返回</button>
-          </div>
-        </div>
+
         <!-- 保存对话框 -->
         <div v-if="showSaveDialog" class="save-dialog-overlay">
           <div class="save-dialog-content">
@@ -128,8 +140,18 @@ defineOptions({
   name: 'PointCloudView',
 })
 
-import { ref, onMounted, onUnmounted, onBeforeUnmount, watch, nextTick, onActivated, onDeactivated, computed } from 'vue'
-import { useRouter, onBeforeRouteLeave } from 'vue-router'
+import {
+  ref,
+  onMounted,
+  onUnmounted,
+  onBeforeUnmount,
+  watch,
+  nextTick,
+  onActivated,
+  onDeactivated,
+  computed,
+} from 'vue'
+import { useRouter, onBeforeRouteLeave, useRoute } from 'vue-router'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
 import { useKeepAliveStore } from '@/stores/keepAlive'
@@ -143,6 +165,10 @@ import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
 // 导入全局日志工具
 import { createLogger } from '@/utils/logger'
+// 导入多站点支持
+import * as THREE from 'three'
+import { stations } from '@/config/pointCloudStations.js'
+import { loadAllStations, loadStation } from '@/utils/pointCloudLoader.js'
 
 // 创建点云页面专用日志记录器
 const logger = createLogger('PointCloudView')
@@ -153,49 +179,71 @@ import {
   enableScreenKeepAwake,
   disableScreenKeepAwake,
 } from '@/utils/device/screen'
-import { generateOptimizedSessionId } from '@/utils/format/sessionId'
-import * as storage from '@/api/pointCloudStorage'
-import { showLoadingToast, closeToast, showToast } from 'vant'
 
+import * as storage from '@/api/pointCloudStorage'
+import PtcrPlugin from '@/plugins/ptcr'
+import { showToast, showLoadingToast, closeToast } from 'vant'
+import { generateOptimizedSessionId } from '@/utils/format/sessionId'
+
+// ==============================================
+// 路由和状态管理
+// ==============================================
+const router = useRouter()
+const route = useRoute()
 const bluetoothStore = useBluetoothStore()
 const folderStore = useFoldersStore()
 const keepAliveStore = useKeepAliveStore()
-const router = useRouter()
 
+// ==============================================
+// 响应式状态
+// ==============================================
 const container = ref(null)
-let renderer = null
-let isRendererReady = ref(false)
-let pointCount = ref(0)
-let frameRate = ref(0)
-const isCollecting = ref(false)
-const saving = ref(false)
-let enableSave = ref(false)
+const pointCount = ref(0)
+const frameRate = ref(0)
 const showSaveDialog = ref(false)
 const projectName = ref('')
+const saving = ref(false)
+const enableSave = ref(false)
+const isCollecting = ref(false)
+const isRendererReady = ref(false)
 const saveInput = ref(null)
-const lastSavedFolder = ref(null)
+const dataBatchCounter = ref(0)
+const lastSavedFolder = ref('')
 const savedDuringDialog = ref(false)
 
-// 会话相关数据
-let currentSessionId = null // 整个项目的会话ID
-let currentBatchData = {
-  // 当前点位的数据
-  rawLines: [],
-  photos: [],
-  pointCount: 0, // 当前点位点云计数
-}
-let dataBatchCounter = ref(0) // 当前点位编号
+const isStitching = ref(false)
+const stitchProgressText = ref('')
+let ptcrProgressHandle = null
 
+// 当前批次数据
+let currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
+
+// 当前会话ID
+let currentSessionId = null
+
+// 渲染器实例
+let renderer = null
+
+// 蓝牙数据解析器
 let parser = null
+
+// 点云数据缓冲区
 const accumulationBuffer = []
 const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
-const MAX_POINTS_PER_BATCH = 500000 // 单个点位最大点云数
+const MAX_POINTS_PER_BATCH = 100000 // 单个点位最大点云数
+
+// 延迟渲染相关状态
+const deferredRenderBuffer = [] // 延迟渲染缓冲区（采集期间暂存所有点数据）
+let backgroundRenderTask = null // 后台渲染任务标识（rAF ID 或 setTimeout ID）
+let isBackgroundRendering = false // 后台渲染是否正在运行
+const BACKGROUND_RENDER_CHUNK = 2000 // 每帧渲染点数
 /**
  * setInterval定时器，每33检查一次缓冲区====缓冲区最多10000个点，超出这个上限时，丢弃缓冲区中旧的点数据
  * 如果正在采集 && 缓冲区至少有3个点
  * 则批量取出数据（最多1000个）
  * 一次性渲染到threejs
  */
+// 积累定时器
 let accumulationTimer = null
 const ACCUMULATION_INTERVAL = 33
 const MIN_BATCH_SIZE = 3 //  进行渲染一次最少需要点数
@@ -203,12 +251,9 @@ let pauseListener = null
 let resumeListener = null
 let hasStarted = false
 
-// 设备断开相关状态
-const deviceDisconnected = ref(false)
 let disconnectUnregister = null
 
 // 记录进入后台前的采集状态
-let wasCollectingBeforePause = false
 const isNavigating = ref(false)
 // 批次按钮状态
 const batchButtons = ref([]) // 存储已经生成的点位序号
@@ -217,9 +262,21 @@ const batchButtons = ref([]) // 存储已经生成的点位序号
 let unsubscribeBatchChange = null
 let _hasCleaned = false
 
+// init() 中 setTimeout 的定时器 ID，用于取消未执行的初始化
+let initTimeoutId = null
+// 组件是否已卸载的标志，防止异步初始化在卸载后执行
+let isUnmounted = false
+
 // 开发环境标志
 // const isDev = ref(import.meta.env.DEV)
 const isDev = true
+
+// ==============================================
+// 多站点显示相关状态
+// ==============================================
+let anchorSprites = [] // 锚点精灵数组
+const raycaster = new THREE.Raycaster() // 射线检测器
+const mouse = new THREE.Vector2() // 鼠标位置
 
 // ==============================================
 // 采集进度相关状态
@@ -228,8 +285,8 @@ const collectionProgress = ref({
   isCollecting: false,
   currentPoints: 0,
   scanTimeSeconds: 30, // 从设备读取的扫描时间，默认30秒
-  elapsedTime: 0,      // 已采集时间（秒）
-  remainingTime: 0     // 剩余时间（秒）
+  elapsedTime: 0, // 已采集时间（秒）
+  remainingTime: 0, // 剩余时间（秒）
 })
 
 // 倒计时定时器
@@ -294,27 +351,21 @@ function isLeavingSession(to) {
 const goBack = async () => {
   // 防止重复触发
   if (isNavigating.value) {
-    logger.debug('[PointCloud] 导航中，忽略重复的返回操作')
     return
   }
 
   try {
     // 设置导航状态
     isNavigating.value = true
-    logger.info('[PointCloud] 用户点击返回，开始导航...')
 
     // 立即开始路由返回
     await router.back()
-    // logger.debug('[PointCloud] 路由返回已触发')
-
   } catch (error) {
-    logger.error('[PointCloud] 返回操作失败', error)
     showToast({ message: '返回失败', position: 'bottom' })
   } finally {
     // 重置导航状态
     setTimeout(() => {
       isNavigating.value = false
-      logger.debug('[PointCloud] 导航状态已重置')
     }, 100)
   }
 }
@@ -405,27 +456,6 @@ const confirmSave = async () => {
   // 先关闭保存对话框
   closeSaveDialog()
 
-  // try {
-  //   // 显示加载中提示
-  //   showLoadingToast({
-  //     message: '保存中...',
-  //     forbidClick: true,
-  //   })
-  //   // 执行保存操作
-  //   await performSave(folderName)
-
-  //   // 保存成功后关闭加载提示
-  //   closeToast()
-  // } catch (error) {
-  //   // 保存失败也关闭加载提示
-  //   closeToast()
-  //   showToast({
-  //     message: '保存失败',
-  //     position: 'bottom',
-  //   })
-  // } finally {
-  //   router.back()
-  // }
   try {
     showLoadingToast({
       message: '保存中...',
@@ -495,6 +525,7 @@ function resetForNewProject() {
 function resetForNewBatch() {
   currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
   clearAccumulationBuffer()
+  deferredRenderBuffer.length = 0
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
     pointCount.value = 0
@@ -545,14 +576,15 @@ async function saveCurrentBatch() {
  * @returns {Promise} - 保存操作的 Promise
  */
 function performSave(folderName) {
-  logger.debug('====folderName',folderName)
-  return new Promise( async (resolve, reject) => {
+  logger.debug('====folderName', folderName)
+  return new Promise(async (resolve, reject) => {
     saving.value = true
     try {
       const tempName = storage.path.getTempSessionName(currentSessionId)
       // 确定目标文件夹名
       let targetName
-      if (folderName && folderName !== currentSessionId) {  // 用户有自定义项目名称
+      if (folderName && folderName !== currentSessionId) {
+        // 用户有自定义项目名称
         targetName = folderName
       } else {
         // 用户没输入项目名，直接使用会话ID
@@ -612,6 +644,505 @@ const delSessionDir = async () => {
 
 let isDeletingSession = false
 
+async function getDataDir() {
+  if (savedDuringDialog.value && lastSavedFolder.value) {
+    return lastSavedFolder.value
+  }
+  return storage.path.getTempSessionName(currentSessionId)
+}
+
+function getCurrentBatchNo() {
+  const idx = dataBatchCounter.value - 1
+  return String(Math.max(0, idx)).padStart(3, '0')
+}
+
+async function handleStitch(mode) {
+  if (isStitching.value) {
+    showToast({ message: '拼接进行中，请等待', position: 'bottom' })
+    return
+  }
+  if (dataBatchCounter.value < 1) {
+    showToast({ message: '请先采集点位数据', position: 'bottom' })
+    return
+  }
+
+  try {
+    isStitching.value = true
+    stitchProgressText.value = '检查插件状态...'
+
+    const diagResult = await debugCheckPlugin()
+    if (!diagResult.ok) {
+      showToast({
+        message: `PtcrPlugin 不可用: ${diagResult.error || '插件未安装到 APK'}`,
+        position: 'bottom',
+        duration: 5000,
+      })
+      return
+    }
+
+    const dataDir = await getDataDir()
+    const batchNo = getCurrentBatchNo()
+
+    stitchProgressText.value = '拼接中...'
+    showLoadingToast({
+      message: `拼接中 (${mode})...`,
+      forbidClick: true,
+      duration: 0,
+    })
+
+    let result
+    if (mode === 'cloud0') {
+      result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
+    } else if (mode === 'raw') {
+      result = await PtcrPlugin.generateCloudByRaw({ dataDir, batchNo })
+    } else if (mode === 'standard') {
+      result = await PtcrPlugin.generateCloudByStandard({ dataDir, batchNo })
+    }
+
+    closeToast()
+
+    if (result.ok) {
+      showToast({
+        message: `拼接完成: ${result.outputFile?.split('/').pop() || 'success'}`,
+        position: 'bottom',
+        duration: 3000,
+      })
+      logger.debug('[PtcrPlugin] 拼接成功', result)
+    } else {
+      showToast({
+        message: `拼接失败: ${result.error || '未知错误'}`,
+        position: 'bottom',
+        duration: 5000,
+      })
+      logger.error('[PtcrPlugin] 拼接失败', result)
+    }
+  } catch (e) {
+    closeToast()
+
+    const errMsg = e.message || String(e)
+    if (errMsg.includes('not implemented on android')) {
+      showToast({
+        message: 'PtcrPlugin 未安装到手机，请重新构建 APK',
+        position: 'bottom',
+        duration: 5000,
+      })
+    } else {
+      showToast({ message: `拼接异常: ${errMsg}`, position: 'bottom', duration: 5000 })
+    }
+    logger.error('[PtcrPlugin] handleStitch error', e)
+  } finally {
+    isStitching.value = false
+  }
+}
+
+async function setupPtcrProgressListener() {
+  try {
+    ptcrProgressHandle = await PtcrPlugin.addListener('ptcrProgress', (event) => {
+      stitchProgressText.value = `[${event.stage}] ${event.task}: ${event.message}`
+      logger.debug('[PtcrPlugin] progress', event)
+    })
+  } catch (e) {
+    logger.warn('[PtcrPlugin] 无法注册进度监听器:', e.message)
+  }
+}
+
+// ==============================================
+// 自动拼接算法相关函数
+// ==============================================
+
+/**
+ * 触发自动拼接（拍照完成后调用）
+ */
+async function triggerAutoStitch() {
+  setTimeout(async () => {
+    try {
+      console.log('\n')
+      console.log('═══════════════════════════════════════════════════════')
+      console.log('[AutoStitch] 🚀 开始自动拼接算法')
+      console.log('═══════════════════════════════════════════════════════')
+      console.log('[AutoStitch] ⏰ 时间:', new Date().toLocaleString('zh-CN'))
+      console.log('[AutoStitch] 📍 当前点位:', dataBatchCounter.value)
+      console.log('═══════════════════════════════════════════════════════\n')
+
+      // 1. 获取数据目录
+      const dataDir = await getDataDir()
+      const batchNo = getCurrentBatchNo()
+
+      console.log('[AutoStitch] 📂 拼接参数:')
+      console.log('   ├─ dataDir:', dataDir)
+      console.log('   └─ batchNo:', batchNo)
+
+      const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
+      const photoDir = `${batchFolder}/allPicture`
+
+      console.log('\n[AutoStitch] 📁 完整路径:')
+      console.log('   ├─ 批次目录:', batchFolder)
+      console.log('   └─ 照片目录:', photoDir)
+
+      // 2. 检查输入文件
+      console.log('\n[AutoStitch] 🔍 开始检查输入文件...')
+      await checkInputFiles(dataDir, batchNo)
+
+      // 3. 诊断插件健康状况
+      console.log('\n[AutoStitch] 🔬 诊断 PtcrPlugin...')
+      const diagResult = await debugCheckPlugin()
+      if (!diagResult.ok) {
+        console.error('[AutoStitch] ❌ 插件不可用，跳过拼接')
+        isStitching.value = false
+        showToast({
+          message: `PtcrPlugin 不可用: ${diagResult.error}`,
+          position: 'bottom',
+          duration: 5000,
+        })
+        return
+      }
+      console.log('[AutoStitch] ✅ PtcrPlugin 已就绪\n')
+      console.log('   ├─ Python:', diagResult.detail.python)
+      console.log('   ├─ 脚本目录:', diagResult.detail.scripts)
+      console.log('   └─ ONNX模型:', diagResult.detail.onnx)
+      console.log('')
+
+      // 4. 显示 UI 进度提示
+      isStitching.value = true
+      stitchProgressText.value = '准备中...'
+
+      // 5. 设置进度监听器
+      let progressHandle = null
+      const progressHandler = (event) => {
+        console.log('───────────────────────────────────────────────────')
+        console.log(`[AutoStitch] 📊 进度更新: ${event.stage}`)
+        console.log(`   ├─ 任务: ${event.task}`)
+        console.log(`   └─ 消息: ${event.message}`)
+        console.log('───────────────────────────────────────────────────')
+
+        stitchProgressText.value = `${event.stage}: ${event.message}`
+
+        if (event.stage === 'finish') {
+          console.log('[AutoStitch] ✅ 拼接任务完成')
+        } else if (event.stage === 'error') {
+          console.error(`[AutoStitch] ❌ 拼接任务失败: ${event.message}`)
+        }
+      }
+
+      try {
+        progressHandle = await PtcrPlugin.addListener('ptcrProgress', progressHandler)
+      } catch (e) {
+        console.warn('[AutoStitch] ⚠️ 无法注册进度监听器:', e.message)
+      }
+
+      // 6. 调用生成算法
+      console.log('\n[AutoStitch] 🚀 调用 generateCloud0()...')
+      console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
+      const startTime = Date.now()
+
+      const result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
+
+      const elapsed = Date.now() - startTime
+
+      // 7. 处理结果
+      console.log('\n')
+      console.log('═══════════════════════════════════════════════════════')
+      console.log('[AutoStitch] 📦 算法返回结果')
+      console.log('═══════════════════════════════════════════════════════')
+      console.log('   ├─ ok:', result.ok ? '✅ 成功' : '❌ 失败')
+      console.log('   ├─ task:', result.task)
+      console.log('   ├─ 算法耗时:', result.elapsedMs, 'ms', `(${(result.elapsedMs / 1000).toFixed(1)}s)`)
+      console.log('   ├─ JS 调用耗时:', elapsed, 'ms', `(${(elapsed / 1000).toFixed(1)}s)`)
+      console.log('   ├─ outputFile:', result.outputFile || '(无)')
+      console.log('   ├─ error:', result.error || '(无)')
+      console.log('   └─ log 长度:', result.log?.length || 0, '字符')
+      console.log('═══════════════════════════════════════════════════════\n')
+
+      if (result.ok) {
+        console.log('[AutoStitch] 🎉 拼接成功！')
+
+        if (result.outputFile) {
+          await checkOutputFiles(result.outputFile, dataDir, batchNo)
+        }
+
+        if (result.log) {
+          console.log('\n[AutoStitch] 📜 完整日志内容:')
+          console.log('───────────────────────────────────────────────────')
+          console.log(result.log)
+          console.log('───────────────────────────────────────────────────\n')
+        }
+
+        isStitching.value = false
+        stitchProgressText.value = '拼接完成'
+
+        showToast({
+          message: '全景图生成成功',
+          position: 'bottom',
+          duration: 2000,
+        })
+      } else {
+        console.error('[AutoStitch] ❌ 拼接失败')
+        console.error('   ├─ 错误:', result.error)
+        console.error('   └─ 日志:', result.log)
+
+        isStitching.value = false
+        stitchProgressText.value = '拼接失败'
+
+        showToast({
+          message: `拼接失败: ${result.error || '未知错误'}`,
+          position: 'bottom',
+          duration: 3000,
+        })
+      }
+    } catch (error) {
+      console.error('\n')
+      console.error('═══════════════════════════════════════════════════════')
+      console.error('[AutoStitch] ❌ 异常')
+      console.error('═══════════════════════════════════════════════════════')
+      console.error('   ├─ 错误:', error.message)
+      console.error('   └─ 堆栈:', error.stack)
+
+      if (error.message && error.message.includes('not implemented on android')) {
+        console.error('')
+        console.error('🔧 解决方案: 需要重新构建 APK 并安装到手机')
+        console.error('   cd e:\\scanAndroid\\scan\\android')
+        console.error('   rd /s /q app\\build')
+        console.error('   .\\gradlew.bat assembleDebug --no-daemon')
+        console.error('   adb install -r app\\build\\outputs\\apk\\debug\\app-debug.apk')
+      }
+
+      console.error('═══════════════════════════════════════════════════════\n')
+
+      isStitching.value = false
+      stitchProgressText.value = '拼接异常'
+
+      showToast({
+        message: 'PtcrPlugin 未安装到手机，请重新构建 APK',
+        position: 'bottom',
+        duration: 5000,
+      })
+    }
+  }, 2000)
+}
+
+/**
+ * 检查输入文件是否存在
+ */
+async function checkInputFiles(dataDir, batchNo) {
+  const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
+  const photoDir = `${batchFolder}/allPicture`
+
+  console.log('[AutoStitch] 📂 检查输入文件...')
+  console.log('   ├─ 批次目录:', batchFolder)
+  console.log('   └─ 照片目录:', photoDir)
+
+  try {
+    const batchDirExists = await storage.file.exists(batchFolder)
+    console.log(
+      `[AutoStitch] ${batchDirExists ? '✅' : '❌'} 批次目录: ${batchDirExists ? '存在' : '不存在'}`,
+    )
+
+    if (batchDirExists) {
+      const { files: entries } = await storage.file.readDir(batchFolder)
+      console.log('[AutoStitch] 📋 批次目录文件列表:')
+      entries.forEach((f, i) => {
+        console.log(`   ${i + 1}. ${f.type === 'directory' ? '📁' : '📄'} ${f.name}`)
+      })
+
+      const pointCloudFiles = entries.filter(
+        (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
+      )
+
+      if (pointCloudFiles.length > 0) {
+        console.log(`[AutoStitch] ✅ 找到 ${pointCloudFiles.length} 个点云文件:`)
+        pointCloudFiles.forEach((f, i) => {
+          console.log(`   ${i + 1}. ${f.name} (${(f.size / 1024).toFixed(1)} KB)`)
+        })
+      } else {
+        console.log('[AutoStitch] ❌ 未找到点云文件 (pointCloud_data_*.txt)')
+      }
+    } else {
+      console.log('[AutoStitch] ❌ 批次目录不存在')
+    }
+
+    console.log('')
+    const photoDirExists = await storage.file.exists(photoDir)
+    console.log(
+      `[AutoStitch] ${photoDirExists ? '✅' : '❌'} 照片目录: ${photoDirExists ? '存在' : '不存在'}`,
+    )
+
+    if (photoDirExists) {
+      const { files: entries } = await storage.file.readDir(photoDir)
+      const photoFiles = entries.filter(
+        (f) => f.type === 'file' && (f.name.endsWith('.jpg') || f.name.endsWith('.png') || f.name.endsWith('.jpeg')),
+      )
+
+      console.log(`[AutoStitch] 📷 照片文件: ${photoFiles.length} 张`)
+
+      if (photoFiles.length > 0) {
+        console.log('   前 5 张:')
+        photoFiles.slice(0, 5).forEach((f, i) => {
+          console.log(`   ${i + 1}. ${f.name} (${(f.size / 1024).toFixed(1)} KB)`)
+        })
+        if (photoFiles.length > 5) {
+          console.log(`   ... 还有 ${photoFiles.length - 5} 张`)
+        }
+      } else {
+        console.log('[AutoStitch] ⚠️ 照片目录为空')
+      }
+    } else {
+      console.log('[AutoStitch] ❌ 照片目录不存在')
+    }
+
+    console.log('')
+  } catch (error) {
+    console.error('[AutoStitch] ❌ 检查文件失败:', error.message)
+    console.error('   堆栈:', error.stack)
+  }
+}
+
+/**
+ * 检查输出文件
+ */
+async function checkOutputFiles(outputFile, dataDir, batchNo) {
+  console.log('[AutoStitch] 📦 检查输出文件...')
+
+  const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
+  const outputDir = `${batchFolder}/ptcr_output`
+  const outputPath = `${outputDir}/ply_raw.ply`
+
+  console.log(`   ├─ 算法报告路径: ${outputFile}`)
+  console.log(`   └─ 实际检查路径: ${outputPath}`)
+
+  try {
+    const exists = await storage.file.exists(outputPath)
+    console.log(`[AutoStitch] ${exists ? '✅' : '❌'} 主输出文件: ${exists ? '存在' : '不存在'}`)
+
+    if (exists) {
+      const stat = await storage.file.stat(outputPath)
+      const fileSize = stat.size ? `${(stat.size / 1024 / 1024).toFixed(2)} MB` : '未知'
+      console.log(`   └─ 文件大小: ${fileSize}`)
+    } else {
+      console.log(`   ⚠️ 文件可能尚未刷新到磁盘，或算法报告路径有误`)
+    }
+
+    // 2. 检查工作目录
+    const workDir = outputDir
+
+    console.log('')
+    const workDirExists = await storage.file.exists(workDir)
+    console.log(
+      `[AutoStitch] ${workDirExists ? '✅' : '❌'} 工作目录: ${workDirExists ? '存在' : '不存在'}`,
+    )
+    console.log('   └─ 路径:', workDir)
+
+    if (workDirExists) {
+      const { files: entries } = await storage.file.readDir(workDir)
+      console.log('[AutoStitch] 📋 工作目录文件列表:')
+      entries.forEach((f, i) => {
+        console.log(`   ${i + 1}. ${f.type === 'directory' ? '📁' : '📄'} ${f.name}`)
+      })
+
+      console.log('')
+      const keyFiles = [
+        { name: 'pano_raw.png', desc: '全景图' },
+        { name: 'depth_sparse_ref.png', desc: '稀疏深度图' },
+        { name: 'ply_raw.ply', desc: '点云文件' },
+        { name: 'params.txt', desc: '相机参数' },
+      ]
+
+      console.log('[AutoStitch] 🔑 关键输出文件:')
+      for (const file of keyFiles) {
+        const filePath = `${workDir}/${file.name}`
+        const fileExists = await storage.file.exists(filePath)
+
+        if (fileExists) {
+          const stat = await storage.file.stat(filePath)
+          const fileSize = stat.size ? `${(stat.size / 1024).toFixed(1)} KB` : '未知'
+          console.log(`   ✅ ${file.name} (${file.desc}): ${fileSize}`)
+
+          if (file.name === 'params.txt') {
+            try {
+              const statResult = await storage.file.stat(filePath)
+              console.log(`      └─ 文件大小: ${(statResult.size / 1024).toFixed(1)} KB`)
+            } catch (e) {
+              console.log(`      └─ 无法读取状态: ${e.message}`)
+            }
+          }
+        } else {
+          console.log(`   ❌ ${file.name} (${file.desc}): 不存在`)
+        }
+      }
+
+      console.log('')
+    } else {
+      console.log('[AutoStitch] ⚠️ 工作目录不存在')
+    }
+  } catch (error) {
+    console.error('[AutoStitch] ❌ 检查输出文件失败:', error.message)
+  }
+}
+
+// ==============================================
+// PtcrPlugin 诊断函数
+// ==============================================
+
+/**
+ * 诊断 PtcrPlugin 是否完整可用
+ * 可在控制台直接调用: debugCheckPlugin()
+ */
+async function debugCheckPlugin() {
+  console.log('[PtcrDiag] 🔬 开始诊断 PtcrPlugin...')
+
+  const result = {
+    ok: false,
+    error: null,
+    detail: { python: '', scripts: '', onnx: '' },
+  }
+
+  try {
+    if (!PtcrPlugin) {
+      result.error = 'PtcrPlugin 未导入'
+      console.error('[PtcrDiag] ❌', result.error)
+      return result
+    }
+
+    console.log('[PtcrDiag] 📡 PtcrPlugin 对象:', Object.keys(PtcrPlugin).join(', '))
+
+    const methods = ['healthCheck', 'generateCloud0', 'generateCloudByRaw', 'generateCloudByStandard']
+    for (const m of methods) {
+      console.log(`[PtcrDiag]    ├─ ${m}:`, typeof PtcrPlugin[m])
+    }
+
+    try {
+      const hc = await PtcrPlugin.healthCheck()
+      console.log('[PtcrDiag] 🏥 healthCheck 返回:', JSON.stringify(hc))
+
+      result.ok = hc.ok === true
+      result.detail.python = hc.ok ? `Python OK (task: ${hc.task})` : `Python 失败: ${hc.error || '未知'}`
+      result.detail.scripts = hc.log || ''
+
+      if (!result.ok) {
+        result.error = hc.error || 'healthCheck 返回失败'
+      }
+    } catch (hcError) {
+      result.error = hcError.message || String(hcError)
+      result.detail.python = `healthCheck 调用失败: ${result.error}`
+
+      if (result.error.includes('not implemented on android')) {
+        result.detail.python = '❌ PtcrPlugin 未安装到 APK（not implemented on android）'
+        result.detail.scripts = '需要在 build.gradle 中包含 PtcrPlugin 并重新构建'
+        result.detail.onnx = 'APK 重建后自动部署'
+        console.error('[PtcrDiag] ❌ 插件未实现（APK 不含原生代码）')
+        console.error('[PtcrDiag] 🔧 解决: 重新构建 APK 并安装')
+        return result
+      }
+    }
+
+    console.log('[PtcrDiag] ✅ 诊断完成:', result.ok ? '插件可用' : `不可用: ${result.error}`)
+  } catch (e) {
+    result.error = e.message || String(e)
+    console.error('[PtcrDiag] ❌ 诊断异常:', result.error)
+  }
+
+  return result
+}
+
 // ==============================================
 // 资源清理函数
 // ==============================================
@@ -622,6 +1153,9 @@ let isDeletingSession = false
 function cleanupTimersAndListeners() {
   // 清理点云渲染定时器
   cleanupAccumulationTimer()
+
+  // 停止后台渲染任务
+  stopBackgroundRender()
 
   // 移除 resize 事件监听器
   if (renderer?.onResize) {
@@ -641,14 +1175,15 @@ function cleanupTimersAndListeners() {
  */
 function cleanupRenderer() {
   return new Promise((resolve) => {
-    setTimeout(() => {
-      if (renderer?.dispose && typeof renderer.dispose === 'function') {
-        renderer.dispose()
-      }
-      renderer = null
-      isRendererReady.value = false
-      resolve()
-    }, 100)
+    // 立即执行清理，不再使用 setTimeout 延迟
+    // 原因：setTimeout 会导致竞态条件，如果用户在延迟期间重新进入页面，
+    // 可能会出现 renderer 被 dispose 但动画循环仍在运行的情况
+    if (renderer?.dispose && typeof renderer.dispose === 'function') {
+      renderer.dispose()
+    }
+    renderer = null
+    isRendererReady.value = false
+    resolve()
   })
 }
 
@@ -659,7 +1194,8 @@ async function cleanupBluetoothSession() {
   try {
     bluetoothStore.setCleanupStatus(true) // 清理中
     await stopSessionParser() // 取消订阅
-    bluetoothStore.handleSendEnd() // 发送结束指令
+
+    bluetoothStore.handleSendEnd() // 发送结束指令-----取消订阅是取消接收下位机消息，上位机依旧可以给下位机发送消息
   } catch (e) {
     logger.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
@@ -674,7 +1210,6 @@ async function cleanupBluetoothSession() {
 function resetStateVariables(resetState) {
   isCollecting.value = false
   pointCount.value = 0
-  deviceDisconnected.value = false
 
   if (resetState) {
     hasStarted = false
@@ -720,12 +1255,7 @@ async function restoreSystemSettings(options) {
  * 记录采集状态并停止必要的资源
  */
 async function cleanupResourcesForPause() {
-  logger.debug('[PointCloud] cleanupResourcesForPause 开始执行')
-
   try {
-    // 1. 记录当前采集状态，用于恢复
-    wasCollectingBeforePause = isCollecting.value
-
     // 2. 检查是否处于拍照会话中
     const isInPhotoSession = parser?.protocolState?.photoSession?.active === true
 
@@ -737,18 +1267,13 @@ async function cleanupResourcesForPause() {
         logger.debug('[PointCloud] 正在采集（非拍照会话），停止会话解析器')
         await cleanupBluetoothSession()
       }
-    } else {
-      logger.debug('[PointCloud] 未在采集状态，无需停止会话解析器')
     }
 
     // 4. 停止屏幕常亮
     // logger.debug('[PointCloud] 停止屏幕常亮')
     await disableScreenKeepAwake()
-
   } catch (error) {
     logger.error('[PointCloud] 清理暂停资源时发生错误', error)
-  } finally {
-    logger.debug('[PointCloud] cleanupResourcesForPause 执行结束')
   }
 }
 
@@ -769,7 +1294,7 @@ async function cleanupResourcesForExit(options = {}) {
     disableImmersive = true,
     restoreStatusBar = true,
     resetState = true,
-    cleanupRenderer: shouldCleanupRenderer = true
+    cleanupRenderer: shouldCleanupRenderer = true,
   } = options
 
   if (_hasCleaned) {
@@ -778,38 +1303,62 @@ async function cleanupResourcesForExit(options = {}) {
   }
 
   _hasCleaned = true
-  logger.debug('[PointCloud] cleanupResourcesForExit 开始执行', { shouldCleanupRenderer })
 
   try {
     // 1. 清理定时器和事件监听器
     cleanupTimersAndListeners()
 
-    // 2. 根据选项决定是否清理渲染器资源
+    // 2. 清理多站点相关资源
+    cleanupMultiStationResources()
+
+    // 3. 根据选项决定是否清理渲染器资源
     if (shouldCleanupRenderer) {
       await cleanupRenderer()
     } else {
       logger.debug('[PointCloud] 跳过渲染器清理，保持点云数据')
     }
 
-    // 3. 清理蓝牙会话
+    // 4. 清理蓝牙会话
     await cleanupBluetoothSession()
 
-    // 4. 重置状态变量
+    // 5. 重置状态变量
     resetStateVariables(resetState)
 
-    // 5. 恢复系统设置
+    // 6. 恢复系统设置
     await restoreSystemSettings({
       restoreStatusBar,
       disableImmersive,
       disableKeepAwake,
-      restorePortrait
+      restorePortrait,
     })
-
   } catch (error) {
     logger.error('[PointCloud] 清理资源时发生错误', error)
   } finally {
     logger.debug('[PointCloud] cleanupResourcesForExit 执行结束')
   }
+}
+
+/**
+ * 清理多站点相关资源
+ */
+function cleanupMultiStationResources() {
+  // 移除点击事件监听
+  if (container.value) {
+    container.value.removeEventListener('click', onContainerClick)
+  }
+
+  // 清理锚点
+  if (renderer) {
+    const scene = renderer.getScene()
+    if (scene) {
+      anchorSprites.forEach((sprite) => {
+        scene.remove(sprite)
+        if (sprite.material.map) sprite.material.map.dispose()
+        sprite.material.dispose()
+      })
+    }
+  }
+  anchorSprites = []
 }
 
 /**
@@ -820,7 +1369,6 @@ function cleanupAccumulationTimer() {
   if (accumulationTimer) {
     clearInterval(accumulationTimer)
     accumulationTimer = null
-    logger.debug('[cleanupAccumulationTimer] 定时器已清理')
   }
 }
 
@@ -829,7 +1377,134 @@ function cleanupAccumulationTimer() {
  */
 function clearAccumulationBuffer() {
   accumulationBuffer.length = 0
-  logger.debug('[clearAccumulationBuffer] 缓冲区已清空')
+  deferredRenderBuffer.length = 0
+}
+
+function startBackgroundPointCloudRender() {
+  if (isBackgroundRendering) {
+    logger.debug('[BackgroundRender] 后台渲染任务已在运行')
+    return
+  }
+
+  isBackgroundRendering = true
+  const initialBufferSize = deferredRenderBuffer.length
+  console.log('[BackgroundRender] ===== 开始后台渲染 =====')
+  console.log(`[BackgroundRender] 初始缓冲区点数: ${initialBufferSize.toLocaleString()}`)
+  console.log(`[BackgroundRender] 每帧渲染点数: ${BACKGROUND_RENDER_CHUNK}`)
+  logger.debug('[BackgroundRender] 启动后台渲染，缓冲区点数:', initialBufferSize)
+
+  let totalRenderedInSession = 0
+  let frameCount = 0
+
+  function renderChunk() {
+    if (!isBackgroundRendering || !isRendererReady.value || !renderer) {
+      backgroundRenderTask = null
+      isBackgroundRendering = false
+      console.log('[BackgroundRender] ===== 后台渲染终止 =====')
+      console.log(
+        `[BackgroundRender] 本次会话渲染总数: ${totalRenderedInSession.toLocaleString()} 点`,
+      )
+      console.log(`[BackgroundRender] 渲染帧数: ${frameCount}`)
+      return
+    }
+
+    const chunk = deferredRenderBuffer.splice(0, BACKGROUND_RENDER_CHUNK)
+    const chunkSize = chunk.length
+    if (chunkSize > 0) {
+      renderer.addPoints(chunk)
+      pointCount.value += chunkSize
+      totalRenderedInSession += chunkSize
+      frameCount++
+
+      if (frameCount % 10 === 0 || chunkSize < BACKGROUND_RENDER_CHUNK) {
+        console.log(
+          `[BackgroundRender] 帧 ${frameCount}: 渲染 ${chunkSize} 点, 累计 ${totalRenderedInSession.toLocaleString()} 点, 缓冲区剩余 ${deferredRenderBuffer.length.toLocaleString()} 点`,
+        )
+      }
+    }
+
+    if (deferredRenderBuffer.length > 0) {
+      backgroundRenderTask = requestAnimationFrame(renderChunk)
+    } else if (isCollecting.value) {
+      backgroundRenderTask = setTimeout(() => {
+        if (deferredRenderBuffer.length > 0) {
+          backgroundRenderTask = requestAnimationFrame(renderChunk)
+        } else {
+          isBackgroundRendering = false
+          backgroundRenderTask = null
+          console.log('[BackgroundRender] ===== 后台渲染暂停（等待新数据）=====')
+          console.log(
+            `[BackgroundRender] 暂停前渲染总数: ${totalRenderedInSession.toLocaleString()} 点`,
+          )
+        }
+      }, 200)
+    } else {
+      isBackgroundRendering = false
+      backgroundRenderTask = null
+      console.log('[BackgroundRender] ===== 后台渲染结束 =====')
+      console.log(
+        `[BackgroundRender] 本次会话渲染总数: ${totalRenderedInSession.toLocaleString()} 点`,
+      )
+      console.log(`[BackgroundRender] 渲染帧数: ${frameCount}`)
+      console.log(`[BackgroundRender] 初始缓冲区: ${initialBufferSize.toLocaleString()} 点`)
+      logger.debug('[BackgroundRender] 后台渲染任务完成')
+    }
+  }
+
+  backgroundRenderTask = requestAnimationFrame(renderChunk)
+}
+
+function stopBackgroundRender() {
+  const wasRendering = isBackgroundRendering
+  const bufferRemaining = deferredRenderBuffer.length
+  isBackgroundRendering = false
+  if (backgroundRenderTask !== null) {
+    if (typeof backgroundRenderTask === 'number') {
+      cancelAnimationFrame(backgroundRenderTask)
+    } else {
+      clearTimeout(backgroundRenderTask)
+    }
+    backgroundRenderTask = null
+  }
+  if (wasRendering) {
+    console.log('[BackgroundRender] ===== 强制停止后台渲染 =====')
+    console.log(`[BackgroundRender] 停止时缓冲区剩余点数: ${bufferRemaining.toLocaleString()} 点`)
+    logger.debug('[BackgroundRender] 后台渲染已强制停止')
+  }
+}
+
+async function flushDeferredRender() {
+  stopBackgroundRender()
+
+  const initialBufferSize = deferredRenderBuffer.length
+  let totalFlushed = 0
+  let flushIterations = 0
+
+  console.log('[BackgroundRender] ===== 开始刷新延迟渲染缓冲区 =====')
+  console.log(`[BackgroundRender] 刷新前缓冲区点数: ${initialBufferSize.toLocaleString()} 点`)
+  console.log(`[BackgroundRender] 刷新每批处理点数: ${BACKGROUND_RENDER_CHUNK * 2}`)
+
+  while (deferredRenderBuffer.length > 0) {
+    const chunk = deferredRenderBuffer.splice(0, BACKGROUND_RENDER_CHUNK * 2)
+    const chunkSize = chunk.length
+    if (chunkSize > 0 && renderer && isRendererReady.value) {
+      renderer.addPoints(chunk)
+      pointCount.value += chunkSize
+      totalFlushed += chunkSize
+      flushIterations++
+
+      if (flushIterations % 5 === 0 || chunkSize < BACKGROUND_RENDER_CHUNK * 2) {
+        console.log(
+          `[BackgroundRender] 刷新进度: 已处理 ${totalFlushed.toLocaleString()} 点, 剩余 ${deferredRenderBuffer.length.toLocaleString()} 点`,
+        )
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 16))
+  }
+
+  console.log('[BackgroundRender] ===== 延迟渲染缓冲区刷新完成 =====')
+  console.log(`[BackgroundRender] 刷新总点数: ${totalFlushed.toLocaleString()} 点`)
+  console.log(`[BackgroundRender] 刷新迭代次数: ${flushIterations}`)
 }
 
 /**
@@ -892,6 +1567,9 @@ async function stopSessionParser() {
     // 清理定时器
     cleanupAccumulationTimer()
 
+    // 停止后台渲染
+    stopBackgroundRender()
+
     // 清空缓冲区
     clearAccumulationBuffer()
 
@@ -903,7 +1581,6 @@ async function stopSessionParser() {
 
     // 重置状态
     resetSessionParserState()
-
   } catch (error) {
     logger.error('[stopSessionParser] 停止解析器时发生错误', error)
   }
@@ -914,8 +1591,8 @@ async function stopSessionParser() {
  * @returns {boolean} - 设备是否已连接
  */
 function checkDeviceConnection() {
-  if (deviceDisconnected.value) {
-    logger.warn('[checkDeviceConnection] 设备已断开，无法订阅')
+  if (bluetoothStore.connectionStatus !== 2) {
+    logger.warn('[checkDeviceConnection] 设备未连接，无法订阅')
     return false
   }
   return true
@@ -930,30 +1607,18 @@ function createSessionParser() {
     enableDebug: true,
     getDataBatchCounter: () => `dataBatch_${dataBatchCounter.value.toString().padStart(3, '0')}`,
     onStartPreview: async () => {
-      // 拍照前再次检查连接状态
-      if (deviceDisconnected.value) {
-        logger.warn(
-          '[createSessionParser] Device disconnected before starting camera preview. Aborting.',
-        )
-        throw new Error('Device disconnected before starting camera preview.')
-      }
+      startBackgroundPointCloudRender()
       return cameraHelper.startPreview('cameraPreview')
     },
     onSendCameraReady: async () => {
       return bluetoothStore.handleSendCameraNextPhoto()
     },
     onTakePhoto: async ({ fileBaseName, meta }) => {
-      if (deviceDisconnected.value) {
-        logger.warn(
-          '[createSessionParser] Device disconnected before taking photo. Aborting photo capture.',
-        )
-        throw new Error('Device disconnected before taking photo.')
-      }
       try {
         // 构建目标目录路径：pointcloud/a7f3c9d1-{sessionId}/Batch_XXX
         const tempFolderName = storage.path.getTempSessionName(currentSessionId)
         const bid = dataBatchCounter.value
-        const targetDir = `pointcloud/${tempFolderName}/Batch_${String(bid).padStart(3, '0')}`
+        const targetDir = `pointcloud/${tempFolderName}/Batch_${String(bid).padStart(3, '0')}/allPicture`
         // 拍照并在后台保存（不阻塞主线程）
         const photoData = await cameraHelper.captureAndSave(
           fileBaseName + '====' + ++parser.reNameFlag,
@@ -966,12 +1631,6 @@ function createSessionParser() {
             name: photoData.fileName,
             filePath: photoData.filePath,
           })
-          if (currentBatchData.photos.length == 24) {
-            logger.debug(
-              '[PointCloud] 照片已添加到当前点位，当前照片数:',
-              currentBatchData.photos.length,
-            )
-          }
         }
         return photoData
       } catch (e) {
@@ -986,23 +1645,49 @@ function createSessionParser() {
       handleScanTimeResponse(data)
     },
     onPhotoSessionEnded: async () => {
-      // 当前点位拍照结束，保存点位数据
-      await saveCurrentBatch()
+      console.log('\n')
+      console.log('═══════════════════════════════════════════════════════')
+      console.log('[PhotoSession] 📸 拍照会话结束')
+      console.log('═══════════════════════════════════════════════════════')
+      console.log('[PhotoSession] 📍 当前点位:', dataBatchCounter.value)
+      console.log('[PhotoSession] 📊 点云数量:', currentBatchData.pointCount)
+      console.log('[PhotoSession] 📷 照片数量:', currentBatchData.photos.length)
+      console.log('[PhotoSession] 📝 数据行数:', currentBatchData.rawLines.length)
+      console.log('═══════════════════════════════════════════════════════\n')
 
-      // 更新点位计数器
+      // 1. 刷新延迟渲染
+      console.log('[PhotoSession] 🎨 刷新延迟渲染...')
+      await flushDeferredRender()
+      stopBackgroundRender()
+
+      // 2. 保存当前点位数据
+      console.log('[PhotoSession] 💾 保存当前点位数据...')
+      await saveCurrentBatch()
+      console.log('[PhotoSession] ✅ 点位数据保存完成')
+
+      // 3. 更新点位计数器
       dataBatchCounter.value++
       enableSave.value = true
 
-      // 添加按钮表示新生成的点位
+      // 4. 添加按钮
       batchButtons.value.push(dataBatchCounter.value)
       isCollecting.value = false
-      logger.debug('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
 
       // 停止采集进度显示
       stopCollectionProgress()
 
       // 停止会话解析器，清理资源但保持 parser 实例
+      console.log('[PhotoSession] 📍 更新点位计数器:', dataBatchCounter.value)
+
+      // 5. 停止会话解析器
+      console.log('[PhotoSession] 🛑 停止会话解析器...')
       await stopSessionParser()
+      console.log('[PhotoSession] ✅ 会话解析器已停止')
+
+      // 6. 触发自动拼接算法（拍照完成后自动运行）
+      console.log('[PhotoSession] 🚀 即将触发自动拼接算法...')
+      console.log('═══════════════════════════════════════════════════════\n')
+      triggerAutoStitch()
     },
   })
 
@@ -1016,55 +1701,60 @@ function createSessionParser() {
  */
 async function subscribeToBluetoothNotifications(deviceId) {
   try {
-    await bluetoothService.subscribeToNotifications(deviceId, NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, (uint8) => {
-      try {
-        // 检查单个点位点云数量上限
-        if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
-          return
-        }
-
-        const { points, errors } = parser.parse(uint8)
-        if (errors && errors.length > 0) {
-          logger.warn('parse errors', errors)
-        }
-        if (points && points.length > 0) {
-          // 检查缓冲区上限  超出上限时丢弃同等数量旧点位
-          if (accumulationBuffer.length > MAX_BUFFER_SIZE) {
-            const overflow = accumulationBuffer.length - MAX_BUFFER_SIZE + points.length
-            accumulationBuffer.splice(0, overflow)
-          }
-
-          accumulationBuffer.push(...points)
-          points.forEach((p) => {
-            // 根据数据类型决定保存格式
-            if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
-              // 完整数据：合并后的数据或单独的极坐标数据
-              // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
-              currentBatchData.rawLines.push(
-                `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
-              )
-            } else {
-              // 只有XYZ数据（单格式模式）
-              currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
-            }
-          })
-          currentBatchData.pointCount += points.length
-
-          // 更新采集进度中的点云计数
-          collectionProgress.value.currentPoints = currentBatchData.pointCount
-
-          // 达到上限时只提示，不停止订阅和采集
-          // 后续的点云数据会在接收时被丢弃（见上面的检查）
+    await bluetoothService.subscribeToNotifications(
+      deviceId,
+      NUS_SERVICE_UUID,
+      NUS_NOTIFY_CHAR_UUID,
+      (uint8) => {
+        try {
+          // 检查单个点位点云数量上限
           if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
-            logger.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
-            showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
-            // 注意：不停止订阅，蓝牙继续接收数据，但点云数据会被丢弃
+            return
           }
+
+          const { points, errors } = parser.parse(uint8)
+          if (errors && errors.length > 0) {
+            logger.warn('parse errors', errors)
+          }
+          if (points && points.length > 0) {
+            // 检查缓冲区上限  超出上限时丢弃同等数量旧点位
+            if (accumulationBuffer.length > MAX_BUFFER_SIZE) {
+              const overflow = accumulationBuffer.length - MAX_BUFFER_SIZE + points.length
+              accumulationBuffer.splice(0, overflow)
+            }
+
+            accumulationBuffer.push(...points)
+            points.forEach((p) => {
+              // 根据数据类型决定保存格式
+              if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
+                // 完整数据：合并后的数据或单独的极坐标数据
+                // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
+                currentBatchData.rawLines.push(
+                  `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
+                )
+              } else {
+                // 只有XYZ数据（单格式模式）
+                currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
+              }
+            })
+            currentBatchData.pointCount += points.length
+
+            // 更新采集进度中的点云计数
+            collectionProgress.value.currentPoints = currentBatchData.pointCount
+
+            // 达到上限时只提示，不停止订阅和采集
+            // 后续的点云数据会在接收时被丢弃（见上面的检查）
+            if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
+              logger.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
+              showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
+              // 注意：不停止订阅，蓝牙继续接收数据，但点云数据会被丢弃
+            }
+          }
+        } catch (e) {
+          logger.error('notification handler error', e)
         }
-      } catch (e) {
-        logger.error('notification handler error', e)
-      }
-    })
+      },
+    )
   } catch (e) {
     logger.warn('subscribeToNotifications failed', e)
   }
@@ -1076,15 +1766,12 @@ async function subscribeToBluetoothNotifications(deviceId) {
 - 点云渲染操作
 - 点计数更新
  */
-function initAndStartRenderingTimer () {
+function initAndStartRenderingTimer() {
   accumulationTimer = setInterval(() => {
     if (!isRendererReady.value || !isCollecting.value) return
     if (accumulationBuffer.length >= MIN_BATCH_SIZE) {
-      const toRender = accumulationBuffer.splice(0, Math.min(accumulationBuffer.length, 1000))
-      if (toRender.length > 0) {
-        renderer.addPoints(toRender)
-        pointCount.value += toRender.length
-      }
+      const toDefer = accumulationBuffer.splice(0, Math.min(accumulationBuffer.length, 1000))
+      deferredRenderBuffer.push(...toDefer)
     }
   }, ACCUMULATION_INTERVAL)
 }
@@ -1134,9 +1821,9 @@ async function startDataStream() {
     return
   }
   if (dataBatchCounter.value >= 50) {
-  // if (dataBatchCounter.value >= 5) {
+    // if (dataBatchCounter.value >= 5) {
     showToast({ message: '采集点位已达上限', position: 'bottom' })
-     return
+    return
   }
   // 开始新点位采集前，清空渲染器中的点云
   if (renderer && typeof renderer.resetPointCloud === 'function') {
@@ -1144,12 +1831,8 @@ async function startDataStream() {
     pointCount.value = 0
   }
 
-  if (deviceDisconnected.value) {
-    showToast({ message: '设备已断开连接，请返回重连', position: 'bottom' })
-    return
-  }
   if (bluetoothStore.connectionStatus !== 2) {
-    showToast({ message: '设备未连接', position: 'bottom' })
+    showToast({ message: '设备未连接，无法开始采集', position: 'bottom' })
     return
   }
   if (!isRendererReady.value) {
@@ -1197,7 +1880,7 @@ async function startDataStream() {
   // 给设备响应时间，最多等待2秒
   let waitCount = 0
   while (!hasScanTime.value && waitCount < 20) {
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await new Promise((resolve) => setTimeout(resolve, 100))
     waitCount++
   }
 
@@ -1268,7 +1951,10 @@ function startCollectionProgress() {
   // 启动倒计时定时器，每秒更新一次
   countdownTimer = setInterval(() => {
     collectionProgress.value.elapsedTime++
-    collectionProgress.value.remainingTime = Math.max(0, collectionProgress.value.scanTimeSeconds - collectionProgress.value.elapsedTime)
+    collectionProgress.value.remainingTime = Math.max(
+      0,
+      collectionProgress.value.scanTimeSeconds - collectionProgress.value.elapsedTime,
+    )
 
     // 倒计时结束，清理定时器
     if (collectionProgress.value.remainingTime <= 0) {
@@ -1296,7 +1982,8 @@ function stopCollectionProgress() {
  */
 const progressPercentage = computed(() => {
   if (collectionProgress.value.scanTimeSeconds === 0) return 0
-  const percentage = (collectionProgress.value.elapsedTime / collectionProgress.value.scanTimeSeconds) * 100
+  const percentage =
+    (collectionProgress.value.elapsedTime / collectionProgress.value.scanTimeSeconds) * 100
   return Math.min(percentage, 100)
 })
 
@@ -1308,11 +1995,16 @@ const progressPercentage = computed(() => {
  * 初始化页面和渲染器
  */
 async function init() {
+  // 获取页面模式
+  const mode = route.query.mode || 'collect'
+  console.log(`[PointCloud] 进入模式: ${mode === 'collect' ? '采集模式' : '查看模式'}`)
   // 每次初始化重置清理标志
   _hasCleaned = false
   if (isRendererReady.value) return
+
   await lockToLandscape()
   await enableScreenKeepAwake()
+
   try {
     await StatusBar.setOverlaysWebView({ overlay: true })
     await StatusBar.setBackgroundColor({ color: '#0e1420' })
@@ -1320,41 +2012,527 @@ async function init() {
   } catch (err) {
     logger.warn('StatusBar overlay set failed', err)
   }
+
   try {
     setImmersive(true)
-
   } catch (err) {
     logger.warn('setImmersive initial calls failed', err)
   }
 
-  setTimeout(() => {
-    if (container.value) {
-      // 可以传入自定义配置覆盖默认值，不传则使用默认配置
-      const customConfig = {
-        // maxPoints: 300000,        // 降低点云上限
-        // initialCapacity: 30000,   // 降低初始容量
-        // targetFps: 60,            // 提高帧率
-        // pointSize: 0.5,           // 增大点的大小
-      }
-      renderer = usePointCloudRenderer(container.value, customConfig)
+  // 使用变量保存定时器 ID，以便在组件卸载时取消
+  initTimeoutId = setTimeout(async () => {
+    // 如果组件已卸载，跳过初始化
+    if (isUnmounted) {
+      logger.debug('[PointCloud] 组件已卸载，跳过渲染器初始化')
+      return
+    }
 
-      renderer.init()
+    if (container.value) {
+      // 检测是否为移动设备
+      const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent)
+
+      const baseConfig = {
+        maxPoints: 5000000,
+        initialCapacity: 100000,
+        pixelRatioMax: isMobile ? 1 : 2,
+        targetFps: 30,
+        pointSize: isMobile ? 0.4 : 0.5,
+        cameraFov: 60,
+        cameraNear: 0.1,
+        cameraFar: 200,
+      }
+
+      renderer = usePointCloudRenderer(container.value, baseConfig)
+
+      // ========== 配置相机和缩放限制 ==========
+      // 初始相机高度10米，缩放范围控制为初始的两倍：5米-20米
+      const initialCameraHeight = 10
+      const cameraConfig = {
+        position: { x: 0, y: initialCameraHeight, z: 0 },
+        target: { x: 0, y: 0, z: 0 },
+        controls: {
+          minDistance: initialCameraHeight / 2, // 5米（初始的1/2）
+          maxDistance: initialCameraHeight * 2, // 20米（初始的2倍）
+          maxPolarAngle: Math.PI / 2,
+        },
+      }
+
+      // 初始化并传入相机配置
+      renderer.init(cameraConfig)
+
       frameRate.value = 30
       isRendererReady.value = true
       window.addEventListener('resize', renderer.onResize)
 
-      if (!currentSessionId) {
-        console.log('!currentSessionId')
-        currentSessionId = generateOptimizedSessionId()
-        resetForNewProject()
+      if (mode === 'view') {
+        // // 从路由参数读取已有项目的 currentSessionId
+        // const querySessionId = route.query.currentSessionId
+        // if (querySessionId && typeof querySessionId === 'string') {
+        //   currentSessionId = querySessionId
+        //   enableSave.value = true
+        //   // await loadBatchButtons()
+        // }
+        // console.log('进入已有数据项目页面currentsessionid', currentSessionId, querySessionId)
+        // // ========== 浏览模式：加载点云数据和创建锚点 ==========
+        // await loadPointCloudAndAnchors(renderer, container.value)
       } else {
-        // 若已有会话ID则加载已存在批次，用于返回时恢复
-        loadBatchButtons()
+        // ========= 采集模式：加载坐标系和网格 ==========
+        if (!currentSessionId) {
+          console.log('!currentSessionId')
+          currentSessionId = generateOptimizedSessionId()
+        } else {
+          loadBatchButtons()
+        }
       }
     }
+
+    // 初始化完成后清空定时器 ID
+    initTimeoutId = null
   }, 100)
 }
+/**
+ * 加载点云数据和创建锚点
+ * @param {Object} renderer - 渲染器实例
+ * @param {HTMLElement} container - 容器元素
+ * @returns {Promise<void>}
+ */
+async function loadPointCloudAndAnchors(renderer, container) {
+  // 获取场景
+  const scene = renderer.getScene()
 
+  // ========== 渐进式加载 ==========
+  console.log('[PointCloud] 开始加载点云数据...')
+
+  // 显示加载提示
+  showLoadingToast({
+    message: '加载点云中...',
+    forbidClick: false,
+  })
+
+  // 先加载中心站点（站点0）
+  const centerStation = stations[0]
+  const centerPoints = loadStation(centerStation)
+  renderer.addPoints(centerPoints)
+  pointCount.value = centerPoints.length
+  console.log(`[PointCloud] 中心站点加载完成: ${centerPoints.length} 个点`)
+
+  // 创建锚点
+  createAnchorSprites(scene)
+  // 添加点击事件监听
+  container.addEventListener('click', onContainerClick)
+
+  // 渐进式加载周围站点
+  const surroundingStations = stations.slice(1)
+  await loadStationsByPriority(
+    surroundingStations,
+    renderer,
+    (loadedCount, totalPoints, currentStationId, currentStationName) => {
+      pointCount.value = totalPoints
+
+      // 打印具体站点信息
+      if (currentStationId !== undefined) {
+        console.log(
+          `[PointCloud] 🚀 正在渲染: 站点${currentStationId} (${currentStationName}) | 累计点数: ${totalPoints.toLocaleString()}`,
+        )
+      } else {
+        console.log(
+          `[PointCloud] 📊 批量更新: ${loadedCount}/${surroundingStations.length} 站点 | 总点数: ${totalPoints.toLocaleString()}`,
+        )
+      }
+    },
+  )
+
+  // 关闭加载提示
+  closeToast()
+}
+/**
+ * 渐进式加载站点点云
+ * @param {Array} stations - 站点配置数组
+ * @param {Object} renderer - 渲染器实例
+ * @param {Function} onProgress - 进度回调
+ */
+async function loadStationsProgressive(stations, renderer, onProgress) {
+  let totalPoints = pointCount.value
+  // 每批次加载2个站点，避免一次性压力过大
+  const batchSize = 2
+  let index = 0
+
+  return new Promise((resolve) => {
+    function loadBatch() {
+      const end = Math.min(index + batchSize, stations.length)
+      const batch = stations.slice(index, end)
+
+      for (const station of batch) {
+        const points = loadStation(station)
+        if (points.length > 0) {
+          renderer.addPoints(points)
+          totalPoints += points.length
+        }
+      }
+
+      index = end
+
+      if (onProgress) {
+        onProgress(index, totalPoints)
+      }
+
+      if (index < stations.length) {
+        // 使用 requestIdleCallback 或 setTimeout 让出主线程
+        if (typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(() => loadBatch(), { timeout: 100 })
+        } else {
+          setTimeout(loadBatch, 50)
+        }
+      } else {
+        console.log(`[PointCloud] 所有站点加载完成，总点数: ${totalPoints.toLocaleString()}`)
+        resolve()
+      }
+    }
+
+    loadBatch()
+  })
+}
+/**
+ * 根据视锥优先级渐进式加载站点点云
+ * @param {Array} stationList - 站点配置数组
+ * @param {Object} renderer - 渲染器实例
+ * @param {Function} onProgress - 进度回调
+ */
+async function loadStationsByPriority(stationList, renderer, onProgress) {
+  let totalPoints = pointCount.value
+  const camera = renderer.getCamera()
+
+  if (!camera) {
+    console.log('[PointCloud] ⚠️ 未获取到相机，降级为普通渐进式加载')
+    return loadStationsProgressive(stationList, renderer, onProgress)
+  }
+
+  const cameraPos = camera.position
+  const fovRadius = Math.abs(cameraPos.y) * Math.tan((30 * Math.PI) / 180)
+
+  // ========== 1. 动态计算所有站点的距离分布 ==========
+  const stationsWithDistance = []
+  let maxDistance = 0
+  let minDistance = Infinity
+
+  for (const station of stationList) {
+    const dx = station.offset.x - cameraPos.x
+    const dz = station.offset.z - cameraPos.z
+    const distance = Math.sqrt(dx * dx + dz * dz)
+
+    stationsWithDistance.push({
+      ...station,
+      distance,
+    })
+
+    if (distance > maxDistance) maxDistance = distance
+    if (distance < minDistance) minDistance = distance
+  }
+
+  console.log('\n' + '='.repeat(60))
+  console.log('[PointCloud] 🎯 视锥剔除渐进式加载开始')
+  console.log('='.repeat(60))
+  console.log(`[PointCloud] 📷 相机位置: (${cameraPos.x}, ${cameraPos.y}, ${cameraPos.z})`)
+  console.log(`[PointCloud] 🔍 视野半径: ${fovRadius.toFixed(2)}米`)
+  console.log(
+    `[PointCloud] 📊 站点距离范围: ${minDistance.toFixed(2)}米 ~ ${maxDistance.toFixed(2)}米`,
+  )
+
+  // ========== 2. 根据实际数据分布动态计算优先级阈值 ==========
+  // 方法：将距离范围分成4个区间
+  // 视锥内（距离 < fovRadius）的站点优先级0
+
+  // 获取所有视锥外站点的距离
+  const outsideDistances = stationsWithDistance
+    .filter((s) => s.distance >= fovRadius)
+    .map((s) => s.distance)
+
+  let radius2, radius3
+
+  if (outsideDistances.length > 0) {
+    // 对视锥外的距离进行排序
+    outsideDistances.sort((a, b) => a - b)
+
+    // 动态分位数：将视锥外的站点按距离分成3个等级
+    const q1Index = Math.floor(outsideDistances.length * 0.33) // 前33%为高优先级
+    const q2Index = Math.floor(outsideDistances.length * 0.66) // 前66%为中优先级
+
+    radius2 = outsideDistances[q1Index] || fovRadius * 1.5
+    radius3 = outsideDistances[q2Index] || fovRadius * 2.5
+  } else {
+    // 没有视锥外站点时的默认值
+    radius2 = fovRadius * 1.5
+    radius3 = fovRadius * 2.5
+  }
+
+  console.log(
+    `[PointCloud] 🎚️ 动态优先级阈值: 立即加载<${fovRadius.toFixed(2)}米 | 高优先级<${radius2.toFixed(2)}米 | 中优先级<${radius3.toFixed(2)}米`,
+  )
+
+  // ========== 3. 计算每个站点的优先级 ==========
+  const stationsWithPriority = stationsWithDistance.map((station) => {
+    let priority
+    let priorityName
+    let priorityIcon
+
+    if (station.distance < fovRadius) {
+      priority = 0
+      priorityName = '立即加载'
+      priorityIcon = '🚀'
+    } else if (station.distance < radius2) {
+      priority = 1
+      priorityName = '高优先级'
+      priorityIcon = '⚡'
+    } else if (station.distance < radius3) {
+      priority = 2
+      priorityName = '中优先级'
+      priorityIcon = '📌'
+    } else {
+      priority = 3
+      priorityName = '低优先级'
+      priorityIcon = '💤'
+    }
+
+    return {
+      ...station,
+      priority,
+      priorityName,
+      priorityIcon,
+      distance: station.distance,
+    }
+  })
+
+  // 按优先级排序
+  stationsWithPriority.sort((a, b) => a.priority - b.priority)
+
+  // 打印优先级统计
+  const priorityStats = {
+    0: stationsWithPriority.filter((s) => s.priority === 0).length,
+    1: stationsWithPriority.filter((s) => s.priority === 1).length,
+    2: stationsWithPriority.filter((s) => s.priority === 2).length,
+    3: stationsWithPriority.filter((s) => s.priority === 3).length,
+  }
+
+  console.log('\n' + '-'.repeat(40))
+  console.log('[PointCloud] 📈 动态优先级统计:')
+  console.log(`   🚀 立即加载(优先级0): ${priorityStats[0]} 个站点`)
+  console.log(`   ⚡ 高优先级(优先级1): ${priorityStats[1]} 个站点`)
+  console.log(`   📌 中优先级(优先级2): ${priorityStats[2]} 个站点`)
+  console.log(`   💤 低优先级(优先级3): ${priorityStats[3]} 个站点`)
+  console.log('-'.repeat(40))
+
+  // 打印所有站点的优先级详情
+  console.log('\n[PointCloud] 📋 所有站点优先级详情:')
+  for (const s of stationsWithPriority) {
+    console.log(
+      `   ${s.priorityIcon} ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米 | ${s.priorityName}`,
+    )
+  }
+
+  // ========== 4. 按优先级分批加载 ==========
+
+  // 优先级0：立即加载
+  const immediateStations = stationsWithPriority.filter((s) => s.priority === 0)
+  if (immediateStations.length > 0) {
+    console.log('\n' + '='.repeat(40))
+    console.log(`[PointCloud] 🚀 阶段1: 立即加载 (${immediateStations.length} 个站点)`)
+    console.log('='.repeat(40))
+
+    for (const station of immediateStations) {
+      console.log(
+        `   🔄 正在加载: ${station.folder} (${station.name}) | 距离相机:${station.distance.toFixed(2)}米`,
+      )
+      const points = loadStation(station)
+      if (points.length > 0) {
+        renderer.addPoints(points)
+        pointCount.value += points.length
+        console.log(
+          `      ✅ 完成! 点数: ${points.length.toLocaleString()} | 累计总点数: ${pointCount.value.toLocaleString()}`,
+        )
+        if (onProgress) {
+          onProgress(1, pointCount.value, station.id, station.name)
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 16))
+    }
+  }
+
+  // 优先级1：高优先级
+  const highPriorityStations = stationsWithPriority.filter((s) => s.priority === 1)
+  if (highPriorityStations.length > 0) {
+    console.log('\n' + '='.repeat(40))
+    console.log(`[PointCloud] ⚡ 阶段2: 高优先级加载 (${highPriorityStations.length} 个站点)`)
+    console.log('='.repeat(40))
+
+    for (const s of highPriorityStations) {
+      console.log(`   📍 待加载: ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米`)
+    }
+
+    const newTotal = await loadStationBatch(
+      highPriorityStations,
+      renderer,
+      (loadedCount, total, stationId, stationName) => {
+        if (onProgress) {
+          onProgress(immediateStations.length + loadedCount, total, stationId, stationName)
+        }
+      },
+    )
+    totalPoints = newTotal
+  }
+
+  // 优先级2：中优先级
+  const midPriorityStations = stationsWithPriority.filter((s) => s.priority === 2)
+  if (midPriorityStations.length > 0) {
+    console.log('\n' + '='.repeat(40))
+    console.log(`[PointCloud] 📌 阶段3: 中优先级加载 (${midPriorityStations.length} 个站点)`)
+    console.log('='.repeat(40))
+
+    const showCount = Math.min(5, midPriorityStations.length)
+    for (let i = 0; i < showCount; i++) {
+      const s = midPriorityStations[i]
+      console.log(`   📍 待加载: ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米`)
+    }
+    if (midPriorityStations.length > showCount) {
+      console.log(`   ... 还有 ${midPriorityStations.length - showCount} 个站点`)
+    }
+
+    const newTotal = await loadStationBatch(
+      midPriorityStations,
+      renderer,
+      (loadedCount, total, stationId, stationName) => {
+        if (onProgress) {
+          onProgress(
+            immediateStations.length + highPriorityStations.length + loadedCount,
+            total,
+            stationId,
+            stationName,
+          )
+        }
+      },
+    )
+    totalPoints = newTotal
+  }
+
+  // 优先级3：低优先级
+  const lowPriorityStations = stationsWithPriority.filter((s) => s.priority === 3)
+  if (lowPriorityStations.length > 0) {
+    console.log('\n' + '='.repeat(40))
+    console.log(
+      `[PointCloud] 💤 阶段4: 低优先级加载 (${lowPriorityStations.length} 个站点) - 使用空闲时间`,
+    )
+    console.log('='.repeat(40))
+
+    const showCount = Math.min(3, lowPriorityStations.length)
+    for (let i = 0; i < showCount; i++) {
+      const s = lowPriorityStations[i]
+      console.log(`   📍 待加载: ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米`)
+    }
+    if (lowPriorityStations.length > showCount) {
+      console.log(`   ... 还有 ${lowPriorityStations.length - showCount} 个站点`)
+    }
+
+    if (typeof requestIdleCallback !== 'undefined') {
+      console.log(`   ⏰ 使用 requestIdleCallback 在浏览器空闲时加载`)
+      await new Promise((resolve) => {
+        requestIdleCallback(
+          async () => {
+            const newTotal = await loadStationBatch(
+              lowPriorityStations,
+              renderer,
+              (loadedCount, total, stationId, stationName) => {
+                if (onProgress) {
+                  onProgress(
+                    immediateStations.length +
+                      highPriorityStations.length +
+                      midPriorityStations.length +
+                      loadedCount,
+                    total,
+                    stationId,
+                    stationName,
+                  )
+                }
+              },
+            )
+            totalPoints = newTotal
+            resolve()
+          },
+          { timeout: 3000 },
+        )
+      })
+    } else {
+      console.log(`   ⏰ 使用 setTimeout 延迟加载`)
+      const newTotal = await loadStationBatch(
+        lowPriorityStations,
+        renderer,
+        (loadedCount, total, stationId, stationName) => {
+          if (onProgress) {
+            onProgress(
+              immediateStations.length +
+                highPriorityStations.length +
+                midPriorityStations.length +
+                loadedCount,
+              total,
+              stationId,
+              stationName,
+            )
+          }
+        },
+      )
+      totalPoints = newTotal
+    }
+  }
+
+  pointCount.value = totalPoints
+
+  console.log('\n' + '='.repeat(60))
+  console.log(`[PointCloud] 🎉 所有站点加载完成！总点数: ${totalPoints.toLocaleString()}`)
+  console.log('='.repeat(60) + '\n')
+}
+
+/**
+ * 批量加载站点（通用函数）
+ * @param {Array} stations - 站点配置数组
+ * @param {Object} renderer - 渲染器实例
+ * @param {Function} onProgress - 进度回调
+ */
+async function loadStationBatch(stations, renderer, onProgress) {
+  if (!stations || stations.length === 0) return
+
+  // 使用局部变量累加
+  let accumulatedPoints = pointCount.value
+  const batchSize = 2
+
+  for (let i = 0; i < stations.length; i += batchSize) {
+    const batch = stations.slice(i, i + batchSize)
+    for (const station of batch) {
+      const points = loadStation(station)
+      if (points.length > 0) {
+        renderer.addPoints(points)
+        accumulatedPoints += points.length
+
+        // 实时显示正在加载的站点
+        console.log(
+          `   🔄 正在加载: ${station.folder} (${station.name}) | 点数: ${points.length.toLocaleString()} | 累计: ${accumulatedPoints.toLocaleString()}`,
+        )
+
+        // 传递当前站点信息给回调
+        if (onProgress) {
+          onProgress(
+            Math.min(i + batchSize, stations.length),
+            accumulatedPoints,
+            station.id,
+            station.name,
+          )
+        }
+      }
+    }
+    // 让出主线程
+    await new Promise((resolve) => setTimeout(resolve, 16))
+  }
+
+  // 返回累加后的总点数
+  return accumulatedPoints
+}
 /**
  * 注册蓝牙断开监听器
  */
@@ -1373,27 +2551,19 @@ function registerDisconnectListener() {
 
       logger.debug('[PointCloudPage] 设备断开连接，手动断开:', isManualDisconnect)
 
-      // 如果是手动断开（主动调用handleDisconnect），直接返回上一页
-      if (isManualDisconnect) {
-        goBack()
-        return
+      // 如果正在采集，停止采集并清理会话
+      if (isCollecting.value) {
+        isCollecting.value = false
+        try {
+          bluetoothStore.setCleanupStatus(true) // 清理中
+          await stopSessionParser() // 这里会取消订阅
+        } catch (e) {
+          logger.warn('[PointCloudPage] 清理会话失败', e)
+        } finally {
+          bluetoothStore.setCleanupStatus(false) // 清理结束
+        }
+        showToast({ message: '设备已断开连接，采集已停止', position: 'bottom' })
       }
-
-      // 意外断开：显示UI提示，停止采集
-      deviceDisconnected.value = true
-      isCollecting.value = false
-
-      // 停止订阅和清空累加器
-      try {
-        bluetoothStore.setCleanupStatus(true) // 清理中
-        await stopSessionParser() // 这里会取消订阅
-      } catch (e) {
-        logger.warn('[PointCloudPage] 清理会话失败', e)
-      } finally {
-        bluetoothStore.setCleanupStatus(false) // 清理结束
-      }
-      // 显示提示
-      showToast({ message: '设备已断开连接', position: 'bottom' })
     },
   )
 }
@@ -1406,21 +2576,19 @@ function registerDisconnectListener() {
 watch(
   () => bluetoothStore.connectionStatus,
   async (newStatus, oldStatus) => {
-    if (oldStatus === 2 && newStatus !== 2) {
-      // 连接从已连接变为非已连接状态
-      if (!deviceDisconnected.value) {
-        logger.debug('[PointCloudPage] 检测到全局连接状态变为未连接')
-        deviceDisconnected.value = true
-        isCollecting.value = false
-        try {
-          bluetoothStore.setCleanupStatus(true) // 清理中
-          await stopSessionParser() // 这里会取消订阅
-        } catch (e) {
-          logger.warn('[PointCloudPage] 清理会话失败', e)
-        } finally {
-          bluetoothStore.setCleanupStatus(false) // 清理结束
-        }
+    if (oldStatus === 2 && newStatus !== 2 && isCollecting.value) {
+      // 采集过程中连接变为未连接，自动停止采集并清理
+      logger.debug('[PointCloudPage] 采集过程中检测到全局连接状态变为未连接')
+      isCollecting.value = false
+      try {
+        bluetoothStore.setCleanupStatus(true) // 清理中
+        await stopSessionParser() // 这里会取消订阅
+      } catch (e) {
+        logger.warn('[PointCloudPage] 清理会话失败', e)
+      } finally {
+        bluetoothStore.setCleanupStatus(false) // 清理结束
       }
+      showToast({ message: '设备已断开连接，采集已停止', position: 'bottom' })
     }
   },
 )
@@ -1431,19 +2599,19 @@ watch(
  */
 onMounted(async () => {
   await init()
-  console.log('PointCloudPage mounted')
+
+  setupPtcrProgressListener()
+
   // --- 注册断开监听 ---
   registerDisconnectListener()
 
   // --- 页面加载时检查连接状态 ---
   if (bluetoothStore.connectionStatus !== 2) {
-    logger.debug('[PointCloudPage] 页面加载时检测到设备未连接')
-    deviceDisconnected.value = true
+    logger.debug('[PointCloudPage] 页面加载时检测到设备未连接，采集功能已禁用')
   } else {
     // 主动校验一次连接状态
     bluetoothService.checkConnectionStatus(bluetoothStore.connectedDeviceId).catch(() => {
       logger.debug('[PointCloudPage] 页面加载时检测到连接已断开')
-      deviceDisconnected.value = true
     })
   }
   // --- 结束：页面加载时检查连接状态 ---
@@ -1460,7 +2628,7 @@ onMounted(async () => {
     // 当当前会话的批次发生变化时，刷新批次按钮
     // folders 中传递的是 folderName（临时文件夹名或正式文件夹名）
     // 需要生成当前会话的临时文件夹名来匹配
-    const tempFolderName = storage.path.getTempSessionName(currentSessionId)  // error（错误）继续编辑项目时，这个获取临时文件夹逻辑不一定适用，因为项目名不一定时临时前缀
+    const tempFolderName = storage.path.getTempSessionName(currentSessionId) // error（错误）继续编辑项目时，这个获取临时文件夹逻辑不一定适用，因为项目名不一定时临时前缀
     if (folders.includes(tempFolderName)) {
       await loadBatchButtons()
     }
@@ -1471,7 +2639,19 @@ onMounted(async () => {
  * 组件卸载时的清理
  */
 onUnmounted(async () => {
-  logger.debug('onUnmounted 开始执行')
+  if (ptcrProgressHandle) {
+    ptcrProgressHandle.remove()
+    ptcrProgressHandle = null
+  }
+  // 标记组件已卸载，防止异步初始化继续执行
+  isUnmounted = true
+
+  // 取消未执行的初始化定时器
+  if (initTimeoutId) {
+    clearTimeout(initTimeoutId)
+    initTimeoutId = null
+  }
+
   if (pauseListener) {
     pauseListener.remove()
     pauseListener = null
@@ -1484,8 +2664,14 @@ onUnmounted(async () => {
     unsubscribeBatchChange()
     unsubscribeBatchChange = null
   }
-  // 组件卸载时也执行彻底清理
-  await cleanupResourcesForExit()
+  // 组件卸载时也执行彻底清理（如果 beforeRouteLeave 中未执行过）
+  if (!_hasCleaned) {
+    await cleanupResourcesForExit()
+  } else {
+    logger.debug(
+      '[PointCloud] onUnmounted: cleanupResourcesForExit 已在 beforeRouteLeave 中执行，跳过',
+    )
+  }
 })
 
 /**
@@ -1522,8 +2708,8 @@ onBeforeRouteLeave(async (to, from, next) => {
   try {
     // 检查是否离开会话页面
     // if (isLeavingSession(to) && hasStarted) {
-      // logger.debug('[PointCloud] 离开会话页面，检查是否需要删除临时文件夹')
-      // await delSessionDir() // 没保存，暂时先不删除 3/19
+    // logger.debug('[PointCloud] 离开会话页面，检查是否需要删除临时文件夹')
+    // await delSessionDir() // 没保存，暂时先不删除 3/19
     // }
 
     // 根据目标路由执行不同的清理策略
@@ -1535,6 +2721,15 @@ onBeforeRouteLeave(async (to, from, next) => {
       logger.debug('[PointCloud] 导航到其他页面，移除 keep-alive 缓存并执行完整清理')
       // 从 keep-alive 缓存中移除
       keepAliveStore.removeCache('PointCloudView')
+
+      // 取消未执行的初始化定时器，防止清理后渲染器又被创建
+      if (initTimeoutId) {
+        clearTimeout(initTimeoutId)
+        initTimeoutId = null
+      }
+
+      // 标记组件已卸载，防止 onUnmounted 中重复清理
+      isUnmounted = true
       await cleanupResourcesForExit()
     }
 
@@ -1553,44 +2748,129 @@ async function handleAppResume() {
   await enableScreenKeepAwake()
 
   // --- 恢复前检查设备是否仍然连接 ---
-  if (deviceDisconnected.value) {
-    logger.debug('[PointCloudPage] 设备已断开，不恢复采集')
-    return
-  }
-
   if (bluetoothStore.connectionStatus !== 2) {
     logger.debug('[PointCloudPage] 设备未连接，不恢复采集')
-    deviceDisconnected.value = true
     return
   }
   // --- 结束：恢复前检查设备是否仍然连接 ---
-
-  // 2. 如果之前正在采集，则尝试恢复订阅
-  // if (wasCollectingBeforePause) {
-  //   // 确保渲染器和会话ID都存在
-  //   if (isRendererReady.value && currentSessionId) {
-  //     // 重新启动会话解析器（重新订阅、启动相机）
-  //     startSessionParser()
-  //   } else {
-  //     logger.warn('[App] 恢复失败：渲染器未就绪、会话ID未生成或未启动过采集')
-  //   }
-  // } else {
-  //   logger.debug('[App] 上次未在采集状态，无需恢复')
-  // }
 }
 
 /**
  * 处理编辑点击
  */
-const handleEditClick = () => {
-  logger.debug('handleEditClick')
-}
+const handleEditClick = () => {}
 
 /**
  * 处理设置点击
  */
-const handleSettingClick = () => {
-  logger.debug('handleSettingClick')
+const handleSettingClick = () => {}
+
+// ==============================================
+// 多站点显示相关函数
+// ==============================================
+
+/**
+ * 创建锚点精灵
+ * @param {THREE.Scene} scene - Three.js 场景
+ */
+function createAnchorSprites(scene) {
+  // 清理现有锚点
+  anchorSprites.forEach((sprite) => {
+    scene.remove(sprite)
+    sprite.material.map.dispose()
+    sprite.material.dispose()
+  })
+  anchorSprites = []
+
+  for (const station of stations) {
+    const sprite = createAnchorSprite(station)
+    // 点云数据的原始Y坐标范围约-4到-1，中心约在-2.5
+    // 锚点放在点云数据中心上方一点，方便用户点击
+    const anchorY = station.offset.y - 2 // 点云中心位置
+    const anchorZ = station.offset.z + 1 // 稍微高出点云
+    sprite.position.set(station.offset.x, anchorY, anchorZ)
+    sprite.scale.set(1.5, 1.5, 1)
+    sprite.userData = { stationId: station.id, isAnchor: true }
+
+    scene.add(sprite)
+    anchorSprites.push(sprite)
+  }
+}
+
+/**
+ * 创建单个锚点精灵
+ * @param {Object} station - 站点配置
+ * @returns {THREE.Sprite} 锚点精灵
+ */
+function createAnchorSprite(station) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+
+  // 绘制圆形背景
+  ctx.beginPath()
+  ctx.arc(32, 32, 28, 0, Math.PI * 2)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+  ctx.strokeStyle = station.hexColor || '#000000'
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  // 绘制文字
+  ctx.fillStyle = '#000000'
+  ctx.font = 'bold 24px Arial'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(String(station.id + 1), 32, 32)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  // 设置 depthTest: false 使锚点不会被其他对象遮挡
+  // 设置 depthWrite: false 避免影响其他对象的深度测试
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    depthTest: false,
+    depthWrite: false,
+  })
+  const sprite = new THREE.Sprite(material)
+
+  return sprite
+}
+
+/**
+ * 容器点击事件处理
+ * @param {MouseEvent} event - 鼠标事件
+ */
+function onContainerClick(event) {
+  if (!renderer || !container.value || !isRendererReady.value) return
+
+  const rect = container.value.getBoundingClientRect()
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+
+  const camera = renderer.getCamera()
+  raycaster.setFromCamera(mouse, camera)
+
+  const intersects = raycaster.intersectObjects(anchorSprites)
+  if (intersects.length > 0) {
+    const stationId = intersects[0].object.userData.stationId
+    jumpToBatchDetail(stationId)
+  }
+}
+
+/**
+ * 跳转到 BatchDetail 页面
+ * @param {number} stationId - 站点ID
+ */
+function jumpToBatchDetail(stationId) {
+  logger.debug('[PointCloud] 跳转到 BatchDetail', { stationId })
+  router.push({
+    name: 'BatchDetail',
+    params: {
+      currentSessionId: 'demo_session',
+      bid: stationId + 1, // 1-5
+    },
+  })
 }
 </script>
 
@@ -1802,6 +3082,58 @@ const handleSettingClick = () => {
 
 .preview-btn:disabled {
   background: rgba(42, 122, 255, 0.5);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.stitch-btn {
+  position: absolute;
+  top: 16px;
+  right: calc(44px + 16px + 32px + 44px + 16px);
+  padding: 0 10px;
+  height: 28px;
+  min-width: 44px;
+  width: auto;
+  background: linear-gradient(145deg, #00c853, #00e676);
+  border: none;
+  border-radius: 999px;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 12px rgba(0, 200, 83, 0.25);
+  pointer-events: auto;
+  z-index: 11;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stitch-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #00e676, #00c853);
+  box-shadow: 0 6px 16px rgba(0, 200, 83, 0.35);
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.stitch-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px rgba(0, 200, 83, 0.2);
+}
+
+.stitch-btn:disabled {
+  background: rgba(0, 200, 83, 0.5);
   box-shadow: none;
   cursor: not-allowed;
   transform: none;
@@ -2255,6 +3587,7 @@ const handleSettingClick = () => {
 .save-actions button:disabled,
 .save-btn:disabled,
 .preview-btn:disabled,
+.stitch-btn:disabled,
 .disconnect-back-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -2311,7 +3644,8 @@ const handleSettingClick = () => {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
@@ -2421,7 +3755,11 @@ const handleSettingClick = () => {
   }
 
   .preview-btn {
-    right: calc(40px + 16px + 16px); /* 保存按钮宽度(40px) + 保存按钮右侧间距 + 16px间隔 */
+    right: calc(40px + 16px + 16px);
+  }
+
+  .stitch-btn {
+    right: calc(40px + 16px + 16px + 40px + 16px);
   }
 
   .capture-btn {

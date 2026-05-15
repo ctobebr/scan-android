@@ -134,7 +134,7 @@ const cameraHelper = {
               data: base64,
               directory: Directory.External,
             })
-            logger.info('照片已后台保存', { filePath })
+            // logger.info('照片已后台保存', { filePath })
 
             // 检查是否是第一张照片（文件名以 ====1.jpg 结尾）
             const isFirstPhoto = filePath.endsWith('====1.jpg')

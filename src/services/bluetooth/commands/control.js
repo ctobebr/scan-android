@@ -27,13 +27,18 @@ export class ControlCommands {
    */
   async sendStartScan(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送启动扫描指令')
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_START,
-      null,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_START,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_START' }).error('发送启动扫描指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -44,13 +49,18 @@ export class ControlCommands {
    */
   async sendStopScan(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送停止扫描指令')
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_STOP,
-      null,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_STOP,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_STOP' }).error('发送停止扫描指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -76,13 +86,18 @@ export class ControlCommands {
     view.setFloat32(0, x, true) // X, 小端序
     view.setFloat32(4, y, true) // Y, 小端序 (偏移 4 字节)
     view.setFloat32(8, z, true) // Z, 小端序 (偏移 8 字节)
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_CALIB_PARAM,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_CALIB_PARAM,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_CALIB_PARAM' }).error('发送设置标定参数指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -105,13 +120,18 @@ export class ControlCommands {
     const view = new DataView(buffer)
     view.setFloat32(0, pitchSpeed, true) // pitch speed, 小端序
     view.setFloat32(4, yawSpeed, true) // yaw speed, 小端序 (偏移 4 字节)
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_ROTATE_SPEED' }).error('发送设置转动速度指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -132,13 +152,18 @@ export class ControlCommands {
     const buffer = new ArrayBuffer(2) // 1 * uint16_t = 2 bytes
     const view = new DataView(buffer)
     view.setUint16(0, seconds, true) // 小端序
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_SCAN_TIME,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_SCAN_TIME,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_SCAN_TIME' }).error('发送设置扫描时间指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -161,13 +186,18 @@ export class ControlCommands {
     const view = new DataView(buffer)
     view.setFloat32(0, upperLimitRad, true) // 上限 limit, 小端序，第一个 float
     view.setFloat32(4, lowerLimitRad, true) // 下限 limit, 小端序，第二个 float (偏移 4 字节)
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_PITCH_LIMIT,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_PITCH_LIMIT,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_PITCH_LIMIT' }).error('发送设置俯仰角上下限指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -187,13 +217,18 @@ export class ControlCommands {
     const buffer = new ArrayBuffer(1) // 1 * bool = 1 byte
     const view = new Uint8Array(buffer)
     view[0] = on ? 1 : 0 // 1 表示开启，0 表示关闭
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_OUTPUT_XYZ,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_OUTPUT_XYZ,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_OUTPUT_XYZ' }).error('发送设置输出XYZ值指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -213,13 +248,18 @@ export class ControlCommands {
     const buffer = new ArrayBuffer(1) // 1 * bool = 1 byte
     const view = new Uint8Array(buffer)
     view[0] = on ? 1 : 0 // 1 表示开启，0 表示关闭
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_OUTPUT_POLAR,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_OUTPUT_POLAR,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_OUTPUT_POLAR' }).error('发送设置输出极坐标值指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -248,13 +288,18 @@ export class ControlCommands {
     view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
     view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
     view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_V_PID,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_V_PID,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_V_PID' }).error('发送设置速度环PID指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -283,13 +328,18 @@ export class ControlCommands {
     view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
     view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
     view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_A_PID,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_A_PID,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_A_PID' }).error('发送设置角度环PID指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -309,13 +359,18 @@ export class ControlCommands {
     const buffer = new ArrayBuffer(4) // 1 * float = 4 bytes
     const view = new DataView(buffer)
     view.setFloat32(0, offset, true) // 零偏值，小端序
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_SET_PITCH_OFFSET,
-      buffer,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_PITCH_OFFSET,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_PITCH_OFFSET' }).error('发送设置俯仰角零偏指令失败', error)
+      throw error
+    }
   }
 
   /**
@@ -327,12 +382,17 @@ export class ControlCommands {
    */
   async sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID) {
     logger.withContext({ deviceId }).debug('发送拍照准备就绪指令(0x91)')
-    await this.parent.sendCommand(
-      deviceId,
-      serviceUUID,
-      characteristicUUID,
-      CONTROL_COMMANDS.CMD_CTRL_CAMERA_NEXT_PHOTO,
-      null,
-    )
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_CTRL_CAMERA_NEXT_PHOTO,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_CTRL_CAMERA_NEXT_PHOTO' }).error('发送拍照准备就绪指令失败', error)
+      throw error
+    }
   }
 }

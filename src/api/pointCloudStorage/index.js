@@ -169,6 +169,9 @@ export const exportData = {
 import {
   parseFolderName,
   getTempSessionName,
+  batchFolder,
+  sessionFolder,
+  isTempSession,
 } from '@/utils/storage/path'
 
 /**
@@ -180,6 +183,12 @@ export const path = {
   parseFolderName,
   /** 获取临时会话名称 */
   getTempSessionName,
+  /** 获取批次文件夹路径 */
+  batchFolder,
+  /** 获取会话文件夹路径 */
+  sessionFolder,
+  /** 判断是否为临时会话 */
+  isTempSession,
 }
 
 // ============================================

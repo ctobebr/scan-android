@@ -422,7 +422,7 @@ async function saveExistingPhoto(filePath) {
  */
 async function saveBase64Photo(sessionPath, batchFolderName, photo, index) {
   const target = photo.name || `photo_${index}.jpg`
-  const photoPath = `${sessionPath}/${batchFolderName}/${target}`
+  const photoPath = `${sessionPath}/${batchFolderName}/allPicture/${target}`
 
   try {
     await writeFile(photoPath, photo.base64)
@@ -784,7 +784,7 @@ export async function getProjectThumbnail(folderName, retries = 2) {
  * @returns {Promise<{uri:string}|null>}
  */
 async function findThumbnailInBatch(folderPath, batchName) {
-  const batchPath = `${folderPath}/${batchName}`
+  const batchPath = `${folderPath}/${batchName}/allPicture`
 
   try {
     const batchItems = await readdir(batchPath)
@@ -837,7 +837,7 @@ export async function getProjectBatchInfo(folderName) {
       .sort((a, b) => a.batchNum - b.batchNum)
 
     for (const batch of batchFolders) {
-      const batchPath = `${folderPath}/${batch.name}`
+      const batchPath = `${folderPath}/${batch.name}/allPicture`
       let photoCount = 0
 
       try {

@@ -6,13 +6,21 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.webkit.JavascriptInterface;
 
+import android.util.Log;
+
 import com.getcapacitor.BridgeActivity;
+import com.ptcr.mobile.PtcrPlugin;
+import com.ptcr.mobile.AppContextHolder;
 
 public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
+        initialPlugins.add(PtcrPlugin.class);
         super.onCreate(savedInstanceState);
+
+        Log.d("MainActivity", "PtcrPlugin registered via initialPlugins: " + PtcrPlugin.class.getName());
+        AppContextHolder.INSTANCE.init(getApplication());
 
         try {
             getBridge().getWebView().addJavascriptInterface(new Object() {

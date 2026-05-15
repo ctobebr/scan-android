@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+    "test": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug && adb install -r -t app/build/outputs/apk/debug/app-debug.apk && cd ..",
+    "console": "chcp 65001 && adb logcat | findstr /i \"console\""
   },
   "dependencies": {
     "@byteowls/capacitor-filesharer": "^5.0.0",

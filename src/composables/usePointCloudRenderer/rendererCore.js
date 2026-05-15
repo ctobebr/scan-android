@@ -1,6 +1,11 @@
 /**
  * @fileoverview 渲染核心模块
  * 负责场景初始化、渲染循环和点云添加
+ *
+ * 性能优化版本：
+ * - 支持俯视相机配置
+ * - 优化视锥剔除参数
+ * - 添加相机外部配置接口
  */
 
 import * as THREE from 'three'
@@ -38,23 +43,48 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
 
   /**
    * 初始化渲染器
+   * 支持外部传入相机位置和视角配置
    */
-  function init() {
+  function init(customCameraConfig = null) {
     const pixelRatio = Math.min(window.devicePixelRatio, config.pixelRatioMax)
 
     // 场景
     scene = new THREE.Scene()
     scene.background = null
 
-    // 相机
+    // 相机参数
+    const cameraFov = config.cameraFov || 60
+    const cameraNear = config.cameraNear || 0.1
+    const cameraFar = config.cameraFar || 200
+
     camera = new THREE.PerspectiveCamera(
-      config.cameraFov,
+      cameraFov,
       container.clientWidth / container.clientHeight,
-      0.1,
-      500,
+      cameraNear,
+      cameraFar,
     )
-    camera.position.set(50, 0, 0)
-    camera.lookAt(0, 0, 0)
+
+    // ========== 关键：处理俯视相机配置 ==========
+    if (customCameraConfig && customCameraConfig.position) {
+      // 使用传入的俯视相机配置
+      const { x = 0, y = 80, z = 0 } = customCameraConfig.position
+      camera.position.set(x, y, z)
+
+      const { x: tx = 0, y: ty = 0, z: tz = 0 } = customCameraConfig.target || {}
+      camera.lookAt(tx, ty, tz)
+
+      console.log(`[RendererCore] ✅ 俯视相机配置已应用: 位置(${x}, ${y}, ${z})`)
+    } else {
+      // 默认相机位置（向后兼容）
+      camera.position.set(50, 0, 0)
+      camera.lookAt(0, 0, 0)
+      console.log(
+        '[RendererCore] ⚠️ 使用默认相机位置（未收到俯视配置）',
+        JSON.stringify(customCameraConfig),
+      )
+    }
+
+    camera.updateProjectionMatrix()
 
     // 渲染器
     renderer = new THREE.WebGLRenderer({
@@ -97,10 +127,26 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
     controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.1
-    controls.screenSpacePanning = false
-    controls.minDistance = 5
-    controls.maxDistance = 300
+    controls.screenSpacePanning = true
     controls.enableZoom = true
+    controls.enablePan = true
+
+    // ========== 应用控制器限制 ==========
+    if (customCameraConfig?.controls) {
+      controls.minDistance = customCameraConfig.controls.minDistance || 20
+      controls.maxDistance = customCameraConfig.controls.maxDistance || 120
+      controls.maxPolarAngle = customCameraConfig.controls.maxPolarAngle || Math.PI / 2.2
+      logger.info('✅使用自定义设置', JSON.stringify(customCameraConfig.controls))
+    } else {
+      controls.minDistance = 4
+      controls.maxDistance = 100
+      controls.maxPolarAngle = Math.PI / 2
+      logger.info('⚠️使用通用相机设置设置', JSON.stringify(customCameraConfig))
+    }
+    // // 初始相机高度20米，缩放范围控制为初始的两倍：10米-40米
+    // controls.minDistance = 10 // 最近距离10米（初始的1/2）
+    // controls.maxDistance = 40 // 最远距离40米（初始的2倍）
+    // controls.maxPolarAngle = Math.PI / 2
 
     controls.addEventListener('change', () => {
       markNeedsRender()
@@ -139,7 +185,11 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
       }
 
       if (currentPointCount + newPoints.length > config.maxPoints) {
-        logger.warn('Point limit reached', { current: currentPointCount, incoming: newPoints.length, max: config.maxPoints })
+        logger.warn('Point limit reached', {
+          current: currentPointCount,
+          incoming: newPoints.length,
+          max: config.maxPoints,
+        })
         showToast({ message: `点云数量已达上限 ${config.maxPoints} 点`, position: 'bottom' })
         return
       }
@@ -159,10 +209,17 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
         posArr[offset + 1] = p.y
         posArr[offset + 2] = p.z
 
-        const color = colorCalculator.getColorByHeight(p.y)
-        colArr[offset] = color.r
-        colArr[offset + 1] = color.g
-        colArr[offset + 2] = color.b
+        // 如果点数据包含自定义颜色，则使用自定义颜色，否则根据高度计算颜色
+        if (p.r !== undefined && p.g !== undefined && p.b !== undefined) {
+          colArr[offset] = p.r
+          colArr[offset + 1] = p.g
+          colArr[offset + 2] = p.b
+        } else {
+          const color = colorCalculator.getColorByHeight(p.y)
+          colArr[offset] = color.r
+          colArr[offset + 1] = color.g
+          colArr[offset + 2] = color.b
+        }
 
         offset += 3
       }
@@ -248,7 +305,9 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
         return
       }
 
-      controls.update()
+      if (controls) {
+        controls.update()
+      }
 
       if (needsRender) {
         renderer.render(scene, camera)
@@ -352,6 +411,34 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
     animationId = id
   }
 
+  /**
+   * 设置相机位置（外部调用）
+   * @param {number} x - X坐标
+   * @param {number} y - Y坐标
+   * @param {number} z - Z坐标
+   */
+  function setCameraPosition(x, y, z) {
+    if (camera) {
+      camera.position.set(x, y, z)
+      camera.lookAt(0, 0, 0)
+      markNeedsRender()
+    }
+  }
+
+  /**
+   * 设置控制器目标
+   * @param {number} x - X坐标
+   * @param {number} y - Y坐标
+   * @param {number} z - Z坐标
+   */
+  function setControlsTarget(x, y, z) {
+    if (controls) {
+      controls.target.set(x, y, z)
+      controls.update()
+      markNeedsRender()
+    }
+  }
+
   return {
     init,
     addPoints,
@@ -368,5 +455,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
     getPointCloud,
     getAnimationId,
     setAnimationId,
+    setCameraPosition,
+    setControlsTarget,
   }
 }

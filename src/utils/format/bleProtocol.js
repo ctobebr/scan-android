@@ -490,7 +490,7 @@ export class parseBleData {
     if (this.options.onSendCameraReady) {
       try {
         await this.options.onSendCameraReady()
-        logger.debug('已发送拍照准备就绪通知(0x91)')
+        // logger.debug('已发送拍照准备就绪通知(0x91)')
       } catch (err) {
         logger.error('发送拍照准备就绪通知失败', err)
       }

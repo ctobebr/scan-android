@@ -22,30 +22,35 @@ export function createResourceManager({ rendererCore, bufferManager }) {
   function dispose() {
     logger.info('Disposing resources...')
 
-    const animationId = rendererCore.getAnimationId()
-    if (animationId) {
-      cancelAnimationFrame(animationId)
-      rendererCore.setAnimationId(null)
-    }
-
-    // 移除事件监听
-    const controls = rendererCore.getControls()
-    if (controls) {
-      controls.removeEventListener('change', rendererCore.markNeedsRender)
-      controls.dispose()
-    }
-
-    // 释放缓冲区
-    bufferManager.dispose()
-
-    // 释放渲染器
-    const renderer = rendererCore.getRenderer()
-    if (renderer) {
-      renderer.dispose()
-      // 移除canvas
-      if (renderer.domElement && renderer.domElement.parentNode) {
-        renderer.domElement.parentNode.removeChild(renderer.domElement)
+    try {
+      const animationId = rendererCore.getAnimationId()
+      if (animationId) {
+        cancelAnimationFrame(animationId)
+        rendererCore.setAnimationId(null)
       }
+
+      // 移除事件监听
+      const controls = rendererCore.getControls()
+      if (controls) {
+        controls.removeEventListener('change', rendererCore.markNeedsRender)
+        controls.dispose()
+      }
+
+      // 释放缓冲区
+      bufferManager.dispose()
+
+      // 释放渲染器
+      const renderer = rendererCore.getRenderer()
+      if (renderer) {
+        // 先移除 canvas 再 dispose，避免 dispose 时访问已移除的 DOM
+        const domElement = renderer.domElement
+        if (domElement && domElement.parentNode) {
+          domElement.parentNode.removeChild(domElement)
+        }
+        renderer.dispose()
+      }
+    } catch (err) {
+      logger.error('dispose 过程中发生错误', err)
     }
 
     logger.info('Resources disposed')
