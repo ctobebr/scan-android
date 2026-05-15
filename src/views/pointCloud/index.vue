@@ -182,6 +182,7 @@ import {
 
 import * as storage from '@/api/pointCloudStorage'
 import PtcrPlugin from '@/plugins/ptcr'
+import { setPanoramaCache } from '@/utils/panoramaCache'
 import { showToast, showLoadingToast, closeToast } from 'vant'
 import { generateOptimizedSessionId } from '@/utils/format/sessionId'
 
@@ -213,7 +214,6 @@ const savedDuringDialog = ref(false)
 
 const isStitching = ref(false)
 const stitchProgressText = ref('')
-let ptcrProgressHandle = null
 
 // 当前批次数据
 let currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
@@ -735,17 +735,6 @@ async function handleStitch(mode) {
   }
 }
 
-async function setupPtcrProgressListener() {
-  try {
-    ptcrProgressHandle = await PtcrPlugin.addListener('ptcrProgress', (event) => {
-      stitchProgressText.value = `[${event.stage}] ${event.task}: ${event.message}`
-      logger.debug('[PtcrPlugin] progress', event)
-    })
-  } catch (e) {
-    logger.warn('[PtcrPlugin] 无法注册进度监听器:', e.message)
-  }
-}
-
 // ==============================================
 // 自动拼接算法相关函数
 // ==============================================
@@ -830,12 +819,32 @@ async function triggerAutoStitch() {
         console.warn('[AutoStitch] ⚠️ 无法注册进度监听器:', e.message)
       }
 
-      // 6. 调用生成算法
-      console.log('\n[AutoStitch] 🚀 调用 generateCloud0()...')
-      console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
-      const startTime = Date.now()
+      // 6. 选择生成算法
+      //    修改下面 method 变量即可切换: 'cloud0' | 'raw' | 'standard'
+      //    cloud0:    无 ONNX 深度估计，稀疏彩色点云（最快 ~30s），输出 ply_raw.ply
+      //    raw:       ONNX 深度估计(raw)，密集彩色点云（~70s），输出 fused_raw.ply
+      //    standard:  ONNX 深度估计(standard)+垂直矫正，高质量密集彩色点云（~151s），输出 fused_standard.ply
+      const method = 'raw'
 
-      const result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
+      let result
+      let startTime
+
+      if (method === 'cloud0') {
+        console.log('\n[AutoStitch] 🚀 调用 generateCloud0()...')
+        console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
+        startTime = Date.now()
+        result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
+      } else if (method === 'raw') {
+        console.log('\n[AutoStitch] 🚀 调用 generateCloudByRaw()...')
+        console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
+        startTime = Date.now()
+        result = await PtcrPlugin.generateCloudByRaw({ dataDir, batchNo })
+      } else if (method === 'standard') {
+        console.log('\n[AutoStitch] 🚀 调用 generateCloudByStandard()...')
+        console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
+        startTime = Date.now()
+        result = await PtcrPlugin.generateCloudByStandard({ dataDir, batchNo })
+      }
 
       const elapsed = Date.now() - startTime
 
@@ -846,7 +855,12 @@ async function triggerAutoStitch() {
       console.log('═══════════════════════════════════════════════════════')
       console.log('   ├─ ok:', result.ok ? '✅ 成功' : '❌ 失败')
       console.log('   ├─ task:', result.task)
-      console.log('   ├─ 算法耗时:', result.elapsedMs, 'ms', `(${(result.elapsedMs / 1000).toFixed(1)}s)`)
+      console.log(
+        '   ├─ 算法耗时:',
+        result.elapsedMs,
+        'ms',
+        `(${(result.elapsedMs / 1000).toFixed(1)}s)`,
+      )
       console.log('   ├─ JS 调用耗时:', elapsed, 'ms', `(${(elapsed / 1000).toFixed(1)}s)`)
       console.log('   ├─ outputFile:', result.outputFile || '(无)')
       console.log('   ├─ error:', result.error || '(无)')
@@ -857,7 +871,7 @@ async function triggerAutoStitch() {
         console.log('[AutoStitch] 🎉 拼接成功！')
 
         if (result.outputFile) {
-          await checkOutputFiles(result.outputFile, dataDir, batchNo)
+          await checkOutputFiles(result.outputFile, dataDir, batchNo, method)
         }
 
         if (result.log) {
@@ -869,6 +883,8 @@ async function triggerAutoStitch() {
 
         isStitching.value = false
         stitchProgressText.value = '拼接完成'
+
+        preCachePanorama(dataDir, batchNo, method)
 
         showToast({
           message: '全景图生成成功',
@@ -945,13 +961,21 @@ async function checkInputFiles(dataDir, batchNo) {
       })
 
       const pointCloudFiles = entries.filter(
-        (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
+        (f) =>
+          f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
       )
 
       if (pointCloudFiles.length > 0) {
         console.log(`[AutoStitch] ✅ 找到 ${pointCloudFiles.length} 个点云文件:`)
         pointCloudFiles.forEach((f, i) => {
-          console.log(`   ${i + 1}. ${f.name} (${(f.size / 1024).toFixed(1)} KB)`)
+          const sizeKb = (f.size / 1024).toFixed(1)
+          const isEmpty = f.size < 200
+          const flag = isEmpty ? '⚠️ 数据为空' : '✅'
+          console.log(`   ${i + 1}. ${f.name} (${sizeKb} KB) ${flag}`)
+          if (isEmpty && i === 0) {
+            console.log(`[AutoStitch] ⚠️ 激光点云数据为空！仅含表头，蓝牙可能未传数据`)
+            console.log(`[AutoStitch]    算法仍会继续，但将生成空点云（无有效深度点）`)
+          }
         })
       } else {
         console.log('[AutoStitch] ❌ 未找到点云文件 (pointCloud_data_*.txt)')
@@ -969,7 +993,9 @@ async function checkInputFiles(dataDir, batchNo) {
     if (photoDirExists) {
       const { files: entries } = await storage.file.readDir(photoDir)
       const photoFiles = entries.filter(
-        (f) => f.type === 'file' && (f.name.endsWith('.jpg') || f.name.endsWith('.png') || f.name.endsWith('.jpeg')),
+        (f) =>
+          f.type === 'file' &&
+          (f.name.endsWith('.jpg') || f.name.endsWith('.png') || f.name.endsWith('.jpeg')),
       )
 
       console.log(`[AutoStitch] 📷 照片文件: ${photoFiles.length} 张`)
@@ -999,12 +1025,50 @@ async function checkInputFiles(dataDir, batchNo) {
 /**
  * 检查输出文件
  */
-async function checkOutputFiles(outputFile, dataDir, batchNo) {
+async function preCachePanorama(dataDir, batchNo, method) {
+  const { Directory } = await import('@capacitor/filesystem')
+  const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
+  const panoNames =
+    method === 'standard'
+      ? ['pano_standard.png', 'pano_raw.png']
+      : ['pano_raw.png', 'pano_standard.png']
+
+  for (const panoName of panoNames) {
+    try {
+      const panoPath = `${batchFolder}/ptcr_output/${panoName}`
+      const { Filesystem } = await import('@capacitor/filesystem')
+      const readResult = await Filesystem.readFile({
+        path: panoPath,
+        directory: Directory.External,
+      })
+      if (readResult?.data) {
+        const dataUri = `data:image/png;base64,${readResult.data}`
+        setPanoramaCache(panoPath, dataUri)
+        console.log(
+          `[AutoStitch] 🚀 已预缓存全景图 (${(readResult.data.length / 1024).toFixed(0)} KB base64)`,
+        )
+        return
+      }
+    } catch (e) {}
+  }
+  console.warn('[AutoStitch] 预缓存全景图失败（不影响功能）')
+}
+
+async function checkOutputFiles(outputFile, dataDir, batchNo, method) {
   console.log('[AutoStitch] 📦 检查输出文件...')
 
   const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
   const outputDir = `${batchFolder}/ptcr_output`
-  const outputPath = `${outputDir}/ply_raw.ply`
+
+  const plyFileName =
+    method === 'raw'
+      ? 'fused_raw.ply'
+      : method === 'standard'
+        ? 'fused_standard.ply'
+        : 'ply_raw.ply'
+  const panoFileName = method === 'standard' ? 'pano_standard.png' : 'pano_raw.png'
+
+  const outputPath = `${outputDir}/${plyFileName}`
 
   console.log(`   ├─ 算法报告路径: ${outputFile}`)
   console.log(`   └─ 实际检查路径: ${outputPath}`)
@@ -1040,10 +1104,10 @@ async function checkOutputFiles(outputFile, dataDir, batchNo) {
 
       console.log('')
       const keyFiles = [
-        { name: 'pano_raw.png', desc: '全景图' },
+        { name: panoFileName, desc: '全景图' },
         { name: 'depth_sparse_ref.png', desc: '稀疏深度图' },
-        { name: 'ply_raw.ply', desc: '点云文件' },
-        { name: 'params.txt', desc: '相机参数' },
+        { name: plyFileName, desc: '点云文件' },
+        { name: 'imgs/params.txt', desc: '相机参数' },
       ]
 
       console.log('[AutoStitch] 🔑 关键输出文件:')
@@ -1104,7 +1168,12 @@ async function debugCheckPlugin() {
 
     console.log('[PtcrDiag] 📡 PtcrPlugin 对象:', Object.keys(PtcrPlugin).join(', '))
 
-    const methods = ['healthCheck', 'generateCloud0', 'generateCloudByRaw', 'generateCloudByStandard']
+    const methods = [
+      'healthCheck',
+      'generateCloud0',
+      'generateCloudByRaw',
+      'generateCloudByStandard',
+    ]
     for (const m of methods) {
       console.log(`[PtcrDiag]    ├─ ${m}:`, typeof PtcrPlugin[m])
     }
@@ -1114,7 +1183,9 @@ async function debugCheckPlugin() {
       console.log('[PtcrDiag] 🏥 healthCheck 返回:', JSON.stringify(hc))
 
       result.ok = hc.ok === true
-      result.detail.python = hc.ok ? `Python OK (task: ${hc.task})` : `Python 失败: ${hc.error || '未知'}`
+      result.detail.python = hc.ok
+        ? `Python OK (task: ${hc.task})`
+        : `Python 失败: ${hc.error || '未知'}`
       result.detail.scripts = hc.log || ''
 
       if (!result.ok) {
@@ -2600,8 +2671,6 @@ watch(
 onMounted(async () => {
   await init()
 
-  setupPtcrProgressListener()
-
   // --- 注册断开监听 ---
   registerDisconnectListener()
 
@@ -2639,10 +2708,6 @@ onMounted(async () => {
  * 组件卸载时的清理
  */
 onUnmounted(async () => {
-  if (ptcrProgressHandle) {
-    ptcrProgressHandle.remove()
-    ptcrProgressHandle = null
-  }
   // 标记组件已卸载，防止异步初始化继续执行
   isUnmounted = true
 

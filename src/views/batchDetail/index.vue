@@ -69,21 +69,15 @@ defineOptions({
   name: 'BatchDetailView'
 })
 
-import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, Icon } from 'vant'
+import { Filesystem, Directory } from '@capacitor/filesystem'
 import * as storage from '@/api/pointCloudStorage'
 import { usePanoramaViewer } from '@/composables/usePanoramaViewer.js'
-import panoramaImage from '@/assets/overViewTest/342cb14e88ccd258660d621bb53825f6.png'
-import { StatusBar } from '@capacitor/status-bar'
-import { setImmersive } from '@/utils/device/immersive'
-import {
-  lockToLandscape,
-  lockToPortrait,
-  enableScreenKeepAwake,
-  disableScreenKeepAwake,
-} from '@/utils/device/screen'
 import { createLogger } from '@/utils/logger'
+
+import { getPanoramaCache } from '@/utils/panoramaCache'
 
 const router = useRouter()
 const route = useRoute()
@@ -98,11 +92,8 @@ const loading = ref(false)
 const webglError = ref(false)
 let viewer = null
 
-onMounted(async () => {
-  await init()
-  setTimeout(() => {
-    initViewer()
-  }, 100)
+onMounted(() => {
+  initViewer()
 })
 
 onUnmounted(async () => {
@@ -110,37 +101,52 @@ onUnmounted(async () => {
     viewer.dispose()
     viewer = null
   }
-  await cleanupResourcesForExit()
 })
 
-async function init() {
-  //   try {
-  //   await StatusBar.setOverlaysWebView({ overlay: true })
-  //   await StatusBar.setBackgroundColor({ color: '#0e1420' })
-  //   await StatusBar.setStyle({ style: 'LIGHT' })
-  //   logger.debug('成功设置')
-  // } catch (err) {
-  //   logger.warn('StatusBar overlay set failed', err)
-  // }
-  // try {
-  //   await setImmersive(true)
-  //   logger.debug('成功设置')
-
-  // } catch (err) {
-  //   logger.warn('setImmersive initial calls failed', err)
-  // }
-}
-
-async function cleanupResourcesForExit(params) {
+async function getPanoramaUrl() {
   try {
-    // 延迟执行状态栏恢复，让页面先退出
+    const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+    const batchId = batchNum - 1
+    const panoPath = `${storage.path.batchFolder(tempFolderName, batchId)}/ptcr_output/pano_raw.png`
 
-    // 延迟执行沉浸模式关闭
-    // setTimeout(() => {
-    //   setImmersive(false)
-    // }, 250)
-  } catch (err) {
-    logger.warn('StatusBar restore overlays failed', err)
+    const cached = getPanoramaCache(panoPath)
+    if (cached) {
+      logger.debug('[getPanoramaUrl] 🚀 命中缓存，秒开！')
+      return cached
+    }
+
+    logger.debug('[getPanoramaUrl] 缓存未命中，从磁盘读取')
+    logger.debug('[getPanoramaUrl] 临时文件夹名:', tempFolderName)
+    logger.debug('[getPanoramaUrl] batchId:', batchId)
+    logger.debug('[getPanoramaUrl] 拼接路径:', panoPath)
+
+    try {
+      await Filesystem.stat({
+        path: panoPath,
+        directory: Directory.External,
+      })
+    } catch (statErr) {
+      logger.warn('[getPanoramaUrl] 文件不存在或无法访问:', panoPath, statErr)
+      return null
+    }
+
+    try {
+      const readResult = await Filesystem.readFile({
+        path: panoPath,
+        directory: Directory.External,
+      })
+      if (readResult && readResult.data) {
+        logger.debug('[getPanoramaUrl] 读取成功, base64长度:', readResult.data.length)
+        return `data:image/png;base64,${readResult.data}`
+      }
+    } catch (readErr) {
+      logger.warn('[getPanoramaUrl] readFile 失败:', readErr)
+    }
+
+    return null
+  } catch (e) {
+    logger.warn('[getPanoramaUrl] 获取算法全景图失败:', e)
+    return null
   }
 }
 
@@ -173,9 +179,12 @@ async function initViewer() {
 
   loading.value = true
   try {
-    await viewer.loadPanorama(panoramaImage)
+    const panoramaUrl = await getPanoramaUrl()
+    if (panoramaUrl) {
+      await viewer.loadPanorama(panoramaUrl)
+    }
   } catch (error) {
-    console.error('[BatchDetail] 全景图片加载失败:', error)
+    logger.error('全景图片加载失败:', error)
   } finally {
     loading.value = false
   }

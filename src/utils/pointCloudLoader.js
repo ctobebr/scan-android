@@ -9,8 +9,9 @@ import { stations } from '@/config/pointCloudStations.js'
  * 预加载所有点云文件
  * 使用 eager: true 在构建时预加载，运行时直接可用
  */
-const pointCloudFiles = import.meta.glob('/src/assets/pointCloud/**/pointCloud_data_*.txt', {
-  as: 'raw',
+const pointCloudFiles = import.meta.glob('../assets/pointCloud/**/pointCloud_data_*.txt', {
+  query: '?raw',
+  import: 'default',
   eager: true
 })
 

@@ -38,6 +38,9 @@ export function usePanoramaViewer(container, options = {}) {
   let animationId = null
   let hotspotClickCallback = null
   let hotspots = []
+  let contextLostHandler = null
+  let contextRestoredHandler = null
+  let isContextLost = false
 
   function init() {
     if (isInitialized) return
@@ -76,6 +79,22 @@ export function usePanoramaViewer(container, options = {}) {
     container.appendChild(cssRenderer.domElement)
 
     console.log('[PanoramaViewer] 渲染器创建完成, 尺寸:', container.clientWidth, 'x', container.clientHeight)
+
+    contextLostHandler = (event) => {
+      event.preventDefault()
+      isContextLost = true
+      stopRenderLoop()
+      console.log('[PanoramaViewer] WebGL 上下文丢失')
+    }
+    contextRestoredHandler = () => {
+      isContextLost = false
+      if (animationId === null && isInitialized) {
+        startRenderLoop()
+      }
+      console.log('[PanoramaViewer] WebGL 上下文已恢复')
+    }
+    renderer.domElement.addEventListener('webglcontextlost', contextLostHandler)
+    renderer.domElement.addEventListener('webglcontextrestored', contextRestoredHandler)
 
     createSphere()
 
@@ -138,10 +157,11 @@ export function usePanoramaViewer(container, options = {}) {
       console.log('[PanoramaViewer] 开始加载纹理:', url)
 
       const loader = new THREE.TextureLoader()
+      loader.setCrossOrigin('anonymous')
       loader.load(
         url,
         (texture) => {
-          console.log('[PanoramaViewer] 纹理加载成功:', url)
+          console.log('[PanoramaViewer] 纹理加载成功:', url.substring(0, 80))
           texture.wrapS = THREE.RepeatWrapping
           texture.wrapT = THREE.ClampToEdgeWrapping
           texture.repeat.set(1, 1)
@@ -157,11 +177,16 @@ export function usePanoramaViewer(container, options = {}) {
           resolve()
         },
         (progress) => {
-          console.log('[PanoramaViewer] 纹理加载进度:', progress)
+          if (progress.total) {
+            console.log('[PanoramaViewer] 纹理加载进度:', Math.round((progress.loaded / progress.total) * 100), '%')
+          }
         },
         (error) => {
-          console.error('[PanoramaViewer] 纹理加载失败:', url, error)
-          reject(error)
+          const errorDetail = error
+            ? (error.message || error.toString ? error.toString() : JSON.stringify(error))
+            : 'unknown'
+          console.error('[PanoramaViewer] 纹理加载失败:', url.substring(0, 80), '错误:', errorDetail)
+          reject(new Error(`纹理加载失败: ${errorDetail}`))
         }
       )
     })
@@ -348,6 +373,7 @@ function checkHotspotClick() {
   function startRenderLoop() {
     function render() {
       animationId = requestAnimationFrame(render)
+      if (isContextLost) return
       if (controls && controls.enabled) {
         controls.update()
       }
@@ -380,10 +406,19 @@ function checkHotspotClick() {
   function dispose() {
     console.log('[PanoramaViewer] 开始释放资源...')
     stopRenderLoop()
+    isInitialized = false
 
     if (renderer && renderer.domElement) {
       const element = renderer.domElement
       element.removeEventListener('click', onMouseClick)
+      if (contextLostHandler) {
+        element.removeEventListener('webglcontextlost', contextLostHandler)
+        contextLostHandler = null
+      }
+      if (contextRestoredHandler) {
+        element.removeEventListener('webglcontextrestored', contextRestoredHandler)
+        contextRestoredHandler = null
+      }
     }
     window.removeEventListener('resize', onResize)
 
@@ -402,6 +437,17 @@ function checkHotspotClick() {
     }
 
     if (renderer) {
+      try {
+        const gl = renderer.getContext()
+        if (gl) {
+          const loseContextExt = gl.getExtension('WEBGL_lose_context')
+          if (loseContextExt) {
+            loseContextExt.loseContext()
+          }
+        }
+      } catch (e) {
+        console.warn('[PanoramaViewer] 强制丢失上下文失败:', e)
+      }
       renderer.dispose()
       if (renderer.domElement && renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement)
@@ -427,7 +473,7 @@ function checkHotspotClick() {
     raycaster = null
     mouse = null
     controls = null
-    isInitialized = false
+    isContextLost = false
     console.log('[PanoramaViewer] 资源释放完成')
   }
 
