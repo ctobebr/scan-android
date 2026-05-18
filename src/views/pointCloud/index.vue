@@ -36,6 +36,10 @@
               >{{ collectionProgress.currentPoints.toLocaleString() }} 点</span
             >
           </div>
+          <!-- <div class="stat-row">
+            <span class="stat-label">速率:</span>
+            <span class="stat-value">{{ pointsPerSecond.toLocaleString() }} 点/秒</span>
+          </div> -->
           <div class="stat-row">
             <span class="stat-label">剩余:</span>
             <span class="stat-value">{{ collectionProgress.remainingTime }} 秒</span>
@@ -56,7 +60,6 @@
           预览
         </button>
         <button
-          @click="handleStitch('cloud0')"
           class="stitch-btn"
           :disabled="saving || !enableSave || isStitching"
         >
@@ -656,84 +659,7 @@ function getCurrentBatchNo() {
   return String(Math.max(0, idx)).padStart(3, '0')
 }
 
-async function handleStitch(mode) {
-  if (isStitching.value) {
-    showToast({ message: '拼接进行中，请等待', position: 'bottom' })
-    return
-  }
-  if (dataBatchCounter.value < 1) {
-    showToast({ message: '请先采集点位数据', position: 'bottom' })
-    return
-  }
 
-  try {
-    isStitching.value = true
-    stitchProgressText.value = '检查插件状态...'
-
-    const diagResult = await debugCheckPlugin()
-    if (!diagResult.ok) {
-      showToast({
-        message: `PtcrPlugin 不可用: ${diagResult.error || '插件未安装到 APK'}`,
-        position: 'bottom',
-        duration: 5000,
-      })
-      return
-    }
-
-    const dataDir = await getDataDir()
-    const batchNo = getCurrentBatchNo()
-
-    stitchProgressText.value = '拼接中...'
-    showLoadingToast({
-      message: `拼接中 (${mode})...`,
-      forbidClick: true,
-      duration: 0,
-    })
-
-    let result
-    if (mode === 'cloud0') {
-      result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
-    } else if (mode === 'raw') {
-      result = await PtcrPlugin.generateCloudByRaw({ dataDir, batchNo })
-    } else if (mode === 'standard') {
-      result = await PtcrPlugin.generateCloudByStandard({ dataDir, batchNo })
-    }
-
-    closeToast()
-
-    if (result.ok) {
-      showToast({
-        message: `拼接完成: ${result.outputFile?.split('/').pop() || 'success'}`,
-        position: 'bottom',
-        duration: 3000,
-      })
-      logger.debug('[PtcrPlugin] 拼接成功', result)
-    } else {
-      showToast({
-        message: `拼接失败: ${result.error || '未知错误'}`,
-        position: 'bottom',
-        duration: 5000,
-      })
-      logger.error('[PtcrPlugin] 拼接失败', result)
-    }
-  } catch (e) {
-    closeToast()
-
-    const errMsg = e.message || String(e)
-    if (errMsg.includes('not implemented on android')) {
-      showToast({
-        message: 'PtcrPlugin 未安装到手机，请重新构建 APK',
-        position: 'bottom',
-        duration: 5000,
-      })
-    } else {
-      showToast({ message: `拼接异常: ${errMsg}`, position: 'bottom', duration: 5000 })
-    }
-    logger.error('[PtcrPlugin] handleStitch error', e)
-  } finally {
-    isStitching.value = false
-  }
-}
 
 // ==============================================
 // 自动拼接算法相关函数
@@ -824,7 +750,7 @@ async function triggerAutoStitch() {
       //    cloud0:    无 ONNX 深度估计，稀疏彩色点云（最快 ~30s），输出 ply_raw.ply
       //    raw:       ONNX 深度估计(raw)，密集彩色点云（~70s），输出 fused_raw.ply
       //    standard:  ONNX 深度估计(standard)+垂直矫正，高质量密集彩色点云（~151s），输出 fused_standard.ply
-      const method = 'raw'
+      const method = 'cloud0'
 
       let result
       let startTime
@@ -1778,11 +1704,11 @@ async function subscribeToBluetoothNotifications(deviceId) {
       NUS_NOTIFY_CHAR_UUID,
       (uint8) => {
         try {
-          // 检查单个点位点云数量上限
+          // 检查单个站位点云数量上限
           if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
             return
           }
-
+          // 单帧单包时，解析得到points长度是1，单帧多包时，解析得到points长度是3
           const { points, errors } = parser.parse(uint8)
           if (errors && errors.length > 0) {
             logger.warn('parse errors', errors)
@@ -2058,6 +1984,11 @@ const progressPercentage = computed(() => {
   return Math.min(percentage, 100)
 })
 
+const pointsPerSecond = computed(() => {
+  if (!collectionProgress.value.isCollecting || collectionProgress.value.elapsedTime <= 0) return 0
+  return Math.round(collectionProgress.value.currentPoints / collectionProgress.value.elapsedTime)
+})
+
 // ==============================================
 // 初始化和设置函数
 // ==============================================
@@ -2125,6 +2056,9 @@ async function init() {
           minDistance: initialCameraHeight / 2, // 5米（初始的1/2）
           maxDistance: initialCameraHeight * 2, // 20米（初始的2倍）
           maxPolarAngle: Math.PI / 2,
+          // minDistance: initialCameraHeight / 10,
+          // maxDistance: initialCameraHeight * 10,
+
         },
       }
 

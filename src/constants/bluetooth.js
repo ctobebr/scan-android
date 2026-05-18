@@ -21,6 +21,11 @@
  * 校验和计算：
  *   只对 CMD + Length + Data 三部分求和，取低 8 位
  *
+ * 点云数据帧 (CMD_OUTPUT_XYZ: 0xA1 / CMD_OUTPUT_POLAR: 0xA2):
+ *   单帧包含 3 个点，每个点 6 字节(int16×3)，数据长度 N = 0x12 = 18 字节
+ *   帧总长度 = 5 + 18 = 23 字节
+ *   解析器通过 dataLength / 6 动态计算点数，兼容任意点数
+ *
  * @module @/constants/bluetooth
  */
 

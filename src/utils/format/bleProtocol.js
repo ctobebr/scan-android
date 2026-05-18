@@ -13,9 +13,18 @@
  *
  * 校验和计算：
  *   只对 CMD + Length + Data 三部分求和，取低 8 位
+ *
+ * 点云数据帧 (CMD_OUTPUT_XYZ: 0xA1 / CMD_OUTPUT_POLAR: 0xA2):
+ *   单帧包含 3 个点，每个点 6 字节(int16×3)，数据长度 N = 0x12 = 18 字节
+ *   帧总长度 = 5 + 18 = 23 字节
+ *   解析器通过 dataLength / 6 动态计算点数，兼容任意点数
  */
 // 导入协议常量，避免硬编码
 // 原因：统一常量管理，消除重复定义
+//点云渲染分三种模式
+// ①下位机直接发 XYZ 坐标，渲染直接用下位机发送的 XYZ
+// ②下位机发极坐标，上位机转笛卡尔，渲染用上位机转换后的 XYZ
+// ③双格式模式（下位机同时发 XYZ + 极坐标），渲染优先使用下位机发送的 XYZ（更精确）
 import {
   CONTROL_COMMANDS,
   DEVICE_DATA_COMMANDS,
@@ -56,7 +65,7 @@ export class parseBleData {
       dataIndex: 0,
       packetData: null,
       checksum: 0, // 校验和需要包含 Cmd, Len, Data
-      accumulatedPoints: [], // 用于累积解析出的点  目前单帧单点并没有累积，但是如果后续有单帧多点目前的程序是支持累积的
+      accumulatedPoints: [], // 累积解析出的点，单帧3点(xyz/polar)或双格式合并后累积，parse()返回后清空
       photoSession: {
         active: false,
         previewStarted: false,
@@ -428,8 +437,8 @@ export class parseBleData {
       }
     }
 
-    // 返回当前批次内累积的点（目前只有一个点）
-    // 这样 bluetooth.js 可以直接使用 parse() 的返回值
+    // 返回当前批次内累积的所有点（单帧3点直接返回，双格式合并后返回）
+    // 调用方可直接使用 parse() 返回的 points 数组
     const points = this.protocolState.accumulatedPoints.slice()
     this.protocolState.accumulatedPoints = [] // 清空内部缓冲
 
@@ -584,7 +593,10 @@ export class parseBleData {
           // 尝试处理挂起的结束请求
           this._tryProcessPendingEndRequests()
           // 拍照完成后发送0x91通知下位机准备就绪
-          if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
+          if (
+            this.protocolState.photoSession.active &&
+            this.protocolState.photoSession.previewStarted
+          ) {
             this._sendCameraReadyNotification()
           }
           if (this.enableDebugLogging) {
@@ -900,26 +912,32 @@ export class parseBleData {
    * @param {Array} polarPoints - 极坐标格式的点数据
    */
   _mergeAndOutputPoints(xyzPoints, polarPoints) {
-    // 单帧单点场景,直接取第一个元素合并
-    const xyz = xyzPoints[0]
-    const polar = polarPoints[0]
+    const count = Math.min(xyzPoints.length, polarPoints.length)
 
-    // 合并后的点: 使用XYZ的坐标(更精确,避免重复渲染)
-    // 同时保留极坐标的原始数据用于保存到文件
-    const mergedPoint = {
-      x: xyz.x,
-      y: xyz.y,
-      z: xyz.z,
-      pitch: polar.pitch,
-      yaw: polar.yaw,
-      distanceM: polar.distanceM,
-      intensity: polar.intensity,
-      pitchDeg: polar.pitchDeg,
-      yawDeg: polar.yawDeg,
+    if (xyzPoints.length !== polarPoints.length) {
+      logger.warn(
+        `[DualMode] XYZ和极坐标点数不匹配: xyz=${xyzPoints.length}, polar=${polarPoints.length}, 只合并前 ${count} 对`,
+      )
     }
 
-    this.protocolState.accumulatedPoints.push(mergedPoint)
-    // logger.debug('[DualMode] XYZ和极坐标数据合并成功')
+    for (let i = 0; i < count; i++) {
+      const xyz = xyzPoints[i]
+      const polar = polarPoints[i]
+
+      const mergedPoint = {
+        x: xyz.x,
+        y: xyz.y,
+        z: xyz.z,
+        pitch: polar.pitch,
+        yaw: polar.yaw,
+        distanceM: polar.distanceM,
+        intensity: polar.intensity,
+        pitchDeg: polar.pitchDeg,
+        yawDeg: polar.yawDeg,
+      }
+
+      this.protocolState.accumulatedPoints.push(mergedPoint)
+    }
   }
 
   /**
@@ -1198,19 +1216,19 @@ export class parseBleData {
    */
   reset(onReset) {
     // 重置协议解析状态
-    this.resetProtocolState();
+    this.resetProtocolState()
 
     // 重置累积的点
-    this.protocolState.accumulatedPoints = [];
+    this.protocolState.accumulatedPoints = []
 
     // 重置拍照会话状态
     this.protocolState.photoSession = {
       active: false,
       previewStarted: false,
-    };
+    }
 
     // 重置数据合并状态
-    this._clearPendingMergeData();
+    this._clearPendingMergeData()
 
     // 重置输出模式检测状态
     this.outputMode = {
@@ -1221,23 +1239,23 @@ export class parseBleData {
     };
 
     // 重置其他状态
-    this.isProcessingPhoto = false;
-    this.pendingEndRequests = [];
-    this.photoRequestQueue = [];
-    this.cameraReadyPromise = null;
+    this.isProcessingPhoto = false
+    this.pendingEndRequests = []
+    this.photoRequestQueue = []
+    this.cameraReadyPromise = null
 
     // 重置调试计数器
-    this.cameraCmdCount = 0;
-    this.cameraCallbackCount = 0;
+    this.cameraCmdCount = 0
+    this.cameraCallbackCount = 0
 
     // 重置照片重命名标志
-    this.reNameFlag = 0;
+    this.reNameFlag = 0
 
     // 调用外部重置回调
     if (typeof onReset === 'function') {
-      onReset();
+      onReset()
     }
 
-    logger.debug('Parser reset complete');
+    logger.debug('Parser reset complete')
   }
 }
