@@ -222,7 +222,7 @@ export {
  * API 版本号
  * 与 package.json 版本保持一致
  */
-export const VERSION = '1.0.4'
+export const VERSION = '1.1.0'
 
 /**
  * 构建日期
