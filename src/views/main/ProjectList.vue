@@ -224,6 +224,22 @@ watch(
       observeListItems()
     }
   },
+)
+
+/**
+ * 监听增量详情加载完成：当 loadingDetails 从 true 变为 false 时，
+ * 说明后台分批加载的缩略图已全部到位，需重新绑定 IntersectionObserver
+ * 来懒加载当前可见范围内的新图片
+ */
+watch(
+  () => folderStore.loadingDetails,
+  (newVal, oldVal) => {
+    if (oldVal && !newVal) {
+      lastRenderStart = -1
+      lastRenderEnd = -1
+      observeListItems()
+    }
+  },
 )</script>
 
 <!-- 注意：这里使用了 scoped 样式，它只会影响当前组件 -->

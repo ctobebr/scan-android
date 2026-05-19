@@ -15,8 +15,13 @@ export const useFoldersStore = defineStore('folders', () => {
   // 状态
   const projectFolders = ref([])
   const loading = ref(false)
+  const loadingDetails = ref(true)
   const lastFetched = ref(null)
   const fetchPromise = ref(null)
+  /** 增量加载详情的任务Promise，用于去重 */
+  let detailsLoadPromise = null
+  /** 增量加载的取消令牌（自增计数器），防止旧批次覆盖新数据 */
+  let detailsLoadToken = 0
 
   // 批次变化回调函数（由 pointCloud/index.vue 注册）
   const batchChangeCallbacks = ref(new Set())
@@ -345,6 +350,14 @@ export const useFoldersStore = defineStore('folders', () => {
 
   /**
    * 加载项目文件夹
+   *
+   * 分两步执行：
+   * 1. 快速获取文件夹名列表，立即渲染UI（loading=false）
+   * 2. 后台分批增量加载缩略图和文件状态等详情，逐批更新列表
+   *
+   * 这种增量模式避免了41个文件夹同时执行getThumbnail+checkFolderFileStatus
+   * 造成的82次文件I/O并行阻塞，与ProjectList的虚拟滚动懒加载模式保持一致
+   *
    * @param {boolean} [forceRefresh=false] - 是否强制刷新
    * @returns {Promise<Array>} 项目文件夹数组
    */
@@ -355,36 +368,32 @@ export const useFoldersStore = defineStore('folders', () => {
     }
 
     if (!forceRefresh && projectFolders.value.length > 0 && lastFetched.value) {
-      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000 // 计算5分钟前的时间戳
-      if (lastFetched.value > fiveMinutesAgo) {// 如果上次获取时间 > 5分钟前
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
+      if (lastFetched.value > fiveMinutesAgo) {
         logger.debug('使用缓存的数据')
         return projectFolders.value
       }
     }
 
     loading.value = true
+    loadingDetails.value = true
 
     fetchPromise.value = (async () => {
       try {
         logger.info('开始加载项目文件夹')
-        const folders = await storage.session.listFolders()
-        const withDetails = await Promise.all(
-          folders.map(async (folder) => {
-            return getFolderDetails(folder)
-          }),
-        )
 
-        // 按 sessionId 解析的时间倒序排列（使用项目创建时间排序）
-        withDetails.sort((a, b) => {
-          const dateA = parseSessionIdToDate(a.sessionId)
-          const dateB = parseSessionIdToDate(b.sessionId)
-          return (dateB?.getTime() || 0) - (dateA?.getTime() || 0)
-        })
-        projectFolders.value = withDetails
+        // 第一步：只列目录名，快速构建基础列表
+        const folders = await storage.session.listFolders()
+        const basicFolders = buildBasicFolderList(folders)
+        projectFolders.value = basicFolders
         lastFetched.value = Date.now()
 
-        logger.info(`加载完成，共 ${withDetails.length} 个项目`)
-        return withDetails
+        logger.info(`基础列表加载完成，共 ${basicFolders.length} 个项目`)
+
+        // 第二步：后台增量加载详情（缩略图、文件状态等）
+        loadFolderDetailsIncremental(basicFolders)
+
+        return basicFolders
       } catch (e) {
         logger.error('加载失败', e)
         throw e
@@ -395,6 +404,107 @@ export const useFoldersStore = defineStore('folders', () => {
     })()
 
     return fetchPromise.value
+  }
+
+  /**
+   * 根据文件夹名列表构建基础项目对象
+   * 仅根据文件夹名解析基本信息，不执行任何文件I/O操作
+   *
+   * @param {Array} folders - storage.session.listFolders() 的返回结果
+   * @returns {Array} 基础文件夹对象数组
+   */
+  function buildBasicFolderList(folders) {
+    const basicFolders = folders.map((folder) => {
+      const info = folder.info || {}
+      const sessionDate = parseSessionIdToDate(info.sessionId || folder.name)
+      return {
+        name: folder.name,
+        thumbnail: null,
+        projectName: info.projectName || info.displayName,
+        sessionId: info.sessionId,
+        displayName: info.displayName,
+        lastModified: sessionDate?.getTime() || 0,
+        displayDate: '',
+        hasFiles: false,
+        type: info.type,
+        _detailsLoaded: false,
+      }
+    })
+
+    basicFolders.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
+    return basicFolders
+  }
+
+  /**
+   * 后台增量加载文件夹详情
+   *
+   * 分批执行getFolderDetails（缩略图 + 文件状态检查），
+   * 每批5个文件夹，逐批完成后就地更新projectFolders响应式列表。
+   * 与ProjectList的虚拟滚动模式统一：UI立即可用，详情渐次到位。
+   *
+   * @param {Array} basicFolders - buildBasicFolderList返回的基础列表
+   */
+  async function loadFolderDetailsIncremental(basicFolders) {
+    // 使用自增令牌取消之前的增量加载任务
+    const token = ++detailsLoadToken
+
+    const BATCH_SIZE = 5
+    const DELAY_BETWEEN_BATCHES_MS = 50
+
+    detailsLoadPromise = (async () => {
+      try {
+        for (let i = 0; i < basicFolders.length; i += BATCH_SIZE) {
+          // 令牌不匹配说明已有新的fullRefresh，立即终止
+          if (token !== detailsLoadToken) return
+
+          const batch = basicFolders.slice(i, i + BATCH_SIZE)
+          const results = await Promise.allSettled(
+            batch.map((folder) =>
+              getFolderDetails({
+                name: folder.name,
+                info: {
+                  projectName: folder.projectName,
+                  sessionId: folder.sessionId,
+                  displayName: folder.displayName,
+                  displayDate: folder.displayDate,
+                  type: folder.type,
+                },
+              }),
+            ),
+          )
+
+          // 逐项就地更新到响应式列表
+          results.forEach((result, j) => {
+            const folderName = batch[j].name
+            const index = projectFolders.value.findIndex((f) => f.name === folderName)
+            if (index === -1) return
+
+            if (result.status === 'fulfilled') {
+              projectFolders.value[index] = { ...result.value, _detailsLoaded: true }
+            } else {
+              // 加载失败时保留基本信息，标记已尝试加载
+              projectFolders.value[index] = {
+                ...projectFolders.value[index],
+                _detailsLoaded: true,
+              }
+              logger.warn(`加载文件夹 ${folderName} 详情失败`, result.reason)
+            }
+          })
+
+          // 批次间短延迟，避免持续占满I/O
+          if (i + BATCH_SIZE < basicFolders.length) {
+            await new Promise((r) => setTimeout(r, DELAY_BETWEEN_BATCHES_MS))
+          }
+        }
+
+        logger.info('所有文件夹详情加载完成')
+      } catch (e) {
+        logger.error('增量加载详情异常', e)
+      } finally {
+        loadingDetails.value = false
+        detailsLoadPromise = null
+      }
+    })()
   }
 
   /**
@@ -527,6 +637,7 @@ export const useFoldersStore = defineStore('folders', () => {
   return {
     projectFolders,
     loading,
+    loadingDetails,
     lastFetched,
     foldersCount,
     folderItems,

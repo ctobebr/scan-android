@@ -31,6 +31,11 @@ const routes = [
     name: 'Overview',
     component: () => import('@/views/pointCloud/component/overView.vue'),
   },
+  {
+    path: '/splice',
+    name: 'SpliceView',
+    component: () => import('@/views/splice/index.vue'),
+  },
 ]
 
 const router = createRouter({

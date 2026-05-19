@@ -59,10 +59,7 @@
         <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
           预览
         </button>
-        <button
-          class="stitch-btn"
-          :disabled="saving || !enableSave || isStitching"
-        >
+        <button class="stitch-btn" :disabled="saving || !enableSave || isStitching">
           {{ isStitching ? stitchProgressText || '拼接中...' : '拼接' }}
         </button>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
@@ -537,6 +534,10 @@ function resetForNewBatch() {
 
 /**
  * 保存当前点位数据
+ *
+ * 根据采集过程中实际接收到的数据格式自动选择文件头：
+ * - 仅XYZ:    x(m) y(m) z(m)
+ * - 含极坐标: x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)
  */
 async function saveCurrentBatch() {
   if (!currentSessionId) return
@@ -547,26 +548,27 @@ async function saveCurrentBatch() {
   }
 
   try {
-    // 使用临时文件夹名保存
     const tempFolderName = storage.path.getTempSessionName(currentSessionId)
 
-    // 添加文件头
-    const header = 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)'
+    // 根据实际数据格式动态选择文件头（而非写死6列）
+    const header = currentBatchData.hasPolarData
+      ? 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)'
+      : 'x(m) y(m) z(m)'
     const linesWithHeader = [header, ...currentBatchData.rawLines]
 
-    // 保存当前点位的数据到批次文件夹
     await storage.batch.save(tempFolderName, bid, linesWithHeader, currentBatchData.photos)
     logger.debug(
       '[PointCloud] 点位保存成功到临时文件夹',
       bid,
       '点云行数:',
-      linesWithHeader.length - 1, // 减去文件头
+      linesWithHeader.length - 1,
       '照片数:',
       currentBatchData.photos.length,
+      '格式:',
+      currentBatchData.hasPolarData ? 'XYZ+极坐标(6列)' : 'XYZ(3列)',
     )
 
-    // 清空当前点位数据（为下一个点位做准备）
-    currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
+    currentBatchData = { rawLines: [], photos: [], pointCount: 0, hasPolarData: false }
   } catch (e) {
     logger.error('[PointCloud] saveCurrentBatch error', e)
     throw e
@@ -658,8 +660,6 @@ function getCurrentBatchNo() {
   const idx = dataBatchCounter.value - 1
   return String(Math.max(0, idx)).padStart(3, '0')
 }
-
-
 
 // ==============================================
 // 自动拼接算法相关函数
@@ -1275,14 +1275,25 @@ async function cleanupResourcesForPause() {
 }
 
 /**
+ * cleanupResourcesForExit 全局超时时间（毫秒）
+ * 防止任何异步清理操作阻塞路由切换过久
+ */
+const EXIT_CLEANUP_TIMEOUT_MS = 5000
+
+/**
  * 路由切换时彻底清理资源
+ *
+ * 清理顺序：定时器/监听器 → 多站点资源 → 渲染器 → 蓝牙会话 → 状态变量 → 系统设置
+ * 所有步骤均有独立的错误捕获，单步失败不影响后续步骤
+ *
  * @param {Object} options - 清理选项
- * @param {boolean} options.restorePortrait - 是否恢复竖屏
- * @param {boolean} options.disableKeepAwake - 是否禁用屏幕常亮
- * @param {boolean} options.disableImmersive - 是否禁用沉浸模式
- * @param {boolean} options.restoreStatusBar - 是否恢复状态栏设置
- * @param {boolean} options.resetState - 是否重置状态变量
- * @param {boolean} options.cleanupRenderer - 是否清理渲染器资源（默认true）
+ * @param {boolean} [options.restorePortrait=true] - 是否恢复竖屏
+ * @param {boolean} [options.disableKeepAwake=true] - 是否禁用屏幕常亮
+ * @param {boolean} [options.disableImmersive=true] - 是否禁用沉浸模式
+ * @param {boolean} [options.restoreStatusBar=true] - 是否恢复状态栏设置
+ * @param {boolean} [options.resetState=true] - 是否重置状态变量
+ * @param {boolean} [options.cleanupRenderer=true] - 是否清理渲染器资源
+ * @param {boolean} [options.nonBlockingBleCleanup=false] - BLE清理是否fire-and-forget（路由退出场景推荐使用，不阻塞跳转）
  */
 async function cleanupResourcesForExit(options = {}) {
   const {
@@ -1292,6 +1303,7 @@ async function cleanupResourcesForExit(options = {}) {
     restoreStatusBar = true,
     resetState = true,
     cleanupRenderer: shouldCleanupRenderer = true,
+    nonBlockingBleCleanup = false,
   } = options
 
   if (_hasCleaned) {
@@ -1301,36 +1313,62 @@ async function cleanupResourcesForExit(options = {}) {
 
   _hasCleaned = true
 
+  let timeoutId = null
+
   try {
-    // 1. 清理定时器和事件监听器
-    cleanupTimersAndListeners()
+    // 整体清理用全局超时包裹，到期后直接 resolve，不阻塞调用方
+    await Promise.race([
+      (async () => {
+        // 1. 清理定时器和事件监听器
+        cleanupTimersAndListeners()
 
-    // 2. 清理多站点相关资源
-    cleanupMultiStationResources()
+        // 2. 清理多站点相关资源
+        cleanupMultiStationResources()
 
-    // 3. 根据选项决定是否清理渲染器资源
-    if (shouldCleanupRenderer) {
-      await cleanupRenderer()
-    } else {
-      logger.debug('[PointCloud] 跳过渲染器清理，保持点云数据')
-    }
+        // 3. 根据选项决定是否清理渲染器资源
+        if (shouldCleanupRenderer) {
+          await cleanupRenderer()
+        } else {
+          logger.debug('[PointCloud] 跳过渲染器清理，保持点云数据')
+        }
 
-    // 4. 清理蓝牙会话
-    await cleanupBluetoothSession()
+        // 4. 清理蓝牙会话
+        if (nonBlockingBleCleanup) {
+          // 路由退出场景：fire-and-forget，不阻塞跳转
+          // 注意：BLE清理失败时仅记录日志，不影响页面退出
+          cleanupBluetoothSession().catch((e) =>
+            logger.warn('[PointCloud] 后台BLE清理失败（非阻塞模式）', e),
+          )
+        } else {
+          await cleanupBluetoothSession()
+        }
 
-    // 5. 重置状态变量
-    resetStateVariables(resetState)
+        // 5. 重置状态变量
+        resetStateVariables(resetState)
 
-    // 6. 恢复系统设置
-    await restoreSystemSettings({
-      restoreStatusBar,
-      disableImmersive,
-      disableKeepAwake,
-      restorePortrait,
-    })
+        // 6. 恢复系统设置
+        await restoreSystemSettings({
+          restoreStatusBar,
+          disableImmersive,
+          disableKeepAwake,
+          restorePortrait,
+        })
+      })(),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          logger.warn(
+            `[PointCloud] cleanupResourcesForExit 超时（${EXIT_CLEANUP_TIMEOUT_MS}ms），强制退出`,
+          )
+          resolve()
+        }, EXIT_CLEANUP_TIMEOUT_MS)
+      }),
+    ])
   } catch (error) {
     logger.error('[PointCloud] 清理资源时发生错误', error)
   } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId)
+    }
     logger.debug('[PointCloud] cleanupResourcesForExit 执行结束')
   }
 }
@@ -1505,20 +1543,35 @@ async function flushDeferredRender() {
 }
 
 /**
+ * BLE取消订阅操作超时时间（毫秒）
+ * 防止底层BLE descriptor写入阻塞过久导致路由切换卡死
+ */
+const BLE_UNSUBSCRIBE_TIMEOUT_MS = 3000
+
+/**
  * 取消蓝牙订阅
+ * 带超时保护，超时后自动放弃等待，不阻塞主流程
  * @returns {Promise<void>}
  */
 async function unsubscribeFromBluetooth() {
   try {
     const deviceId = bluetoothStore.connectedDeviceId
-    if (deviceId) {
-      await bluetoothService.unsubscribeFromNotifications(
+    if (!deviceId) return
+
+    await Promise.race([
+      bluetoothService.unsubscribeFromNotifications(
         deviceId,
         NUS_SERVICE_UUID,
         NUS_NOTIFY_CHAR_UUID,
-      )
-      logger.debug('[unsubscribeFromBluetooth] 蓝牙订阅已取消')
-    }
+      ),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`BLE取消订阅超时（${BLE_UNSUBSCRIBE_TIMEOUT_MS}ms）`)),
+          BLE_UNSUBSCRIBE_TIMEOUT_MS,
+        ),
+      ),
+    ])
+    logger.debug('[unsubscribeFromBluetooth] 蓝牙订阅已取消')
   } catch (e) {
     logger.warn('[unsubscribeFromBluetooth] 取消订阅失败', e)
   }
@@ -1724,13 +1777,13 @@ async function subscribeToBluetoothNotifications(deviceId) {
             points.forEach((p) => {
               // 根据数据类型决定保存格式
               if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
-                // 完整数据：合并后的数据或单独的极坐标数据
-                // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
+                // 极坐标数据：标记为含极坐标格式，保存6列
+                currentBatchData.hasPolarData = true
                 currentBatchData.rawLines.push(
                   `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
                 )
               } else {
-                // 只有XYZ数据（单格式模式）
+                // 仅XYZ数据（单格式模式）：3列
                 currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
               }
             })
@@ -1813,8 +1866,13 @@ function startSessionParser() {
  * 开始数据采集
  */
 async function startDataStream() {
+  console.log('点击startDataStream')
   if (isCollecting.value) {
     showToast({ message: '正在采集中...', position: 'bottom' })
+    return
+  }
+  if (isStitching.value) {
+    showToast({ message: '算法拼接中，请等待完成后重试', position: 'bottom' })
     return
   }
   if (dataBatchCounter.value >= 50) {
@@ -1862,7 +1920,7 @@ async function startDataStream() {
   }
 
   // 重置当前点位数据
-  currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
+  currentBatchData = { rawLines: [], photos: [], pointCount: 0, hasPolarData: false }
   clearAccumulationBuffer()
 
   isCollecting.value = true
@@ -2058,7 +2116,6 @@ async function init() {
           maxPolarAngle: Math.PI / 2,
           // minDistance: initialCameraHeight / 10,
           // maxDistance: initialCameraHeight * 10,
-
         },
       }
 
@@ -2700,6 +2757,7 @@ onActivated(async () => {
 /**
  * 路由离开守卫
  * 根据目标路由执行不同的清理策略
+ * 调用router.back()时，会先等待 onBeforeRouteLeave执行完毕，这里将部分场景下蓝牙取消订阅修改为非阻塞的，避免影响路由跳转
  */
 onBeforeRouteLeave(async (to, from, next) => {
   logger.debug('[PointCloud] 执行 beforeRouteLeave 守卫')
@@ -2729,7 +2787,10 @@ onBeforeRouteLeave(async (to, from, next) => {
 
       // 标记组件已卸载，防止 onUnmounted 中重复清理
       isUnmounted = true
-      await cleanupResourcesForExit()
+
+      // nonBlockingBleCleanup: true → BLE取消订阅作为fire-and-forget后台执行
+      // 不阻塞路由跳转，避免BLE底层descriptor写入延迟导致UI卡死
+      await cleanupResourcesForExit({ nonBlockingBleCleanup: true })
     }
 
     next()
@@ -2903,7 +2964,9 @@ function jumpToBatchDetail(stationId) {
   user-select: none;
   -webkit-touch-callout: none;
 }
-
+/**
+幕布画板背景色
+*/
 .three-container {
   flex: 1;
   width: 100%;
