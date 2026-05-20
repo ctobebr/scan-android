@@ -100,7 +100,51 @@ export class parseBleData {
 
     // 照片重命名标志,用于生成唯一文件名
     this.reNameFlag = 0
+
+    // 解析器暂停状态（方案C：页面级订阅，站位间切换时不取消订阅，仅暂停解析）
+    this._paused = false
   }
+
+  pause() {
+    this._paused = true
+    this.resetProtocolState()
+    this.protocolState.accumulatedPoints = []
+    this._clearPendingMergeData()
+  }
+
+  resume() {
+    this._paused = false
+    this.resetProtocolState()
+    this.protocolState.accumulatedPoints = []
+    this.protocolState.photoSession = {
+      active: false,
+      previewStarted: false,
+    }
+    this._clearPendingMergeData()
+    this.outputMode = {
+      current: 'detecting',
+      detectionCount: 0,
+      DETECTION_FRAMES: 5,
+      detectedFormats: new Set(),
+    }
+    // 重置其他状态
+    this.isProcessingPhoto = false
+    this.pendingEndRequests = []
+    this.photoRequestQueue = []
+    this.cameraReadyPromise = null
+
+    // 重置调试计数器
+    this.cameraCmdCount = 0
+    this.cameraCallbackCount = 0
+
+    // 重置照片重命名标志
+    this.reNameFlag = 0
+  }
+
+  isPaused() {
+    return this._paused
+  }
+
   // 验证数据包
   validateBinaryPacket(receivedChecksum) {
     const calculatedChecksum = this.protocolState.checksum & 0xff
@@ -321,6 +365,10 @@ export class parseBleData {
    * parse() → accumulationBuffer → flushAccumulatedPoints() → renderer
    */
   parse(data) {
+    if (this._paused) {
+      return { points: [], errors: [] }
+    }
+
     const errors = []
     for (let i = 0; i < data.length; i++) {
       const byte = data[i]
@@ -1236,7 +1284,7 @@ export class parseBleData {
       detectionCount: 0,
       DETECTION_FRAMES: 5,
       detectedFormats: new Set(),
-    };
+    }
 
     // 重置其他状态
     this.isProcessingPhoto = false

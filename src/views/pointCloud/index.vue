@@ -1261,8 +1261,15 @@ async function cleanupResourcesForPause() {
       if (isInPhotoSession) {
         logger.debug('[PointCloud] 正在拍照会话中，跳过蓝牙会话清理')
       } else {
-        logger.debug('[PointCloud] 正在采集（非拍照会话），停止会话解析器')
-        await cleanupBluetoothSession()
+        // 方案C：暂停解析器但不取消订阅，保持蓝牙通知通道
+        logger.debug('[PointCloud] 正在采集（非拍照会话），暂停解析器')
+        if (parser) {
+          parser.pause()
+        }
+        cleanupAccumulationTimer()
+        stopBackgroundRender()
+        clearAccumulationBuffer()
+        resetSessionParserState()
       }
     }
 
@@ -1629,7 +1636,7 @@ async function stopSessionParser() {
     // 停止相机预览
     await stopCameraPreview()
 
-    // 重置状态
+    // 重置采集状态为未采集
     resetSessionParserState()
   } catch (error) {
     logger.error('[stopSessionParser] 停止解析器时发生错误', error)
@@ -1721,23 +1728,25 @@ function createSessionParser() {
 
       // 4. 添加按钮
       batchButtons.value.push(dataBatchCounter.value)
-      isCollecting.value = false
 
       // 停止采集进度显示
       stopCollectionProgress()
 
-      // 停止会话解析器，清理资源但保持 parser 实例
       console.log('[PhotoSession] 📍 更新点位计数器:', dataBatchCounter.value)
 
-      // 5. 停止会话解析器
-      console.log('[PhotoSession] 🛑 停止会话解析器...')
-      await stopSessionParser()
-      console.log('[PhotoSession] ✅ 会话解析器已停止')
+      // 5. 方案C：暂停解析器（不取消订阅），保持蓝牙通知通道
+      console.log('[PhotoSession] ⏸️ 暂停解析器（保持蓝牙订阅）...')
+      if (parser) {
+        parser.pause()
+      }
+      clearAccumulationBuffer()
+      resetSessionParserState()
+      console.log('[PhotoSession] ✅ 解析器已暂停')
 
       // 6. 触发自动拼接算法（拍照完成后自动运行）
       console.log('[PhotoSession] 🚀 即将触发自动拼接算法...')
       console.log('═══════════════════════════════════════════════════════\n')
-      triggerAutoStitch()
+      // triggerAutoStitch()
     },
   })
 
@@ -1757,6 +1766,11 @@ async function subscribeToBluetoothNotifications(deviceId) {
       NUS_NOTIFY_CHAR_UUID,
       (uint8) => {
         try {
+          // 快速路径：非采集状态或 parser 暂停时直接跳过
+          if (!isCollecting.value || !parser || parser.isPaused()) {
+            return
+          }
+
           // 检查单个站位点云数量上限
           if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
             return
@@ -1827,42 +1841,6 @@ function initAndStartRenderingTimer() {
 }
 
 /**
- * 启动会话解析器并订阅蓝牙通知
- */
-function startSessionParser() {
-  // 检查设备连接状态
-  if (!checkDeviceConnection()) {
-    return
-  }
-
-  if (parser) {
-    // 如果 parser 已存在，先重置状态
-    logger.debug('[startSessionParser] Parser already exists, resetting state...')
-    parser.reset(() => {
-      parser.reNameFlag = 0
-    })
-  } else {
-    // 创建会话解析器实例
-    parser = createSessionParser()
-    logger.debug('[startSessionParser] Creating new parser instance...')
-  }
-
-  const deviceId = bluetoothStore.connectedDeviceId
-  if (!deviceId) {
-    logger.warn('未连接设备，无法订阅通知')
-    return
-  }
-
-  // 订阅蓝牙通知
-  subscribeToBluetoothNotifications(deviceId)
-
-  // 初始化渲染定时器
-  initAndStartRenderingTimer()
-
-  hasStarted = true // 表示是否开始过采集，如果没有则不用删除文件夹
-}
-
-/**
  * 开始数据采集
  */
 async function startDataStream() {
@@ -1925,10 +1903,20 @@ async function startDataStream() {
 
   isCollecting.value = true
 
-  // 先重置状态  再去发送开始指令
-  await startSessionParser()
+  // 方案C：使用 parser.resume() 恢复解析器（订阅已在页面进入时建立）
+  // resume() 内部执行与 reset() 等价的状态重置，包括 reNameFlag / photoSession / outputMode 等
+  if (!parser) {
+    parser = createSessionParser()
+  }
+  parser.resume()
 
-  // 发送读取扫描时间指令（在蓝牙订阅建立后）
+  if (!accumulationTimer) {
+    initAndStartRenderingTimer()
+  }
+
+  hasStarted = true
+
+  // 发送读取扫描时间指令（复用已有订阅通道）
   await readScanTimeFromDevice()
 
   // 等待扫描时间读取完成后再启动进度显示
@@ -2675,6 +2663,21 @@ onMounted(async () => {
     })
   }
   // --- 结束：页面加载时检查连接状态 ---
+
+  // --- 方案C：页面进入时建立蓝牙订阅（仅一次）---
+  if (bluetoothStore.connectionStatus === 2) {
+    if (!parser) {
+      parser = createSessionParser()
+    }
+    parser.pause()
+
+    const deviceId = bluetoothStore.connectedDeviceId
+    if (deviceId) {
+      await subscribeToBluetoothNotifications(deviceId)
+      initAndStartRenderingTimer()
+    }
+  }
+  // --- 结束：页面进入时建立蓝牙订阅 ---
 
   pauseListener = await App.addListener('pause', () => {
     cleanupResourcesForPause() // 暂停清理函数
