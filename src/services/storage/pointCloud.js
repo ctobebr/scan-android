@@ -4,7 +4,6 @@
  * 所有操作都基于文件系统服务，添加业务层验证和日志
  */
 
-import { Share } from '@capacitor/share'
 import { parseSessionIdToFormattedTime } from '@/utils/format/sessionId'
 import {
   POINTCLOUD_ROOT,
@@ -33,6 +32,7 @@ import {
   extractBatchNumber,
   isImageFile,
 } from '@/utils/storage/path'
+import ZipPlugin from '@/plugins/zip'
 import {
   readFile,
   writeFile,
@@ -862,199 +862,30 @@ export async function getProjectBatchInfo(folderName) {
   }
 }
 
-// ========== 压缩和导出 - 拆分后的函数 ==========
+// ========== 压缩和导出 ==========
 
-/**
- * 加载 JSZip 库
- * @returns {Promise<*>} JSZip 实例
- */
-async function loadJSZip() {
-  // 检查全局对象
-  if (typeof window !== 'undefined' && window.JSZip) {
-    return window.JSZip
-  }
-
-  // 尝试动态导入
-  try {
-    const mod = await import('jszip')
-    return mod.default || mod
-  } catch (impErr) {
-    logger.warn('动态导入JSZip失败', { error: impErr.message })
-  }
-
-  // 尝试从CDN加载
-  if (typeof window !== 'undefined') {
-    try {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement('script')
-        script.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.0/dist/jszip.min.js'
-        script.onload = resolve
-        script.onerror = reject
-        document.head.appendChild(script)
-      })
-      return window.JSZip
-    } catch (cdnErr) {
-      logger.warn('从CDN加载JSZip失败', { error: cdnErr.message })
-    }
-  }
-
-  return null
-}
-
-/**
- * 清理文件名中的非法字符
- * @param {string} fileName - 原始文件名
- * @returns {string} 清理后的文件名
- */
-function sanitizeFileName(fileName) {
-  if (!fileName || typeof fileName !== 'string') return 'unnamed'
-  return fileName
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/\s+/g, '_')
-    .substring(0, 100) // 限制长度
-}
-
-/**
- * 检查 zip 文件是否已存在
- * @param {string} zipPath - zip 文件路径
- * @returns {Promise<{exists:boolean,uri?:string}>}
- */
-async function checkExistingZip(zipPath) {
-  try {
-    if (await exists(zipPath)) {
-      const existingUri = await getUri(zipPath)
-      logger.info('zip已存在，返回已有文件', { uri: existingUri.uri })
-      return { exists: true, uri: existingUri.uri }
-    }
-  } catch (e) {
-    logger.debug('zip不存在或检查失败', { error: e.message })
-  }
-  return { exists: false }
-}
-
-/**
- * 收集文件夹中的文件到 zip
- * @param {*} zip - JSZip 实例
- * @param {string} folderPath - 文件夹路径
- * @returns {Promise<void>}
- */
-async function collectFilesToZip(zip, folderPath) {
-  const allFiles = await listFilesRecursive(folderPath)
-
-  if (!allFiles || allFiles.length === 0) {
-    throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '项目文件夹下无文件')
-  }
-
-  for (const filePath of allFiles) {
-    if (filePath.endsWith('.zip')) continue // 跳过已有的zip文件
-
-    const relative = filePath.replace(`${folderPath}/`, '')
-    await addFileToZip(zip, filePath, relative)
-  }
-}
-
-/**
- * 添加单个文件到 zip
- * @param {*} zip - JSZip 实例
- * @param {string} filePath - 文件路径
- * @param {string} relativePath - zip 中的相对路径
- * @returns {Promise<void>}
- */
-async function addFileToZip(zip, filePath, relativePath) {
-  try {
-    const read = await readFile(filePath)
-    zip.file(relativePath, read.data, { base64: true })
-  } catch (e) {
-    logger.warn('读取文件失败，尝试通过URI获取', { path: filePath, error: e.message })
-    await addFileToZipViaFetch(zip, filePath, relativePath)
-  }
-}
-
-/**
- * 通过 fetch 添加文件到 zip（降级方案）
- * @param {*} zip - JSZip 实例
- * @param {string} filePath - 文件路径
- * @param {string} relativePath - zip 中的相对路径
- * @returns {Promise<void>}
- */
-async function addFileToZipViaFetch(zip, filePath, relativePath) {
-  try {
-    const uriRes = await getUri(filePath)
-    const resp = await fetch(uriRes.uri)
-    const blob = await resp.blob()
-    const arrayBuffer = await blob.arrayBuffer()
-    zip.file(relativePath, arrayBuffer)
-  } catch (e) {
-    logger.warn('添加到zip失败', { path: filePath, error: e.message })
-  }
-}
-
-/**
- * 生成并保存 zip 文件
- * @param {*} zip - JSZip 实例
- * @param {string} zipPath - zip 文件保存路径
- * @returns {Promise<string>} 文件 URI
- */
-async function generateAndSaveZip(zip, zipPath) {
-  const content = await zip.generateAsync({ type: 'base64' })
-  logger.info('生成zip完成', { size: content.length })
-
-  const folderPath = zipPath.substring(0, zipPath.lastIndexOf('/'))
-  await ensureDir(folderPath)
-  await writeFile(zipPath, content)
-
-  const uriRes = await getUri(zipPath)
-  logger.info('zip写入完成', { uri: uriRes.uri })
-
-  return uriRes.uri
-}
-
-/**
- * 将会话文件夹打包为 zip 文件
- * @param {string} sessionFolderName - 会话文件夹名
- * @param {string} [zipFileName] - 输出 zip 文件名（不含扩展名）
- * @returns {Promise<{uri:string,path:string,relativePath:string}>}
- * @throws {FilePathError} 当打包失败时抛出
- */
 export async function zipSessionToFile(sessionFolderName, zipFileName) {
   if (!sessionFolderName) {
     throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '需要提供会话文件夹名称')
   }
 
-  const folderPath = `${POINTCLOUD_ROOT}/${sessionFolderName}`
+  const result = await ZipPlugin.createZip({
+    sessionFolderName,
+    zipFileName: zipFileName || sessionFolderName,
+  })
 
-  // 步骤1: 加载 JSZip
-  const JSZipLib = await loadJSZip()
-  if (!JSZipLib) {
-    throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, '无法加载压缩库 JSZip')
-  }
-
-  // 步骤2: 生成安全的文件名并检查是否已存在
-  const safeBase = sanitizeFileName(zipFileName || sessionFolderName)
-  const zipName = `${safeBase}.zip`
-  const zipPath = `${folderPath}/${zipName}`
-
-  logger.info('检查zip是否已存在', { zipPath })
-  const existingCheck = await checkExistingZip(zipPath)
-  if (existingCheck.exists) {
-    return {
-      uri: existingCheck.uri,
-      path: zipPath,
-      relativePath: zipPath,
-    }
-  }
-
-  // 步骤3: 创建 zip 并收集文件
-  const zip = new JSZipLib()
-  await collectFilesToZip(zip, folderPath)
-
-  // 步骤4: 生成并保存 zip
-  const uri = await generateAndSaveZip(zip, zipPath)
+  logger.info('原生ZIP生成完成', {
+    uri: result.uri,
+    path: result.path,
+    cached: result.cached,
+    fileCount: result.fileCount,
+    zipSize: result.zipSize,
+  })
 
   return {
-    uri,
-    path: zipPath,
-    relativePath: zipPath,
+    uri: result.uri,
+    path: result.path,
+    relativePath: result.relativePath,
   }
 }
 
