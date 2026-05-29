@@ -137,6 +137,7 @@ const handleItemClick = (item) => {
     query: {
       mode: 'view',
       currentSessionId: item.sessionId,
+      folderName: item.folderName || item.id,
     },
   })
 }

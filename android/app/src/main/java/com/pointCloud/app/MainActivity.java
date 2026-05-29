@@ -12,6 +12,7 @@ import com.getcapacitor.BridgeActivity;
 import com.ptcr.mobile.PtcrPlugin;
 import com.ptcr.mobile.ZipPlugin;
 import com.ptcr.mobile.AppContextHolder;
+import com.hlmrf.plugin.HLMRFPlugin;
 
 public class MainActivity extends BridgeActivity {
 
@@ -19,6 +20,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(android.os.Bundle savedInstanceState) {
         initialPlugins.add(PtcrPlugin.class);
         initialPlugins.add(ZipPlugin.class);
+        initialPlugins.add(HLMRFPlugin.class);
         super.onCreate(savedInstanceState);
 
         Log.d("MainActivity", "PtcrPlugin registered via initialPlugins: " + PtcrPlugin.class.getName());

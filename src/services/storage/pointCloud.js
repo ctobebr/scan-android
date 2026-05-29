@@ -582,6 +582,22 @@ export async function listBatches(folderName) {
   }
 }
 
+export async function findLatestAlignedBlock(folderName) {
+  validateSessionId(folderName)
+  const batches = await listBatches(folderName)
+  for (let i = batches.length - 1; i >= 0; i--) {
+    const batchName = batches[i]
+    const outputPath = `${sessionFolder(folderName)}/${batchName}/stitch/stitch_output/final_dense_registered_cloud.txt`
+    try {
+      await stat(outputPath)
+      return outputPath
+    } catch (_) {
+      continue
+    }
+  }
+  return null
+}
+
 /**
  * 读取单个批次的数据
  * @param {string} sessionId - 会话ID

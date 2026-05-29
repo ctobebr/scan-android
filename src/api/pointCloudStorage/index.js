@@ -147,6 +147,7 @@ import {
   zipSessionToFile,
   getProjectThumbnail,
   getProjectBatchInfo,
+  findLatestAlignedBlock,
 } from '@/services/storage/pointCloud'
 
 /**
@@ -160,6 +161,19 @@ export const exportData = {
   getThumbnail: getProjectThumbnail,
   /** 获取项目批次信息 */
   getBatchInfo: getProjectBatchInfo,
+}
+
+// ============================================
+// 拼接相关命名空间 (Stitch Functions)
+// ============================================
+
+/**
+ * 拼接相关命名空间
+ * @namespace
+ */
+export const stitch = {
+  /** 查找最新的拼接结果文件路径 */
+  findLatestAlignedBlock,
 }
 
 // ============================================
