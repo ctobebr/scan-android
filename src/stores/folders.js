@@ -129,7 +129,8 @@ export const useFoldersStore = defineStore('folders', () => {
 
             case 'batch_added':
             case 'batch_deleted':
-            case 'batch_reindexed': {
+            case 'batch_reindexed':
+            case 'batch_rebuilt': {
               // 批次操作后刷新文件夹详情（缩略图、文件状态等可能变化）
               for (const folderName of folders) {
                 const index = projectFolders.value.findIndex((f) => f.name === folderName)

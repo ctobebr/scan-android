@@ -90,6 +90,7 @@ import {
   listBatches,
   // readBatch,
   deleteBatch,
+  deleteBatchAndRebuild,
 } from '@/services/storage/pointCloud'
 
 /**
@@ -105,6 +106,8 @@ export const batch = {
   // read: readBatch,
   /** 删除批次 */
   delete: deleteBatch,
+  /** 删除站位并重建点云（先重建后重命名） */
+  deleteAndRebuild: deleteBatchAndRebuild,
 }
 
 // ============================================

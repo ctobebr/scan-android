@@ -41,6 +41,7 @@ import {
   readdir,
   ensureDir,
   deleteDirectory,
+  deleteFile,
   listFilesRecursive,
   rename,
   exists,
@@ -49,6 +50,7 @@ import {
 // 原因：统一日志管理，消除代码重复
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger, configureLogger } from '@/utils/logger'
+import { HLMRF_OUTPUT, HLMRF_SESSION } from '@/config/hlmrf'
 
 // ========== 日志工具 ==========
 // 使用全局日志工具创建模块专用记录器
@@ -665,7 +667,21 @@ export async function findLatestAlignedBlock(folderName) {
  * @returns {Promise<void>}
  * @throws {FilePathError} 当参数无效时抛出
  */
-export async function deleteBatch(folderName, batchId) {
+/**
+ * 删除指定批次并自动重排其他批次
+ * 业务层删除函数，负责验证、事件通知和重索引
+ * 实际文件系统操作委托给 fileSystem.deleteDirectory
+ *
+ * @param {string} folderName - 文件夹名（临时文件夹名如 a7f3c9d1-xxx 或正式文件夹名如 ProjectName_xxx）
+ * @param {number|string} batchId - 批次ID
+ * @param {Object} [options] - 可选参数
+ * @param {boolean} [options.skipReindex=false] - 是否跳过重索引（当外部需要先重建点云后再重命名时使用）
+ * @returns {Promise<void>}
+ * @throws {FilePathError} 当参数无效时抛出
+ */
+export async function deleteBatch(folderName, batchId, options = {}) {
+  const { skipReindex = false } = options
+
   // 步骤1: 验证参数
   validateSessionId(folderName)
   validateBatchId(batchId)
@@ -673,15 +689,15 @@ export async function deleteBatch(folderName, batchId) {
   // 步骤2: 构建批次文件夹路径
   const folder = batchFolder(folderName, batchId)
 
-  logger.info('开始删除批次', { folderName, batchId, folder })
+  logger.info('开始删除批次', { folderName, batchId, folder, skipReindex })
 
   // 步骤3: 调用文件系统服务执行删除
   try {
     await deleteDirectory(folder, {
-      recursive: true,      // 递归删除批次内所有内容
-      includeSelf: true,    // 删除批次文件夹本身
-      force: false,         // 不强制删除，遇到错误抛出
-      maxDepth: 5,          // 批次目录层级较浅
+      recursive: true,
+      includeSelf: true,
+      force: false,
+      maxDepth: 5,
     })
 
     // 步骤4: 触发批次删除事件
@@ -690,13 +706,116 @@ export async function deleteBatch(folderName, batchId) {
       folders: [folderName],
     })
 
-    // 步骤5: 重索引其余批次
-    await reindexBatches(folderName)
+    // 步骤5: 重索引其余批次（仅在不需要外部重建时执行）
+    if (!skipReindex) {
+      await reindexBatches(folderName)
+    }
 
     logger.info('批次删除成功', { folderName, batchId })
   } catch (e) {
     logger.error('删除批次失败', { folderName, batchId, error: e.message })
     throw new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `删除批次失败: ${e.message}`)
+  }
+}
+
+/**
+ * 删除站位并重建点云（完整编排函数）
+ *
+ * 执行顺序：删除文件夹 → 从 global_poses_all.txt 移除位姿 → 重建合并点云 → 重命名批次 → 更新位姿编号
+ * 确保"先重建后重命名"以避免批次编号与 stitch_output 内容不一致
+ *
+ * @param {string} folderName - 会话文件夹名
+ * @param {number|string} batchId - 要删除的批次ID（0-based，如 Batch_000 的 batchId=0）
+ * @returns {Promise<{rebuiltPath: string, remainingCount: number}>} 重建结果
+ * @throws {FilePathError} 当操作失败时抛出
+ */
+export async function deleteBatchAndRebuild(folderName, batchId) {
+  validateSessionId(folderName)
+  validateBatchId(batchId)
+
+  const deletedBatchNo = parseInt(batchId) + 1
+  const batchFolderName = `Batch_${String(batchId).padStart(3, '0')}`
+
+  console.log(`[deleteBatchAndRebuild] 🔥 删除 Batch_${String(batchId).padStart(3, '0')} (batchNo=${deletedBatchNo}), folderName=${folderName}`)
+
+  logger.info('[deleteBatchAndRebuild] 开始删除并重建', { folderName, batchId, deletedBatchNo })
+
+  try {
+    const {
+      readGlobalPosesAll,
+      writeGlobalPosesAll,
+      rebuildDenseCloud,
+    } = await import('@/utils/pointCloud/reconstruction')
+
+    // 步骤0: 读取当前全局位姿
+    const oldPoses = await readGlobalPosesAll(folderName)
+    console.log(`[deleteBatchAndRebuild] 📋 当前 ${oldPoses.size} 个站位, batchNos=[${Array.from(oldPoses.keys()).sort((a, b) => a - b).join(', ')}]`)
+
+    // 步骤1: 删除批次文件夹（跳过重索引）
+    await deleteBatch(folderName, batchId, { skipReindex: true })
+
+    // 步骤2: 从位姿 Map 中移除被删除的站位
+    oldPoses.delete(deletedBatchNo)
+    console.log(`[deleteBatchAndRebuild] 📋 移除 batchNo=${deletedBatchNo}, 剩余 ${oldPoses.size} 个: [${Array.from(oldPoses.keys()).sort((a, b) => a - b).join(', ')}]`)
+
+    // 步骤3: 用原始编号重建合并点云（此时文件夹尚未重命名，编号匹配）
+    console.log(`[deleteBatchAndRebuild] 🔨 重建合并点云...`)
+    const rebuiltPath = await rebuildDenseCloud(folderName, oldPoses)
+
+    // 步骤4: 重命名剩余批次文件夹（连续编号）
+    await reindexBatches(folderName)
+
+    // 步骤5: 将位姿重新编号为连续编号，与重命名后的文件夹一致
+    const sortedEntries = Array.from(oldPoses.entries()).sort(([a], [b]) => a - b)
+    const newPoses = new Map()
+    for (let i = 0; i < sortedEntries.length; i++) {
+      newPoses.set(i + 1, sortedEntries[i][1])
+    }
+    await writeGlobalPosesAll(folderName, newPoses)
+
+    // 步骤6: 验证矩阵数量与实际站位数量是否匹配
+    const batchFolders = await listBatches(folderName)
+    const actualBatchCount = batchFolders.length
+    const matrixCount = newPoses.size
+    if (actualBatchCount === matrixCount) {
+      console.log(`[deleteBatchAndRebuild] ✅ 数量匹配: ${matrixCount} = ${actualBatchCount} (站位=${batchFolders.join(', ') || '无'})`)
+    } else {
+      console.error(`[deleteBatchAndRebuild] ❌ 数量不匹配: 矩阵=${matrixCount}, 站位=${actualBatchCount}`)
+    }
+
+    // 步骤7: 所有站位已删除，清理会话级文件
+    if (newPoses.size === 0) {
+      const sessionDir = sessionFolder(folderName)
+      console.log(`[deleteBatchAndRebuild] 🧹 所有站位已删除，清理会话级文件`)
+      for (const file of [HLMRF_SESSION.GLOBAL_POSES_ALL_FILE, HLMRF_OUTPUT.DENSE_CLOUD_FILE]) {
+        try {
+          await deleteFile(`${sessionDir}/${file}`)
+        } catch (_) { /* 文件可能不存在 */ }
+      }
+    }
+
+    console.log(`[deleteBatchAndRebuild] 🎉 完成: 剩余 ${newPoses.size} 个站位`)
+
+    // 触发更新事件
+    dispatchFolderUpdate('partial_update', {
+      action: 'batch_rebuilt',
+      folders: [folderName],
+    })
+
+    logger.info(
+      `[deleteBatchAndRebuild] 完成: 剩余 ${newPoses.size} 个站位`,
+    )
+
+    return {
+      rebuiltPath,
+      remainingCount: newPoses.size,
+    }
+  } catch (e) {
+    logger.error('[deleteBatchAndRebuild] 失败', { folderName, batchId, error: e.message })
+    throw new FilePathError(
+      ErrorCodes.FILESYSTEM_ERROR,
+      `删除并重建失败: ${e.message}`,
+    )
   }
 }
 

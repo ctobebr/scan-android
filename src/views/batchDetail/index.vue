@@ -105,44 +105,53 @@ onUnmounted(async () => {
 
 async function getPanoramaUrl() {
   try {
-    const tempFolderName = storage.path.getTempSessionName(currentSessionId)
     const batchId = batchNum - 1
-    const panoPath = `${storage.path.batchFolder(tempFolderName, batchId)}/ptcr_output/pano_raw.png`
+    const queryFolder = route.query.folderName
+    const tempFolderName = storage.path.getTempSessionName(currentSessionId)
 
-    const cached = getPanoramaCache(panoPath)
-    if (cached) {
-      logger.debug('[getPanoramaUrl] 🚀 命中缓存，秒开！')
-      return cached
+    const candidateFolders = []
+    if (queryFolder) {
+      candidateFolders.push(queryFolder)
     }
+    candidateFolders.push(tempFolderName)
 
-    logger.debug('[getPanoramaUrl] 缓存未命中，从磁盘读取')
-    logger.debug('[getPanoramaUrl] 临时文件夹名:', tempFolderName)
-    logger.debug('[getPanoramaUrl] batchId:', batchId)
-    logger.debug('[getPanoramaUrl] 拼接路径:', panoPath)
+    for (const folder of candidateFolders) {
+      const panoPath = `${storage.path.batchFolder(folder, batchId)}/ptcr_output/pano_raw.png`
 
-    try {
-      await Filesystem.stat({
-        path: panoPath,
-        directory: Directory.External,
-      })
-    } catch (statErr) {
-      logger.warn('[getPanoramaUrl] 文件不存在或无法访问:', panoPath, statErr)
-      return null
-    }
-
-    try {
-      const readResult = await Filesystem.readFile({
-        path: panoPath,
-        directory: Directory.External,
-      })
-      if (readResult && readResult.data) {
-        logger.debug('[getPanoramaUrl] 读取成功, base64长度:', readResult.data.length)
-        return `data:image/png;base64,${readResult.data}`
+      const cached = getPanoramaCache(panoPath)
+      if (cached) {
+        logger.debug('[getPanoramaUrl] 🚀 命中缓存，秒开！')
+        return cached
       }
-    } catch (readErr) {
-      logger.warn('[getPanoramaUrl] readFile 失败:', readErr)
+
+      logger.debug('[getPanoramaUrl] 尝试路径:', panoPath)
+
+      try {
+        await Filesystem.stat({
+          path: panoPath,
+          directory: Directory.External,
+        })
+      } catch (_) {
+        continue
+      }
+
+      logger.debug('[getPanoramaUrl] 缓存未命中，从磁盘读取, 路径:', panoPath)
+
+      try {
+        const readResult = await Filesystem.readFile({
+          path: panoPath,
+          directory: Directory.External,
+        })
+        if (readResult && readResult.data) {
+          logger.debug('[getPanoramaUrl] 读取成功, base64长度:', readResult.data.length)
+          return `data:image/png;base64,${readResult.data}`
+        }
+      } catch (readErr) {
+        logger.warn('[getPanoramaUrl] readFile 失败:', readErr)
+      }
     }
 
+    logger.warn('[getPanoramaUrl] 全景图不存在，已尝试:', candidateFolders)
     return null
   } catch (e) {
     logger.warn('[getPanoramaUrl] 获取算法全景图失败:', e)
@@ -219,14 +228,19 @@ function cancelDelete() {
 
 async function confirmDelete() {
   try {
-    // 使用临时文件夹名删除批次
-    // batchNum 是显示的点位编号（1,2,3...），需要转换为 batchId（0,1,2...）
+    const queryFolder = route.query.folderName
     const tempFolderName = storage.path.getTempSessionName(currentSessionId)
+    const folderName = queryFolder || tempFolderName
     const batchId = batchNum - 1
-    await storage.batch.delete(tempFolderName, batchId)
-    showToast({ message: '删除成功', position: 'bottom' })
+
+    const result = await storage.batch.deleteAndRebuild(folderName, batchId)
+    showToast({
+      message: `删除成功，剩余 ${result.remainingCount} 个站位`,
+      position: 'bottom',
+    })
     router.back()
   } catch (e) {
+    logger.error('[confirmDelete] 删除失败:', e)
     showToast({ message: '删除失败', position: 'bottom' })
   }
 }

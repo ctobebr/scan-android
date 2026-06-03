@@ -284,6 +284,7 @@ let anchorSprites = [] // 锚点精灵数组
 const raycaster = new THREE.Raycaster() // 射线检测器
 const mouse = new THREE.Vector2() // 鼠标位置
 let _hlmrfClickRegistered = false // 是否已注册HLMRF锚点点击事件
+let hlmrfAnchorPositions = new Map() // 持久化锚点位置 Map<batchNo, {x, y, z}>
 
 // ==============================================
 // 采集进度相关状态
@@ -382,7 +383,11 @@ const goBack = async () => {
  */
 const handleOverivew = () => {
   let testID = 1
-  router.push({ name: 'BatchDetail', params: { currentSessionId: currentSessionId, bid: testID } })
+  router.push({
+    name: 'BatchDetail',
+    params: { currentSessionId: currentSessionId, bid: testID },
+    query: { folderName: currentFolderName || '' },
+  })
 }
 
 /**
@@ -390,7 +395,6 @@ const handleOverivew = () => {
  * @param {number} idx - 点位索引
  */
 function goToBatch(idx) {
-  // 检查是否正在采集中
   if (isCollecting.value) {
     showToast({ message: '正在采集中...', position: 'bottom' })
     return
@@ -398,7 +402,11 @@ function goToBatch(idx) {
 
   if (!currentSessionId) return
   const bid = idx + 1
-  router.push({ name: 'BatchDetail', params: { currentSessionId: currentSessionId, bid } })
+  router.push({
+    name: 'BatchDetail',
+    params: { currentSessionId: currentSessionId, bid },
+    query: { folderName: currentFolderName || '' },
+  })
 }
 
 /**
@@ -749,21 +757,36 @@ async function loadAndRenderProjectData(folderName) {
   showLoadingToast({ message: '加载点云中...', forbidClick: false })
 
   try {
+    const { getSessionDenseCloudPath, sessionDenseCloudExists } = await import(
+      '@/utils/pointCloud/reconstruction'
+    )
+
+    const sessionCloudPath = getSessionDenseCloudPath(folderName)
+    const sessionCloudAvailable = await sessionDenseCloudExists(folderName)
+
+    if (sessionCloudAvailable) {
+      console.log(`[ViewMode] 👁 加载会话级合并点云, ${pointCount.value} 个点`)
+      await parseAndRenderTxt(sessionCloudPath)
+      closeToast()
+      await loadHLMRFAnchorsForViewMode(folderName)
+      return
+    }
+
     const alignedPath = await storage.stitch.findLatestAlignedBlock(folderName)
     if (alignedPath) {
-      logger.info(`[PointCloud] 查看模式 - 加载拼接结果文件: ${alignedPath}`)
+      console.log(`[ViewMode] 👁 降级加载 alignedBlock, ${pointCount.value} 个点`)
       await parseAndRenderTxt(alignedPath)
-      logger.info(`[PointCloud] 查看模式 - 渲染点云数量: ${pointCount.value}`)
       closeToast()
+      await loadHLMRFAnchorsForViewMode(folderName)
       return
     }
 
     const firstBatchPath = await findFirstBatchTxt(folderName)
     if (firstBatchPath) {
-      logger.info(`[PointCloud] 查看模式 - 无拼接结果，降级加载原始点云文件: ${firstBatchPath}`)
+      console.log(`[ViewMode] 👁 降级加载原始点云, ${pointCount.value} 个点`)
       await parseAndRenderTxt(firstBatchPath)
-      logger.info(`[PointCloud] 查看模式 - 渲染点云数量: ${pointCount.value}`)
       closeToast()
+      await loadHLMRFAnchorsForViewMode(folderName)
       return
     }
 
@@ -777,6 +800,90 @@ async function loadAndRenderProjectData(folderName) {
   }
 }
 
+/**
+ * 查看模式下：遍历所有批次的 global_poses.txt，加载所有站位的锚点坐标
+ * 每个批次的 stitch_output/global_poses.txt 包含两个位姿矩阵：
+ *   - 矩阵1（标签 "1:"）= 站位1坐标
+ *   - 矩阵2（标签 "2:"）= 该批次的站位坐标
+ * 通过遍历所有批次，汇总得到全部站位的锚点坐标（统一坐标系中）
+ *
+ * @param {string} folderName - 项目文件夹名
+ */
+async function loadHLMRFAnchorsForViewMode(folderName) {
+  try {
+    const { readGlobalPosesAll, getPoseTranslation } = await import(
+      '@/utils/pointCloud/reconstruction'
+    )
+
+    const poses = await readGlobalPosesAll(folderName)
+
+    if (poses.size === 0) {
+      await loadHLMRFAnchorsFromBatchStitch(folderName)
+      return
+    }
+
+    hlmrfAnchorPositions.clear()
+    for (const [batchNo, matrix] of poses) {
+      hlmrfAnchorPositions.set(batchNo, getPoseTranslation(matrix))
+    }
+    console.log(`[HLMRF] 📍 查看模式 - 加载 ${hlmrfAnchorPositions.size} 个锚点`)
+    updateHLMRFAnchorsFromMap()
+  } catch (e) {
+    console.warn('[HLMRF] 查看模式 - 加载锚点失败:', e.message)
+    await loadHLMRFAnchorsFromBatchStitch(folderName)
+  }
+}
+
+/**
+ * 兼容旧数据：从每个批次的 stitch_output 读取 global_poses.txt 来加载锚点
+ * 仅在没有 global_poses_all.txt 时作为降级方案
+ *
+ * @param {string} folderName - 项目文件夹名
+ */
+async function loadHLMRFAnchorsFromBatchStitch(folderName) {
+  try {
+    const batches = await storage.batch.list(folderName)
+    if (!batches || batches.length === 0) {
+      return
+    }
+
+    hlmrfAnchorPositions.clear()
+    const dataDir = await getDataDir()
+
+    for (let i = 0; i < batches.length; i++) {
+      const batchFolder = storage.path.batchFolder(dataDir, i)
+      const stitchOutputDir = `${batchFolder}/${HLMRF_STITCH.STITCH_DIR}/${HLMRF_STITCH.OUTPUT_DIR}`
+      const posesPath = `${stitchOutputDir}/${HLMRF_OUTPUT.GLOBAL_POSES_FILE}`
+
+      try {
+        await storage.file.stat(posesPath)
+      } catch (_) {
+        continue
+      }
+
+      const readResult = await Filesystem.readFile({
+        path: posesPath,
+        directory: Directory.External,
+        encoding: FilesystemEncoding.UTF8,
+      })
+
+      if (!readResult || !readResult.data) continue
+
+      const positions = parseGlobalPosesContent(readResult.data, i)
+      for (const pos of positions) {
+        hlmrfAnchorPositions.set(pos.batchNo, { x: pos.x, y: pos.y, z: pos.z })
+      }
+    }
+
+    if (hlmrfAnchorPositions.size > 0) {
+      console.log(`[HLMRF] 📍 降级模式 - 加载 ${hlmrfAnchorPositions.size} 个锚点`)
+      updateHLMRFAnchorsFromMap()
+    }
+  } catch (e) {
+    console.warn('[HLMRF] 降级模式 - 加载锚点失败:', e.message)
+  }
+}
+
 // ==============================================
 // 自动拼接算法相关函数
 // ==============================================
@@ -787,38 +894,16 @@ async function loadAndRenderProjectData(folderName) {
 async function triggerAutoStitch() {
   setTimeout(async () => {
     try {
-      console.log('\n')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[AutoStitch] 🚀 开始自动拼接算法')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[AutoStitch] ⏰ 时间:', new Date().toLocaleString('zh-CN'))
-      console.log('[AutoStitch] 📍 当前点位:', dataBatchCounter.value)
-      console.log('═══════════════════════════════════════════════════════\n')
-
-      // 1. 获取数据目录
       const dataDir = await getDataDir()
       const batchNo = getCurrentBatchNo()
-
-      console.log('[AutoStitch] 📂 拼接参数:')
-      console.log('   ├─ dataDir:', dataDir)
-      console.log('   └─ batchNo:', batchNo)
+      console.log(`[AutoStitch] 🚀 开始 (batchNo=${batchNo})`)
 
       const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
-      const photoDir = `${batchFolder}/allPicture`
 
-      console.log('\n[AutoStitch] 📁 完整路径:')
-      console.log('   ├─ 批次目录:', batchFolder)
-      console.log('   └─ 照片目录:', photoDir)
-
-      // 2. 检查输入文件
-      console.log('\n[AutoStitch] 🔍 开始检查输入文件...')
-      await checkInputFiles(dataDir, batchNo)
-
-      // 3. 诊断插件健康状况
-      console.log('\n[AutoStitch] 🔬 诊断 PtcrPlugin...')
+      // 诊断插件健康状况
       const diagResult = await debugCheckPlugin()
       if (!diagResult.ok) {
-        console.error('[AutoStitch] ❌ 插件不可用，跳过拼接')
+        console.error('[AutoStitch] ❌ PtcrPlugin 不可用:', diagResult.error)
         isStitching.value = false
         showToast({
           message: `PtcrPlugin 不可用: ${diagResult.error}`,
@@ -827,31 +912,17 @@ async function triggerAutoStitch() {
         })
         return
       }
-      console.log('[AutoStitch] ✅ PtcrPlugin 已就绪\n')
-      console.log('   ├─ Python:', diagResult.detail.python)
-      console.log('   ├─ 脚本目录:', diagResult.detail.scripts)
-      console.log('   └─ ONNX模型:', diagResult.detail.onnx)
-      console.log('')
 
-      // 4. 显示 UI 进度提示
+      // 显示 UI 进度提示
       isStitching.value = true
       stitchProgressText.value = '准备中...'
 
-      // 5. 设置进度监听器
+      // 设置进度监听器
       let progressHandle = null
       const progressHandler = (event) => {
-        console.log('───────────────────────────────────────────────────')
-        console.log(`[AutoStitch] 📊 进度更新: ${event.stage}`)
-        console.log(`   ├─ 任务: ${event.task}`)
-        console.log(`   └─ 消息: ${event.message}`)
-        console.log('───────────────────────────────────────────────────')
-
         stitchProgressText.value = `${event.stage}: ${event.message}`
-
-        if (event.stage === 'finish') {
-          console.log('[AutoStitch] ✅ 拼接任务完成')
-        } else if (event.stage === 'error') {
-          console.error(`[AutoStitch] ❌ 拼接任务失败: ${event.message}`)
+        if (event.stage === 'error') {
+          console.error(`[AutoStitch] ❌ 拼接失败: ${event.message}`)
         }
       }
 
@@ -861,7 +932,7 @@ async function triggerAutoStitch() {
         console.warn('[AutoStitch] ⚠️ 无法注册进度监听器:', e.message)
       }
 
-      // 6. 选择生成算法
+      // 选择生成算法: 'cloud0' | 'raw' | 'standard'
       //    修改下面 method 变量即可切换: 'cloud0' | 'raw' | 'standard'
       //    cloud0:    无 ONNX 深度估计，稀疏彩色点云（最快 ~30s），输出 ply_raw.ply
       //    raw:       ONNX 深度估计(raw)，密集彩色点云（~70s），输出 fused_raw.ply
@@ -869,78 +940,31 @@ async function triggerAutoStitch() {
       const method = 'cloud0'
 
       let result
-      let startTime
+      const startTime = Date.now()
 
       if (method === 'cloud0') {
-        console.log('\n[AutoStitch] 🚀 调用 generateCloud0()...')
-        console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
-        startTime = Date.now()
         result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
       } else if (method === 'raw') {
-        console.log('\n[AutoStitch] 🚀 调用 generateCloudByRaw()...')
-        console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
-        startTime = Date.now()
         result = await PtcrPlugin.generateCloudByRaw({ dataDir, batchNo })
       } else if (method === 'standard') {
-        console.log('\n[AutoStitch] 🚀 调用 generateCloudByStandard()...')
-        console.log('[AutoStitch] 配置参数:', { dataDir, batchNo })
-        startTime = Date.now()
         result = await PtcrPlugin.generateCloudByStandard({ dataDir, batchNo })
       }
 
       const elapsed = Date.now() - startTime
 
-      // 7. 处理结果
-      console.log('\n')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[AutoStitch] 📦 算法返回结果')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('   ├─ ok:', result.ok ? '✅ 成功' : '❌ 失败')
-      console.log('   ├─ task:', result.task)
-      console.log(
-        '   ├─ 算法耗时:',
-        result.elapsedMs,
-        'ms',
-        `(${(result.elapsedMs / 1000).toFixed(1)}s)`,
-      )
-      console.log('   ├─ JS 调用耗时:', elapsed, 'ms', `(${(elapsed / 1000).toFixed(1)}s)`)
-      console.log('   ├─ outputFile:', result.outputFile || '(无)')
-      console.log('   ├─ error:', result.error || '(无)')
-      console.log('   └─ log 长度:', result.log?.length || 0, '字符')
-      console.log('═══════════════════════════════════════════════════════\n')
-
       if (result.ok) {
-        console.log('[AutoStitch] 🎉 拼接成功！')
-
+        console.log(`[AutoStitch] ✅ 成功 (${(elapsed / 1000).toFixed(1)}s), output: ${result.outputFile || '(无)'}`)
         if (result.outputFile) {
           await checkOutputFiles(result.outputFile, dataDir, batchNo, method)
         }
-
-        if (result.log) {
-          console.log('\n[AutoStitch] 📜 完整日志内容:')
-          console.log('───────────────────────────────────────────────────')
-          console.log(result.log)
-          console.log('───────────────────────────────────────────────────\n')
-        }
-
         isStitching.value = false
         stitchProgressText.value = '拼接完成'
-
         preCachePanorama(dataDir, batchNo, method)
-
-        showToast({
-          message: '全景图生成成功',
-          position: 'bottom',
-          duration: 2000,
-        })
+        showToast({ message: '全景图生成成功', position: 'bottom', duration: 2000 })
       } else {
-        console.error('[AutoStitch] ❌ 拼接失败')
-        console.error('   ├─ 错误:', result.error)
-        console.error('   └─ 日志:', result.log)
-
+        console.error(`[AutoStitch] ❌ 失败: ${result.error}, 耗时 ${(elapsed / 1000).toFixed(1)}s`)
         isStitching.value = false
         stitchProgressText.value = '拼接失败'
-
         showToast({
           message: `拼接失败: ${result.error || '未知错误'}`,
           position: 'bottom',
@@ -948,27 +972,9 @@ async function triggerAutoStitch() {
         })
       }
     } catch (error) {
-      console.error('\n')
-      console.error('═══════════════════════════════════════════════════════')
-      console.error('[AutoStitch] ❌ 异常')
-      console.error('═══════════════════════════════════════════════════════')
-      console.error('   ├─ 错误:', error.message)
-      console.error('   └─ 堆栈:', error.stack)
-
-      if (error.message && error.message.includes('not implemented on android')) {
-        console.error('')
-        console.error('🔧 解决方案: 需要重新构建 APK 并安装到手机')
-        console.error('   cd e:\\scanAndroid\\scan\\android')
-        console.error('   rd /s /q app\\build')
-        console.error('   .\\gradlew.bat assembleDebug --no-daemon')
-        console.error('   adb install -r app\\build\\outputs\\apk\\debug\\app-debug.apk')
-      }
-
-      console.error('═══════════════════════════════════════════════════════\n')
-
+      console.error(`[AutoStitch] ❌ 异常: ${error.message}`)
       isStitching.value = false
       stitchProgressText.value = '拼接异常'
-
       showToast({
         message: 'PtcrPlugin 未安装到手机，请重新构建 APK',
         position: 'bottom',
@@ -985,40 +991,30 @@ async function triggerHLMRFRegistration() {
       const currentIdx = parseInt(getCurrentBatchNo())
 
       if (currentIdx < 1) {
-        logger.info('[HLMRF] 首个站位，无需拼接，在原点创建锚点')
-
-        updateHLMRFAnchors([{ batchNo: 1, x: 0, y: 0, z: 0 }])
+        console.log('[HLMRF] 🏁 首个站位 (Batch_000) - 初始化会话级文件')
+        hlmrfAnchorPositions.set(1, { x: 0, y: 0, z: 0 })
+        updateHLMRFAnchorsFromMap()
+        const { initGlobalPosesAll } = await import('@/utils/pointCloud/reconstruction')
+        await initGlobalPosesAll(dataDir)
         return
       }
 
+      const currentIdx1Based = currentIdx + 1
       const previousIdx = currentIdx - 1
-      const prevNo = String(previousIdx).padStart(3, '0')
-      const currNo = String(currentIdx).padStart(3, '0')
 
       const currentBatchFolder = storage.path.batchFolder(dataDir, currentIdx)
       const previousBatchFolder = storage.path.batchFolder(dataDir, previousIdx)
 
-      console.log('\n')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[HLMRF] ===== 开始 HLMRF 多站点拼接 =====')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log(`[HLMRF]   当前批次: Batch_${currNo}`)
-      console.log(`[HLMRF]   上一批次: Batch_${prevNo}`)
-      console.log(`[HLMRF]   当前批次目录: ${currentBatchFolder}`)
-      console.log(`[HLMRF]   上一批次目录: ${previousBatchFolder}`)
+      console.log(`[HLMRF] 🔄 多站点拼接: Batch_${String(currentIdx).padStart(3, '0')} ← Batch_${String(previousIdx).padStart(3, '0')}`)
 
       const { files: currentFiles } = await storage.file.readDir(currentBatchFolder)
       const currentPointCloudFile = currentFiles.find(
-        (f) =>
-          f.type === 'file' &&
-          f.name.startsWith('pointCloud_data_') &&
-          f.name.endsWith('.txt'),
+        (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
       )
       if (!currentPointCloudFile) {
         logger.warn('[HLMRF] 当前批次无点云文件，跳过拼接')
         return
       }
-      console.log(`[HLMRF]   当前批次点云文件: ${currentPointCloudFile.name}`)
 
       const stitchDir = `${currentBatchFolder}/${HLMRF_STITCH.STITCH_DIR}`
       const stitchInputDir = `${stitchDir}/${HLMRF_STITCH.INPUT_DIR}`
@@ -1027,197 +1023,111 @@ async function triggerHLMRFRegistration() {
       await storage.file.ensureDir(stitchInputDir)
       await storage.file.ensureDir(stitchOutputDir)
 
-      console.log(`[HLMRF]   stitch_input: ${stitchInputDir}`)
-      console.log(`[HLMRF]   stitch_output: ${stitchOutputDir}`)
-
       const { copyFile } = await import('@/services/storage/fileSystem')
 
-      const currentSource = `${currentBatchFolder}/${currentPointCloudFile.name}`
-      const currentDest = `${stitchInputDir}/${currentPointCloudFile.name}`
-      await copyFile(currentSource, currentDest)
-      console.log(`[HLMRF]   已复制当前批次点云: ${currentPointCloudFile.name}`)
+      // 复制当前批次点云到 stitch_input
+      await copyFile(
+        `${currentBatchFolder}/${currentPointCloudFile.name}`,
+        `${stitchInputDir}/${currentPointCloudFile.name}`,
+      )
 
-      const previousStitchOutput =
-        `${previousBatchFolder}/${HLMRF_STITCH.STITCH_DIR}/${HLMRF_STITCH.OUTPUT_DIR}`
-      const previousDenseCloudPath =
-        `${previousStitchOutput}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`
+      const { getSessionDenseCloudPath, sessionDenseCloudExists } = await import(
+        '@/utils/pointCloud/reconstruction'
+      )
 
-      let previousDenseCloudExists = false
-      try {
-        await storage.file.stat(previousDenseCloudPath)
-        previousDenseCloudExists = true
-      } catch (_) {}
+      // 查找并复制累积点云作为 stitch_input 的 merged cloud
+      const sessionDenseCloudPath = getSessionDenseCloudPath(dataDir)
+      let sessionCloudExists = false
+      try { await storage.file.stat(sessionDenseCloudPath); sessionCloudExists = true } catch (_) {}
 
-      if (previousDenseCloudExists) {
-        const prevDest = `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`
-        await copyFile(previousDenseCloudPath, prevDest)
-        console.log(`[HLMRF]   已复制上一批次拼接结果: ${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
+      if (sessionCloudExists) {
+        await copyFile(sessionDenseCloudPath, `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
       } else {
-        const { files: prevFiles } = await storage.file.readDir(previousBatchFolder)
-        const prevPointCloudFile = prevFiles.find(
-          (f) =>
-            f.type === 'file' &&
-            f.name.startsWith('pointCloud_data_') &&
-            f.name.endsWith('.txt'),
-        )
-        if (!prevPointCloudFile) {
-          logger.warn('[HLMRF] 上一批次无点云文件，跳过拼接')
-          return
-        }
-        const prevSource = `${previousBatchFolder}/${prevPointCloudFile.name}`
-        const prevDest = `${stitchInputDir}/${prevPointCloudFile.name}`
-        await copyFile(prevSource, prevDest)
-        console.log(`[HLMRF]   已复制上一批次原始点云: ${prevPointCloudFile.name}`)
-      }
+        const previousStitchOutput = `${previousBatchFolder}/${HLMRF_STITCH.STITCH_DIR}/${HLMRF_STITCH.OUTPUT_DIR}`
+        const previousDenseCloudPath = `${previousStitchOutput}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`
+        let previousDenseCloudExists = false
+        try { await storage.file.stat(previousDenseCloudPath); previousDenseCloudExists = true } catch (_) {}
 
-      console.log('[HLMRF]   调用 HLMRFPlugin.runRegistration...')
+        if (previousDenseCloudExists) {
+          await copyFile(previousDenseCloudPath, `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
+        } else {
+          const { files: prevFiles } = await storage.file.readDir(previousBatchFolder)
+          const prevPointCloudFile = prevFiles.find(
+            (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
+          )
+          if (!prevPointCloudFile) { logger.warn('[HLMRF] 上一批次无点云文件，跳过拼接'); return }
+          await copyFile(`${previousBatchFolder}/${prevPointCloudFile.name}`, `${stitchInputDir}/${prevPointCloudFile.name}`)
+        }
+      }
 
       const result = await HLMRFPlugin.runRegistration({
         inputDir: stitchInputDir,
         outputDir: stitchOutputDir,
       })
 
-      console.log('\n')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[HLMRF] ===== 拼接结果 =====')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('    ok:', result.ok)
-      console.log('    outputDir:', result.outputDir)
-      console.log('    alignedPointCloudPath:', result.alignedPointCloudPath || '(无)')
-      console.log('    alignedBlockPath:', result.alignedBlockPath || '(无)')
-      console.log('═══════════════════════════════════════════════════════\n')
+      console.log(`[HLMRF] ${result.ok ? '✅' : '❌'} 拼接结果: ok=${result.ok}`)
 
       if (result.ok) {
         const denseCloudPath = `${stitchOutputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`
         try {
           await parseAndRenderTxt(denseCloudPath)
-          const renderedCount = pointCount.value
-          logger.info(`[HLMRF] 渲染完成: ${renderedCount} 个点`)
-          showToast({
-            message: `多站点拼接完成 (Batch_${currNo}), ${renderedCount.toLocaleString()} 点`,
-            position: 'bottom',
-            duration: 3000,
-          })
+          logger.info(`[HLMRF] 渲染完成: ${pointCount.value} 个点`)
+          showToast({ message: `多站点拼接完成, ${pointCount.value.toLocaleString()} 点`, position: 'bottom', duration: 3000 })
         } catch (renderError) {
           logger.error('[HLMRF] 渲染拼接结果失败:', renderError.message)
-          showToast({
-            message: `拼接完成但渲染失败: ${renderError.message}`,
-            position: 'bottom',
-            duration: 5000,
-          })
         }
 
-        const positions = await readGlobalPosesFromStitch(stitchOutputDir)
+        const { syncDenseCloudToSession, appendPoseToGlobalPosesAll } = await import('@/utils/pointCloud/reconstruction')
+        await syncDenseCloudToSession(denseCloudPath, dataDir)
+        console.log('[HLMRF] 💾 已同步到会话根目录')
+
+        const positions = await readGlobalPosesFromStitch(stitchOutputDir, currentIdx)
         if (positions.length > 0) {
-          updateHLMRFAnchors(positions)
+          for (const pos of positions) {
+            hlmrfAnchorPositions.set(pos.batchNo, { x: pos.x, y: pos.y, z: pos.z })
+          }
+          updateHLMRFAnchorsFromMap()
+          console.log(`[HLMRF] 📍 锚点已更新: ${hlmrfAnchorPositions.size} 个`)
+        }
+
+        // 从 per-stitch global_poses.txt 解析新站位的 4x4 矩阵，追加到 global_poses_all.txt
+        const globalPosesPath = `${stitchOutputDir}/${HLMRF_OUTPUT.GLOBAL_POSES_FILE}`
+        try {
+          const readResult = await Filesystem.readFile({
+            path: globalPosesPath, directory: Directory.External, encoding: FilesystemEncoding.UTF8,
+          })
+          if (readResult?.data) {
+            const lines = readResult.data.trim().split('\n')
+            for (let i = 0; i < lines.length; i++) {
+              const match = lines[i].trim().match(/^(\d+):$/)
+              if (match && parseInt(match[1]) === 2 && i + 4 <= lines.length) {
+                const matrix = [
+                  lines[i + 1].trim().split(/\s+/).map(parseFloat),
+                  lines[i + 2].trim().split(/\s+/).map(parseFloat),
+                  lines[i + 3].trim().split(/\s+/).map(parseFloat),
+                  lines[i + 4].trim().split(/\s+/).map(parseFloat),
+                ]
+                await appendPoseToGlobalPosesAll(dataDir, currentIdx1Based, matrix)
+                console.log(`[HLMRF] 🔑 已追加站位 ${currentIdx1Based} 位姿到 global_poses_all.txt`)
+                break
+              }
+            }
+          }
+        } catch (_) {
+          console.warn('[HLMRF] ⚠️ 无法读取 global_poses.txt，跳过位姿追加')
         }
       } else {
-        showToast({
-          message: '多站点拼接失败',
-          position: 'bottom',
-          duration: 3000,
-        })
+        showToast({ message: '多站点拼接失败', position: 'bottom', duration: 3000 })
       }
     } catch (error) {
-      logger.error('[HLMRF] 拼接异常:', error.message)
-      console.error('[HLMRF] 堆栈:', error.stack)
-      showToast({
-        message: `HLMRF 拼接异常: ${error.message || '未知错误'}`,
-        position: 'bottom',
-        duration: 5000,
-      })
+      console.error(`[HLMRF] ❌ 异常: ${error.message}`)
+      showToast({ message: `HLMRF 拼接异常: ${error.message || '未知错误'}`, position: 'bottom', duration: 5000 })
     }
   }, 2000)
 }
 
 /**
- * 检查输入文件是否存在
- */
-async function checkInputFiles(dataDir, batchNo) {
-  const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
-  const photoDir = `${batchFolder}/allPicture`
-
-  console.log('[AutoStitch] 📂 检查输入文件...')
-  console.log('   ├─ 批次目录:', batchFolder)
-  console.log('   └─ 照片目录:', photoDir)
-
-  try {
-    const batchDirExists = await storage.file.exists(batchFolder)
-    console.log(
-      `[AutoStitch] ${batchDirExists ? '✅' : '❌'} 批次目录: ${batchDirExists ? '存在' : '不存在'}`,
-    )
-
-    if (batchDirExists) {
-      const { files: entries } = await storage.file.readDir(batchFolder)
-      console.log('[AutoStitch] 📋 批次目录文件列表:')
-      entries.forEach((f, i) => {
-        console.log(`   ${i + 1}. ${f.type === 'directory' ? '📁' : '📄'} ${f.name}`)
-      })
-
-      const pointCloudFiles = entries.filter(
-        (f) =>
-          f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
-      )
-
-      if (pointCloudFiles.length > 0) {
-        console.log(`[AutoStitch] ✅ 找到 ${pointCloudFiles.length} 个点云文件:`)
-        pointCloudFiles.forEach((f, i) => {
-          const sizeKb = (f.size / 1024).toFixed(1)
-          const isEmpty = f.size < 200
-          const flag = isEmpty ? '⚠️ 数据为空' : '✅'
-          console.log(`   ${i + 1}. ${f.name} (${sizeKb} KB) ${flag}`)
-          if (isEmpty && i === 0) {
-            console.log(`[AutoStitch] ⚠️ 激光点云数据为空！仅含表头，蓝牙可能未传数据`)
-            console.log(`[AutoStitch]    算法仍会继续，但将生成空点云（无有效深度点）`)
-          }
-        })
-      } else {
-        console.log('[AutoStitch] ❌ 未找到点云文件 (pointCloud_data_*.txt)')
-      }
-    } else {
-      console.log('[AutoStitch] ❌ 批次目录不存在')
-    }
-
-    console.log('')
-    const photoDirExists = await storage.file.exists(photoDir)
-    console.log(
-      `[AutoStitch] ${photoDirExists ? '✅' : '❌'} 照片目录: ${photoDirExists ? '存在' : '不存在'}`,
-    )
-
-    if (photoDirExists) {
-      const { files: entries } = await storage.file.readDir(photoDir)
-      const photoFiles = entries.filter(
-        (f) =>
-          f.type === 'file' &&
-          (f.name.endsWith('.jpg') || f.name.endsWith('.png') || f.name.endsWith('.jpeg')),
-      )
-
-      console.log(`[AutoStitch] 📷 照片文件: ${photoFiles.length} 张`)
-
-      if (photoFiles.length > 0) {
-        console.log('   前 5 张:')
-        photoFiles.slice(0, 5).forEach((f, i) => {
-          console.log(`   ${i + 1}. ${f.name} (${(f.size / 1024).toFixed(1)} KB)`)
-        })
-        if (photoFiles.length > 5) {
-          console.log(`   ... 还有 ${photoFiles.length - 5} 张`)
-        }
-      } else {
-        console.log('[AutoStitch] ⚠️ 照片目录为空')
-      }
-    } else {
-      console.log('[AutoStitch] ❌ 照片目录不存在')
-    }
-
-    console.log('')
-  } catch (error) {
-    console.error('[AutoStitch] ❌ 检查文件失败:', error.message)
-    console.error('   堆栈:', error.stack)
-  }
-}
-
-/**
- * 检查输出文件
+ * 预缓存全景图到内存
  */
 async function preCachePanorama(dataDir, batchNo, method) {
   const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
@@ -1236,9 +1146,6 @@ async function preCachePanorama(dataDir, batchNo, method) {
       if (readResult?.data) {
         const dataUri = `data:image/png;base64,${readResult.data}`
         setPanoramaCache(panoPath, dataUri)
-        console.log(
-          `[AutoStitch] 🚀 已预缓存全景图 (${(readResult.data.length / 1024).toFixed(0)} KB base64)`,
-        )
         return
       }
     } catch (e) {}
@@ -1247,8 +1154,6 @@ async function preCachePanorama(dataDir, batchNo, method) {
 }
 
 async function checkOutputFiles(outputFile, dataDir, batchNo, method) {
-  console.log('[AutoStitch] 📦 检查输出文件...')
-
   const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
   const outputDir = `${batchFolder}/ptcr_output`
 
@@ -1258,79 +1163,19 @@ async function checkOutputFiles(outputFile, dataDir, batchNo, method) {
       : method === 'standard'
         ? 'fused_standard.ply'
         : 'ply_raw.ply'
-  const panoFileName = method === 'standard' ? 'pano_standard.png' : 'pano_raw.png'
 
   const outputPath = `${outputDir}/${plyFileName}`
-
-  console.log(`   ├─ 算法报告路径: ${outputFile}`)
-  console.log(`   └─ 实际检查路径: ${outputPath}`)
-
   try {
     const exists = await storage.file.exists(outputPath)
-    console.log(`[AutoStitch] ${exists ? '✅' : '❌'} 主输出文件: ${exists ? '存在' : '不存在'}`)
-
     if (exists) {
       const stat = await storage.file.stat(outputPath)
       const fileSize = stat.size ? `${(stat.size / 1024 / 1024).toFixed(2)} MB` : '未知'
-      console.log(`   └─ 文件大小: ${fileSize}`)
+      console.log(`[AutoStitch] ✅ 点云输出: ${plyFileName} (${fileSize})`)
     } else {
-      console.log(`   ⚠️ 文件可能尚未刷新到磁盘，或算法报告路径有误`)
-    }
-
-    // 2. 检查工作目录
-    const workDir = outputDir
-
-    console.log('')
-    const workDirExists = await storage.file.exists(workDir)
-    console.log(
-      `[AutoStitch] ${workDirExists ? '✅' : '❌'} 工作目录: ${workDirExists ? '存在' : '不存在'}`,
-    )
-    console.log('   └─ 路径:', workDir)
-
-    if (workDirExists) {
-      const { files: entries } = await storage.file.readDir(workDir)
-      console.log('[AutoStitch] 📋 工作目录文件列表:')
-      entries.forEach((f, i) => {
-        console.log(`   ${i + 1}. ${f.type === 'directory' ? '📁' : '📄'} ${f.name}`)
-      })
-
-      console.log('')
-      const keyFiles = [
-        { name: panoFileName, desc: '全景图' },
-        { name: 'depth_sparse_ref.png', desc: '稀疏深度图' },
-        { name: plyFileName, desc: '点云文件' },
-        { name: 'imgs/params.txt', desc: '相机参数' },
-      ]
-
-      console.log('[AutoStitch] 🔑 关键输出文件:')
-      for (const file of keyFiles) {
-        const filePath = `${workDir}/${file.name}`
-        const fileExists = await storage.file.exists(filePath)
-
-        if (fileExists) {
-          const stat = await storage.file.stat(filePath)
-          const fileSize = stat.size ? `${(stat.size / 1024).toFixed(1)} KB` : '未知'
-          console.log(`   ✅ ${file.name} (${file.desc}): ${fileSize}`)
-
-          if (file.name === 'params.txt') {
-            try {
-              const statResult = await storage.file.stat(filePath)
-              console.log(`      └─ 文件大小: ${(statResult.size / 1024).toFixed(1)} KB`)
-            } catch (e) {
-              console.log(`      └─ 无法读取状态: ${e.message}`)
-            }
-          }
-        } else {
-          console.log(`   ❌ ${file.name} (${file.desc}): 不存在`)
-        }
-      }
-
-      console.log('')
-    } else {
-      console.log('[AutoStitch] ⚠️ 工作目录不存在')
+      console.log(`[AutoStitch] ⚠️ 点云输出文件不存在: ${plyFileName}`)
     }
   } catch (error) {
-    console.error('[AutoStitch] ❌ 检查输出文件失败:', error.message)
+    console.error(`[AutoStitch] ❌ 检查输出文件失败: ${error.message}`)
   }
 }
 
@@ -1340,6 +1185,14 @@ async function checkOutputFiles(outputFile, dataDir, batchNo, method) {
 
 /**
  * 解析 global_poses.txt 内容，提取所有站位的设备采集坐标
+ *
+ * HLMRF 拼接输出格式：
+ *   每次拼接输出的 global_poses.txt 只包含两个位姿矩阵：
+ *     - 第一个矩阵（标签 "1:"）：始终代表站位1在统一坐标系下的位姿
+ *     - 第二个矩阵（标签 "2:"）：代表本次拼接中被注册的新站位在统一坐标系下的位姿
+ *   例如：
+ *     - 拼接 站位1 & 站位2 → 输出矩阵1=站位1坐标, 矩阵2=站位2坐标
+ *     - 拼接 站位2 & 站位3 → 输出矩阵1=站位1坐标, 矩阵2=站位3坐标
  *
  * global_poses.txt 格式示例:
  *   1:
@@ -1356,9 +1209,10 @@ async function checkOutputFiles(outputFile, dataDir, batchNo, method) {
  * 每个站位对应一个 4x4 变换矩阵，平移分量（设备坐标）在最后一列的前三行
  *
  * @param {string} content - global_poses.txt 文件内容
+ * @param {number} currentIdx - 当前拼接的站位编号（新站位的 batchNo）
  * @returns {Array<{batchNo: number, x: number, y: number, z: number}>}
  */
-function parseGlobalPosesContent(content) {
+function parseGlobalPosesContent(content, currentIdx) {
   const lines = content.trim().split('\n')
   const positions = []
 
@@ -1367,19 +1221,25 @@ function parseGlobalPosesContent(content) {
     const line = lines[i].trim()
     const match = line.match(/^(\d+):$/)
     if (match) {
-      const batchNo = parseInt(match[1])
+      const fileLabel = parseInt(match[1])
       if (i + 4 <= lines.length) {
         const row1 = lines[i + 1].trim().split(/\s+/)
         const row2 = lines[i + 2].trim().split(/\s+/)
         const row3 = lines[i + 3].trim().split(/\s+/)
 
         if (row1.length >= 4 && row2.length >= 4 && row3.length >= 4) {
-          positions.push({
-            batchNo,
-            x: parseFloat(row1[3]),
-            y: parseFloat(row2[3]),
-            z: parseFloat(row3[3]),
-          })
+          const x = parseFloat(row1[3])
+          const y = parseFloat(row2[3])
+          const z = parseFloat(row3[3])
+
+          let batchNo
+          if (fileLabel === 1) {
+            batchNo = 1
+          } else {
+            batchNo = currentIdx + 1
+          }
+
+          positions.push({ batchNo, x, y, z })
         }
         i += 4
       }
@@ -1391,12 +1251,10 @@ function parseGlobalPosesContent(content) {
 }
 
 /**
- * 根据解析出的站位坐标更新 3D 场景中的锚点精灵
- * 首个站位在原点，后续站位根据位姿矩阵的平移分量定位
- *
- * @param {Array<{batchNo: number, x: number, y: number, z: number}>} positions
+ * 根据持久化的锚点位置 Map 更新 3D 场景中的锚点精灵
+ * 所有站位坐标均基于统一的全局坐标系（以站位1为原点建立）
  */
-function updateHLMRFAnchors(positions) {
+function updateHLMRFAnchorsFromMap() {
   if (!renderer || !isRendererReady.value) return
 
   const scene = renderer.getScene()
@@ -1414,19 +1272,27 @@ function updateHLMRFAnchors(positions) {
     _hlmrfClickRegistered = true
   }
 
-  for (const pos of positions) {
-    const sprite = createHLMRFAnchorSprite(pos.batchNo)
+  const sortedPositions = Array.from(hlmrfAnchorPositions.entries()).sort(([a], [b]) => a - b)
+
+  for (const [batchNo, pos] of sortedPositions) {
+    const sprite = createHLMRFAnchorSprite(batchNo)
     sprite.position.set(pos.x, pos.y + 0.5, pos.z)
     sprite.scale.set(1.5, 1.5, 1)
-    sprite.userData = { stationId: pos.batchNo - 1, isAnchor: true, isHLMRFAnchor: true }
+    sprite.userData = { stationId: batchNo - 1, isAnchor: true, isHLMRFAnchor: true }
     scene.add(sprite)
     anchorSprites.push(sprite)
   }
 
   console.log(
-    `[HLMRF] 锚点更新完成: ${positions.length} 个站位`,
-    positions.map((p) => `站${p.batchNo}(${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)})`),
+    `[HLMRF] 锚点更新完成: ${sortedPositions.length} 个站位`,
+    sortedPositions.map(
+      ([batchNo, p]) => `站${batchNo}(${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)})`,
+    ),
   )
+
+  if (renderer && typeof renderer.markNeedsRender === 'function') {
+    renderer.markNeedsRender()
+  }
 }
 
 /**
@@ -1466,15 +1332,15 @@ function createHLMRFAnchorSprite(batchNo) {
 /**
  * 读取 stitch_output 目录下的 global_poses.txt 并解析为站位坐标
  * @param {string} stitchOutputDir - stitch_output 目录路径
+ * @param {number} currentIdx - 当前拼接的站位编号（新站位的 batchNo）
  * @returns {Promise<Array<{batchNo: number, x: number, y: number, z: number}>>}
  */
-async function readGlobalPosesFromStitch(stitchOutputDir) {
+async function readGlobalPosesFromStitch(stitchOutputDir, currentIdx) {
   const posesPath = `${stitchOutputDir}/${HLMRF_OUTPUT.GLOBAL_POSES_FILE}`
 
   try {
     await storage.file.stat(posesPath)
   } catch (_) {
-    console.warn('[HLMRF] global_poses.txt 不存在:', posesPath)
     return []
   }
 
@@ -1485,17 +1351,10 @@ async function readGlobalPosesFromStitch(stitchOutputDir) {
   })
 
   if (!readResult || !readResult.data) {
-    console.warn('[HLMRF] global_poses.txt 内容为空')
     return []
   }
 
-  const positions = parseGlobalPosesContent(readResult.data)
-  console.log(
-    '[HLMRF] global_poses.txt 解析结果:',
-    JSON.stringify(positions),
-  )
-
-  return positions
+  return parseGlobalPosesContent(readResult.data, currentIdx)
 }
 
 // ==============================================
@@ -1507,8 +1366,6 @@ async function readGlobalPosesFromStitch(stitchOutputDir) {
  * 可在控制台直接调用: debugCheckPlugin()
  */
 async function debugCheckPlugin() {
-  console.log('[PtcrDiag] 🔬 开始诊断 PtcrPlugin...')
-
   const result = {
     ok: false,
     error: null,
@@ -1518,26 +1375,11 @@ async function debugCheckPlugin() {
   try {
     if (!PtcrPlugin) {
       result.error = 'PtcrPlugin 未导入'
-      console.error('[PtcrDiag] ❌', result.error)
       return result
-    }
-
-    console.log('[PtcrDiag] 📡 PtcrPlugin 对象:', Object.keys(PtcrPlugin).join(', '))
-
-    const methods = [
-      'healthCheck',
-      'generateCloud0',
-      'generateCloudByRaw',
-      'generateCloudByStandard',
-    ]
-    for (const m of methods) {
-      console.log(`[PtcrDiag]    ├─ ${m}:`, typeof PtcrPlugin[m])
     }
 
     try {
       const hc = await PtcrPlugin.healthCheck()
-      console.log('[PtcrDiag] 🏥 healthCheck 返回:', JSON.stringify(hc))
-
       result.ok = hc.ok === true
       result.detail.python = hc.ok
         ? `Python OK (task: ${hc.task})`
@@ -1552,16 +1394,14 @@ async function debugCheckPlugin() {
       result.detail.python = `healthCheck 调用失败: ${result.error}`
 
       if (result.error.includes('not implemented on android')) {
-        result.detail.python = '❌ PtcrPlugin 未安装到 APK（not implemented on android）'
+        result.detail.python = 'PtcrPlugin 未安装到 APK（not implemented on android）'
         result.detail.scripts = '需要在 build.gradle 中包含 PtcrPlugin 并重新构建'
         result.detail.onnx = 'APK 重建后自动部署'
-        console.error('[PtcrDiag] ❌ 插件未实现（APK 不含原生代码）')
-        console.error('[PtcrDiag] 🔧 解决: 重新构建 APK 并安装')
         return result
       }
     }
 
-    console.log('[PtcrDiag] ✅ 诊断完成:', result.ok ? '插件可用' : `不可用: ${result.error}`)
+    return result
   } catch (e) {
     result.error = e.message || String(e)
     console.error('[PtcrDiag] ❌ 诊断异常:', result.error)
@@ -1829,6 +1669,7 @@ function cleanupMultiStationResources() {
     }
   }
   anchorSprites = []
+  hlmrfAnchorPositions.clear()
   _hlmrfClickRegistered = false
 }
 
@@ -1853,17 +1694,11 @@ function clearAccumulationBuffer() {
 
 function startBackgroundPointCloudRender() {
   if (isBackgroundRendering) {
-    logger.debug('[BackgroundRender] 后台渲染任务已在运行')
     return
   }
 
   isBackgroundRendering = true
   const initialBufferSize = deferredRenderBuffer.length
-  console.log('[BackgroundRender] ===== 开始后台渲染 =====')
-  console.log(`[BackgroundRender] 初始缓冲区点数: ${initialBufferSize.toLocaleString()}`)
-  console.log(`[BackgroundRender] 每帧渲染点数: ${BACKGROUND_RENDER_CHUNK}`)
-  logger.debug('[BackgroundRender] 启动后台渲染，缓冲区点数:', initialBufferSize)
-
   let totalRenderedInSession = 0
   let frameCount = 0
 
@@ -1871,11 +1706,6 @@ function startBackgroundPointCloudRender() {
     if (!isBackgroundRendering || !isRendererReady.value || !renderer) {
       backgroundRenderTask = null
       isBackgroundRendering = false
-      console.log('[BackgroundRender] ===== 后台渲染终止 =====')
-      console.log(
-        `[BackgroundRender] 本次会话渲染总数: ${totalRenderedInSession.toLocaleString()} 点`,
-      )
-      console.log(`[BackgroundRender] 渲染帧数: ${frameCount}`)
       return
     }
 
@@ -1886,12 +1716,6 @@ function startBackgroundPointCloudRender() {
       pointCount.value += chunkSize
       totalRenderedInSession += chunkSize
       frameCount++
-
-      if (frameCount % 10 === 0 || chunkSize < BACKGROUND_RENDER_CHUNK) {
-        console.log(
-          `[BackgroundRender] 帧 ${frameCount}: 渲染 ${chunkSize} 点, 累计 ${totalRenderedInSession.toLocaleString()} 点, 缓冲区剩余 ${deferredRenderBuffer.length.toLocaleString()} 点`,
-        )
-      }
     }
 
     if (deferredRenderBuffer.length > 0) {
@@ -1903,22 +1727,12 @@ function startBackgroundPointCloudRender() {
         } else {
           isBackgroundRendering = false
           backgroundRenderTask = null
-          console.log('[BackgroundRender] ===== 后台渲染暂停（等待新数据）=====')
-          console.log(
-            `[BackgroundRender] 暂停前渲染总数: ${totalRenderedInSession.toLocaleString()} 点`,
-          )
         }
       }, 200)
     } else {
       isBackgroundRendering = false
       backgroundRenderTask = null
-      console.log('[BackgroundRender] ===== 后台渲染结束 =====')
-      console.log(
-        `[BackgroundRender] 本次会话渲染总数: ${totalRenderedInSession.toLocaleString()} 点`,
-      )
-      console.log(`[BackgroundRender] 渲染帧数: ${frameCount}`)
-      console.log(`[BackgroundRender] 初始缓冲区: ${initialBufferSize.toLocaleString()} 点`)
-      logger.debug('[BackgroundRender] 后台渲染任务完成')
+      console.log(`[BackgroundRender] ✅ 完成: 初始点数=${initialBufferSize.toLocaleString()}, 渲染总数=${totalRenderedInSession.toLocaleString()}, 帧数=${frameCount}`)
     }
   }
 
@@ -1938,9 +1752,7 @@ function stopBackgroundRender() {
     backgroundRenderTask = null
   }
   if (wasRendering) {
-    console.log('[BackgroundRender] ===== 强制停止后台渲染 =====')
-    console.log(`[BackgroundRender] 停止时缓冲区剩余点数: ${bufferRemaining.toLocaleString()} 点`)
-    logger.debug('[BackgroundRender] 后台渲染已强制停止')
+    console.log(`[BackgroundRender] ⏹ 强制停止, 缓冲区剩余 ${bufferRemaining.toLocaleString()} 点`)
   }
 }
 
@@ -1949,11 +1761,6 @@ async function flushDeferredRender() {
 
   const initialBufferSize = deferredRenderBuffer.length
   let totalFlushed = 0
-  let flushIterations = 0
-
-  console.log('[BackgroundRender] ===== 开始刷新延迟渲染缓冲区 =====')
-  console.log(`[BackgroundRender] 刷新前缓冲区点数: ${initialBufferSize.toLocaleString()} 点`)
-  console.log(`[BackgroundRender] 刷新每批处理点数: ${BACKGROUND_RENDER_CHUNK * 2}`)
 
   while (deferredRenderBuffer.length > 0) {
     const chunk = deferredRenderBuffer.splice(0, BACKGROUND_RENDER_CHUNK * 2)
@@ -1962,20 +1769,11 @@ async function flushDeferredRender() {
       renderer.addPoints(chunk)
       pointCount.value += chunkSize
       totalFlushed += chunkSize
-      flushIterations++
-
-      if (flushIterations % 5 === 0 || chunkSize < BACKGROUND_RENDER_CHUNK * 2) {
-        console.log(
-          `[BackgroundRender] 刷新进度: 已处理 ${totalFlushed.toLocaleString()} 点, 剩余 ${deferredRenderBuffer.length.toLocaleString()} 点`,
-        )
-      }
     }
     await new Promise((resolve) => setTimeout(resolve, 16))
   }
 
-  console.log('[BackgroundRender] ===== 延迟渲染缓冲区刷新完成 =====')
-  console.log(`[BackgroundRender] 刷新总点数: ${totalFlushed.toLocaleString()} 点`)
-  console.log(`[BackgroundRender] 刷新迭代次数: ${flushIterations}`)
+  console.log(`[BackgroundRender] 🔄 刷新完成: ${totalFlushed.toLocaleString()} 点 (初始缓冲=${initialBufferSize.toLocaleString()})`)
 }
 
 /**
@@ -2101,7 +1899,8 @@ function createSessionParser() {
     },
     onTakePhoto: async ({ fileBaseName, meta }) => {
       try {
-        const saveFolderName = currentFolderName || storage.path.getTempSessionName(currentSessionId)
+        const saveFolderName =
+          currentFolderName || storage.path.getTempSessionName(currentSessionId)
         const bid = dataBatchCounter.value
         const targetDir = `pointcloud/${saveFolderName}/Batch_${String(bid).padStart(3, '0')}/allPicture`
         // 拍照并在后台保存（不阻塞主线程）
@@ -2130,51 +1929,29 @@ function createSessionParser() {
       handleScanTimeResponse(data)
     },
     onPhotoSessionEnded: async () => {
-      console.log('\n')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[PhotoSession] 📸 拍照会话结束')
-      console.log('═══════════════════════════════════════════════════════')
-      console.log('[PhotoSession] 📍 当前点位:', dataBatchCounter.value)
-      console.log('[PhotoSession] 📊 点云数量:', currentBatchData.pointCount)
-      console.log('[PhotoSession] 📷 照片数量:', currentBatchData.photos.length)
-      console.log('[PhotoSession] 📝 数据行数:', currentBatchData.rawLines.length)
-      console.log('═══════════════════════════════════════════════════════\n')
+      console.log(`[PhotoSession] 📸 会话结束: 点位=${dataBatchCounter.value}, 点云=${currentBatchData.pointCount}, 照片=${currentBatchData.photos.length}`)
 
-      // 1. 刷新延迟渲染
-      console.log('[PhotoSession] 🎨 刷新延迟渲染...')
+      // 1. 刷新延迟渲染并停止
       await flushDeferredRender()
       stopBackgroundRender()
 
       // 2. 保存当前点位数据
-      console.log('[PhotoSession] 💾 保存当前点位数据...')
       await saveCurrentBatch()
-      console.log('[PhotoSession] ✅ 点位数据保存完成')
 
       // 3. 更新点位计数器
       dataBatchCounter.value++
       enableSave.value = true
-
-      // 4. 添加按钮
       batchButtons.value.push(dataBatchCounter.value)
-
-      // 停止采集进度显示
       stopCollectionProgress()
 
-      console.log('[PhotoSession] 📍 更新点位计数器:', dataBatchCounter.value)
-
-      // 5. 方案C：暂停解析器（不取消订阅），保持蓝牙通知通道
-      console.log('[PhotoSession] ⏸️ 暂停解析器（保持蓝牙订阅）...')
-      if (parser) {
-        parser.pause()
-      }
+      // 4. 暂停解析器（保持蓝牙订阅）
+      if (parser) parser.pause()
       clearAccumulationBuffer()
       resetSessionParserState()
-      console.log('[PhotoSession] ✅ 解析器已暂停')
 
-      // 6. 触发 HLMRF 多站点拼接（拍照完成后自动运行）
-      console.log('[PhotoSession] 🚀 即将触发 HLMRF 多站点拼接...')
-      console.log('═══════════════════════════════════════════════════════\n')
+      // 5. 触发 HLMRF 多站点拼接 + PtcrPlugin 单站点拼接
       triggerHLMRFRegistration()
+      triggerAutoStitch()
     },
   })
 
@@ -2271,7 +2048,6 @@ function initAndStartRenderingTimer() {
  * 开始数据采集
  */
 async function startDataStream() {
-  console.log('点击startDataStream')
   if (isCollecting.value) {
     showToast({ message: '正在采集中...', position: 'bottom' })
     return
@@ -2556,7 +2332,6 @@ async function init() {
       } else {
         // ========= 采集模式：加载坐标系和网格 ==========
         if (!currentSessionId) {
-          console.log('!currentSessionId')
           currentSessionId = generateOptimizedSessionId()
         } else {
           loadBatchButtons()
@@ -2575,52 +2350,24 @@ async function init() {
  * @returns {Promise<void>}
  */
 async function loadPointCloudAndAnchors(renderer, container) {
-  // 获取场景
   const scene = renderer.getScene()
 
-  // ========== 渐进式加载 ==========
-  console.log('[PointCloud] 开始加载点云数据...')
+  showLoadingToast({ message: '加载点云中...', forbidClick: false })
 
-  // 显示加载提示
-  showLoadingToast({
-    message: '加载点云中...',
-    forbidClick: false,
-  })
-
-  // 先加载中心站点（站点0）
+  // 先加载中心站点
   const centerStation = stations[0]
   const centerPoints = loadStation(centerStation)
   renderer.addPoints(centerPoints)
   pointCount.value = centerPoints.length
-  console.log(`[PointCloud] 中心站点加载完成: ${centerPoints.length} 个点`)
 
-  // 创建锚点
+  // 创建锚点和点击事件
   createAnchorSprites(scene)
-  // 添加点击事件监听
   container.addEventListener('click', onContainerClick)
 
   // 渐进式加载周围站点
   const surroundingStations = stations.slice(1)
-  await loadStationsByPriority(
-    surroundingStations,
-    renderer,
-    (loadedCount, totalPoints, currentStationId, currentStationName) => {
-      pointCount.value = totalPoints
+  await loadStationsByPriority(surroundingStations, renderer, () => {})
 
-      // 打印具体站点信息
-      if (currentStationId !== undefined) {
-        console.log(
-          `[PointCloud] 🚀 正在渲染: 站点${currentStationId} (${currentStationName}) | 累计点数: ${totalPoints.toLocaleString()}`,
-        )
-      } else {
-        console.log(
-          `[PointCloud] 📊 批量更新: ${loadedCount}/${surroundingStations.length} 站点 | 总点数: ${totalPoints.toLocaleString()}`,
-        )
-      }
-    },
-  )
-
-  // 关闭加载提示
   closeToast()
 }
 /**
@@ -2681,290 +2428,61 @@ async function loadStationsByPriority(stationList, renderer, onProgress) {
   const camera = renderer.getCamera()
 
   if (!camera) {
-    console.log('[PointCloud] ⚠️ 未获取到相机，降级为普通渐进式加载')
     return loadStationsProgressive(stationList, renderer, onProgress)
   }
 
   const cameraPos = camera.position
   const fovRadius = Math.abs(cameraPos.y) * Math.tan((30 * Math.PI) / 180)
 
-  // ========== 1. 动态计算所有站点的距离分布 ==========
-  const stationsWithDistance = []
-  let maxDistance = 0
-  let minDistance = Infinity
-
-  for (const station of stationList) {
+  // 计算所有站点距离和优先级
+  const stationsWithPriority = stationList.map((station) => {
     const dx = station.offset.x - cameraPos.x
     const dz = station.offset.z - cameraPos.z
     const distance = Math.sqrt(dx * dx + dz * dz)
 
-    stationsWithDistance.push({
-      ...station,
-      distance,
-    })
-
-    if (distance > maxDistance) maxDistance = distance
-    if (distance < minDistance) minDistance = distance
-  }
-
-  console.log('\n' + '='.repeat(60))
-  console.log('[PointCloud] 🎯 视锥剔除渐进式加载开始')
-  console.log('='.repeat(60))
-  console.log(`[PointCloud] 📷 相机位置: (${cameraPos.x}, ${cameraPos.y}, ${cameraPos.z})`)
-  console.log(`[PointCloud] 🔍 视野半径: ${fovRadius.toFixed(2)}米`)
-  console.log(
-    `[PointCloud] 📊 站点距离范围: ${minDistance.toFixed(2)}米 ~ ${maxDistance.toFixed(2)}米`,
-  )
-
-  // ========== 2. 根据实际数据分布动态计算优先级阈值 ==========
-  // 方法：将距离范围分成4个区间
-  // 视锥内（距离 < fovRadius）的站点优先级0
-
-  // 获取所有视锥外站点的距离
-  const outsideDistances = stationsWithDistance
-    .filter((s) => s.distance >= fovRadius)
-    .map((s) => s.distance)
-
-  let radius2, radius3
-
-  if (outsideDistances.length > 0) {
-    // 对视锥外的距离进行排序
-    outsideDistances.sort((a, b) => a - b)
-
-    // 动态分位数：将视锥外的站点按距离分成3个等级
-    const q1Index = Math.floor(outsideDistances.length * 0.33) // 前33%为高优先级
-    const q2Index = Math.floor(outsideDistances.length * 0.66) // 前66%为中优先级
-
-    radius2 = outsideDistances[q1Index] || fovRadius * 1.5
-    radius3 = outsideDistances[q2Index] || fovRadius * 2.5
-  } else {
-    // 没有视锥外站点时的默认值
-    radius2 = fovRadius * 1.5
-    radius3 = fovRadius * 2.5
-  }
-
-  console.log(
-    `[PointCloud] 🎚️ 动态优先级阈值: 立即加载<${fovRadius.toFixed(2)}米 | 高优先级<${radius2.toFixed(2)}米 | 中优先级<${radius3.toFixed(2)}米`,
-  )
-
-  // ========== 3. 计算每个站点的优先级 ==========
-  const stationsWithPriority = stationsWithDistance.map((station) => {
     let priority
-    let priorityName
-    let priorityIcon
-
-    if (station.distance < fovRadius) {
+    if (distance < fovRadius) {
       priority = 0
-      priorityName = '立即加载'
-      priorityIcon = '🚀'
-    } else if (station.distance < radius2) {
+    } else if (distance < fovRadius * 1.5) {
       priority = 1
-      priorityName = '高优先级'
-      priorityIcon = '⚡'
-    } else if (station.distance < radius3) {
+    } else if (distance < fovRadius * 2.5) {
       priority = 2
-      priorityName = '中优先级'
-      priorityIcon = '📌'
     } else {
       priority = 3
-      priorityName = '低优先级'
-      priorityIcon = '💤'
     }
 
-    return {
-      ...station,
-      priority,
-      priorityName,
-      priorityIcon,
-      distance: station.distance,
-    }
+    return { ...station, priority, distance }
   })
 
-  // 按优先级排序
   stationsWithPriority.sort((a, b) => a.priority - b.priority)
 
-  // 打印优先级统计
-  const priorityStats = {
-    0: stationsWithPriority.filter((s) => s.priority === 0).length,
-    1: stationsWithPriority.filter((s) => s.priority === 1).length,
-    2: stationsWithPriority.filter((s) => s.priority === 2).length,
-    3: stationsWithPriority.filter((s) => s.priority === 3).length,
-  }
-
-  console.log('\n' + '-'.repeat(40))
-  console.log('[PointCloud] 📈 动态优先级统计:')
-  console.log(`   🚀 立即加载(优先级0): ${priorityStats[0]} 个站点`)
-  console.log(`   ⚡ 高优先级(优先级1): ${priorityStats[1]} 个站点`)
-  console.log(`   📌 中优先级(优先级2): ${priorityStats[2]} 个站点`)
-  console.log(`   💤 低优先级(优先级3): ${priorityStats[3]} 个站点`)
-  console.log('-'.repeat(40))
-
-  // 打印所有站点的优先级详情
-  console.log('\n[PointCloud] 📋 所有站点优先级详情:')
+  // 按优先级分批加载
+  const priorityGroups = [[], [], [], []]
   for (const s of stationsWithPriority) {
-    console.log(
-      `   ${s.priorityIcon} ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米 | ${s.priorityName}`,
-    )
+    priorityGroups[s.priority].push(s)
   }
 
-  // ========== 4. 按优先级分批加载 ==========
+  console.log(`[PointCloud] 🎯 视锥加载: ${stationList.length} 站, 立即=${priorityGroups[0].length}, 高=${priorityGroups[1].length}, 中=${priorityGroups[2].length}, 低=${priorityGroups[3].length}`)
 
-  // 优先级0：立即加载
-  const immediateStations = stationsWithPriority.filter((s) => s.priority === 0)
-  if (immediateStations.length > 0) {
-    console.log('\n' + '='.repeat(40))
-    console.log(`[PointCloud] 🚀 阶段1: 立即加载 (${immediateStations.length} 个站点)`)
-    console.log('='.repeat(40))
-
-    for (const station of immediateStations) {
-      console.log(
-        `   🔄 正在加载: ${station.folder} (${station.name}) | 距离相机:${station.distance.toFixed(2)}米`,
-      )
-      const points = loadStation(station)
-      if (points.length > 0) {
-        renderer.addPoints(points)
-        pointCount.value += points.length
-        console.log(
-          `      ✅ 完成! 点数: ${points.length.toLocaleString()} | 累计总点数: ${pointCount.value.toLocaleString()}`,
-        )
-        if (onProgress) {
-          onProgress(1, pointCount.value, station.id, station.name)
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 16))
+  for (const station of priorityGroups[0]) {
+    const points = loadStation(station)
+    if (points.length > 0) {
+      renderer.addPoints(points)
+      pointCount.value += points.length
     }
+    await new Promise((resolve) => setTimeout(resolve, 16))
   }
 
-  // 优先级1：高优先级
-  const highPriorityStations = stationsWithPriority.filter((s) => s.priority === 1)
-  if (highPriorityStations.length > 0) {
-    console.log('\n' + '='.repeat(40))
-    console.log(`[PointCloud] ⚡ 阶段2: 高优先级加载 (${highPriorityStations.length} 个站点)`)
-    console.log('='.repeat(40))
-
-    for (const s of highPriorityStations) {
-      console.log(`   📍 待加载: ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米`)
-    }
-
-    const newTotal = await loadStationBatch(
-      highPriorityStations,
-      renderer,
-      (loadedCount, total, stationId, stationName) => {
-        if (onProgress) {
-          onProgress(immediateStations.length + loadedCount, total, stationId, stationName)
-        }
-      },
-    )
-    totalPoints = newTotal
-  }
-
-  // 优先级2：中优先级
-  const midPriorityStations = stationsWithPriority.filter((s) => s.priority === 2)
-  if (midPriorityStations.length > 0) {
-    console.log('\n' + '='.repeat(40))
-    console.log(`[PointCloud] 📌 阶段3: 中优先级加载 (${midPriorityStations.length} 个站点)`)
-    console.log('='.repeat(40))
-
-    const showCount = Math.min(5, midPriorityStations.length)
-    for (let i = 0; i < showCount; i++) {
-      const s = midPriorityStations[i]
-      console.log(`   📍 待加载: ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米`)
-    }
-    if (midPriorityStations.length > showCount) {
-      console.log(`   ... 还有 ${midPriorityStations.length - showCount} 个站点`)
-    }
-
-    const newTotal = await loadStationBatch(
-      midPriorityStations,
-      renderer,
-      (loadedCount, total, stationId, stationName) => {
-        if (onProgress) {
-          onProgress(
-            immediateStations.length + highPriorityStations.length + loadedCount,
-            total,
-            stationId,
-            stationName,
-          )
-        }
-      },
-    )
-    totalPoints = newTotal
-  }
-
-  // 优先级3：低优先级
-  const lowPriorityStations = stationsWithPriority.filter((s) => s.priority === 3)
-  if (lowPriorityStations.length > 0) {
-    console.log('\n' + '='.repeat(40))
-    console.log(
-      `[PointCloud] 💤 阶段4: 低优先级加载 (${lowPriorityStations.length} 个站点) - 使用空闲时间`,
-    )
-    console.log('='.repeat(40))
-
-    const showCount = Math.min(3, lowPriorityStations.length)
-    for (let i = 0; i < showCount; i++) {
-      const s = lowPriorityStations[i]
-      console.log(`   📍 待加载: ${s.folder} (${s.name}) | 距离相机:${s.distance.toFixed(2)}米`)
-    }
-    if (lowPriorityStations.length > showCount) {
-      console.log(`   ... 还有 ${lowPriorityStations.length - showCount} 个站点`)
-    }
-
-    if (typeof requestIdleCallback !== 'undefined') {
-      console.log(`   ⏰ 使用 requestIdleCallback 在浏览器空闲时加载`)
-      await new Promise((resolve) => {
-        requestIdleCallback(
-          async () => {
-            const newTotal = await loadStationBatch(
-              lowPriorityStations,
-              renderer,
-              (loadedCount, total, stationId, stationName) => {
-                if (onProgress) {
-                  onProgress(
-                    immediateStations.length +
-                      highPriorityStations.length +
-                      midPriorityStations.length +
-                      loadedCount,
-                    total,
-                    stationId,
-                    stationName,
-                  )
-                }
-              },
-            )
-            totalPoints = newTotal
-            resolve()
-          },
-          { timeout: 3000 },
-        )
-      })
-    } else {
-      console.log(`   ⏰ 使用 setTimeout 延迟加载`)
-      const newTotal = await loadStationBatch(
-        lowPriorityStations,
-        renderer,
-        (loadedCount, total, stationId, stationName) => {
-          if (onProgress) {
-            onProgress(
-              immediateStations.length +
-                highPriorityStations.length +
-                midPriorityStations.length +
-                loadedCount,
-              total,
-              stationId,
-              stationName,
-            )
-          }
-        },
-      )
+  for (let priority = 1; priority <= 3; priority++) {
+    const group = priorityGroups[priority]
+    if (group.length > 0) {
+      const newTotal = await loadStationBatch(group, renderer, () => {})
       totalPoints = newTotal
     }
   }
 
-  pointCount.value = totalPoints
-
-  console.log('\n' + '='.repeat(60))
-  console.log(`[PointCloud] 🎉 所有站点加载完成！总点数: ${totalPoints.toLocaleString()}`)
-  console.log('='.repeat(60) + '\n')
+  pointCount.value = totalPoints || pointCount.value
+  console.log(`[PointCloud] 🎉 所有站点加载完成: ${pointCount.value.toLocaleString()} 点`)
 }
 
 /**
@@ -3170,16 +2688,30 @@ onDeactivated(() => {
 
 /**
  * 组件从 keep-alive 缓存中激活时调用
- * 从 BatchDetail 返回时，状态完全保持，无需恢复
+ * 从 BatchDetail 返回时，无论 view 还是 collect 模式，
+ * 都可能发生了删除操作，需要重新加载点云和锚点
  *
- * 注意：由于 goToBatch 阻止了采集状态下的跳转
- * 从 BatchDetail 返回时一定不在采集状态，无需恢复采集定时器
+ * 注意：goToBatch 在采集状态下阻止跳转，因此返回时一定不在采集状态
  */
 onActivated(async () => {
-  logger.debug('[PointCloud] onActivated - 组件被激活，状态完全保持')
+  const dataDir = await getDataDir()
+  if (!dataDir) return
 
-  // 所有状态完全保持，无需任何恢复操作
-  // - 所有数据状态保持
+  console.log(`[PointCloud] 🔄 onActivated: 从 BatchDetail 返回, dataDir=${dataDir}`)
+
+  const { sessionDenseCloudExists, getSessionDenseCloudPath } = await import(
+    '@/utils/pointCloud/reconstruction'
+  )
+  const cloudAvailable = await sessionDenseCloudExists(dataDir)
+
+  if (cloudAvailable) {
+    const cloudPath = getSessionDenseCloudPath(dataDir)
+    await parseAndRenderTxt(cloudPath)
+    console.log(`[PointCloud]    ✅ 点云渲染完成: ${pointCount.value} 个点`)
+  }
+
+  await loadHLMRFAnchorsForViewMode(dataDir)
+  console.log(`[PointCloud]    ✅ 锚点加载完成: ${hlmrfAnchorPositions.size} 个`)
 })
 
 /**
@@ -3283,6 +2815,10 @@ function createAnchorSprites(scene) {
     scene.add(sprite)
     anchorSprites.push(sprite)
   }
+
+  if (renderer && typeof renderer.markNeedsRender === 'function') {
+    renderer.markNeedsRender()
+  }
 }
 
 /**
@@ -3359,6 +2895,7 @@ function jumpToBatchDetail(stationId) {
       currentSessionId,
       bid: stationId + 1,
     },
+    query: { folderName: currentFolderName || '' },
   })
 }
 </script>
