@@ -203,10 +203,13 @@ function goBack() {
 }
 
 function handleManualSplice() {
-  showToast({ message: '手动拼接功能开发中', position: 'bottom' })
-    // 跳转到拼接页面
   router.push({
-    name: 'SpliceView'
+    name: 'SpliceView',
+    params: {
+      currentSessionId: currentSessionId,
+      bid: batchNum,
+    },
+    query: { folderName: route.query.folderName || '' },
   })
 }
 

@@ -157,7 +157,6 @@ import { useFoldersStore } from '@/stores/folders'
 import { useKeepAliveStore } from '@/stores/keepAlive'
 import { usePointCloudRenderer } from '@/composables/usePointCloudRenderer/index.js'
 import { StatusBar } from '@capacitor/status-bar'
-import { setImmersive } from '@/utils/device/immersive'
 import { bluetoothService } from '@/services/bluetooth'
 import cameraHelper from '@/utils/device/camera'
 import { parseBleData } from '@/utils/format/bleProtocol'
@@ -173,9 +172,6 @@ import { loadAllStations, loadStation } from '@/utils/pointCloudLoader.js'
 // 创建点云页面专用日志记录器
 const logger = createLogger('PointCloudView')
 import {
-  lockToLandscape,
-  lockToPortrait,
-  unlockOrientation,
   enableScreenKeepAwake,
   disableScreenKeepAwake,
 } from '@/utils/device/screen'
@@ -424,7 +420,6 @@ const openSaveDialog = async () => {
     return
   }
 
-  // await unlockOrientation()
   showSaveDialog.value = true
   nextTick(() => {
     try {
@@ -1116,6 +1111,11 @@ async function triggerHLMRFRegistration() {
         } catch (_) {
           console.warn('[HLMRF] ⚠️ 无法读取 global_poses.txt，跳过位姿追加')
         }
+
+        // 关键修复：写入 global_poses_all.txt 后重新加载锚点
+        // stitch_output 中的位姿可能是相对变换，global_poses_all.txt 包含正确的绝对坐标
+        await loadHLMRFAnchorsForViewMode(dataDir)
+        console.log(`[HLMRF] 📍 从 global_poses_all.txt 重新加载锚点完成: ${hlmrfAnchorPositions.size} 个`)
       } else {
         showToast({ message: '多站点拼接失败', position: 'bottom', duration: 3000 })
       }
@@ -1302,25 +1302,27 @@ function updateHLMRFAnchorsFromMap() {
  */
 function createHLMRFAnchorSprite(batchNo) {
   const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
+  canvas.width = 256
+  canvas.height = 256
   const ctx = canvas.getContext('2d')
 
   ctx.beginPath()
-  ctx.arc(32, 32, 28, 0, Math.PI * 2)
+  ctx.arc(128, 128, 112, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
   ctx.strokeStyle = '#2a7aff'
-  ctx.lineWidth = 3
+  ctx.lineWidth = 12
   ctx.stroke()
 
   ctx.fillStyle = '#000000'
-  ctx.font = 'bold 24px Arial'
+  ctx.font = 'bold 96px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(String(batchNo), 32, 32)
+  ctx.fillText(String(batchNo), 128, 128)
 
   const texture = new THREE.CanvasTexture(canvas)
+  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.LinearFilter
   const material = new THREE.SpriteMaterial({
     map: texture,
     depthTest: false,
@@ -1489,7 +1491,7 @@ function resetStateVariables(resetState) {
  * @param {Object} options - 恢复选项
  */
 async function restoreSystemSettings(options) {
-  const { restoreStatusBar, disableImmersive, disableKeepAwake, restorePortrait } = options
+  const { restoreStatusBar, disableImmersive, disableKeepAwake } = options
 
   // 恢复状态栏设置
   if (restoreStatusBar) {
@@ -1501,19 +1503,9 @@ async function restoreSystemSettings(options) {
     }
   }
 
-  // 禁用沉浸模式
-  if (disableImmersive) {
-    setImmersive(false)
-  }
-
   // 停止屏幕常亮
   if (disableKeepAwake) {
     await disableScreenKeepAwake()
-  }
-
-  // 恢复竖屏
-  if (restorePortrait) {
-    await lockToPortrait()
   }
 }
 
@@ -1564,7 +1556,6 @@ const EXIT_CLEANUP_TIMEOUT_MS = 5000
  * 所有步骤均有独立的错误捕获，单步失败不影响后续步骤
  *
  * @param {Object} options - 清理选项
- * @param {boolean} [options.restorePortrait=true] - 是否恢复竖屏
  * @param {boolean} [options.disableKeepAwake=true] - 是否禁用屏幕常亮
  * @param {boolean} [options.disableImmersive=true] - 是否禁用沉浸模式
  * @param {boolean} [options.restoreStatusBar=true] - 是否恢复状态栏设置
@@ -1574,7 +1565,6 @@ const EXIT_CLEANUP_TIMEOUT_MS = 5000
  */
 async function cleanupResourcesForExit(options = {}) {
   const {
-    restorePortrait = true,
     disableKeepAwake = true,
     disableImmersive = true,
     restoreStatusBar = true,
@@ -1628,7 +1618,6 @@ async function cleanupResourcesForExit(options = {}) {
           restoreStatusBar,
           disableImmersive,
           disableKeepAwake,
-          restorePortrait,
         })
       })(),
       new Promise((resolve) => {
@@ -2253,7 +2242,6 @@ async function init() {
   _hasCleaned = false
   if (isRendererReady.value) return
 
-  await lockToLandscape()
   await enableScreenKeepAwake()
 
   try {
@@ -2262,12 +2250,6 @@ async function init() {
     await StatusBar.setStyle({ style: 'LIGHT' })
   } catch (err) {
     logger.warn('StatusBar overlay set failed', err)
-  }
-
-  try {
-    setImmersive(true)
-  } catch (err) {
-    logger.warn('setImmersive initial calls failed', err)
   }
 
   // 使用变量保存定时器 ID，以便在组件卸载时取消
@@ -2678,16 +2660,32 @@ onUnmounted(async () => {
 
 /**
  * 组件被 keep-alive 缓存时调用
- * 完全保持状态，只暂停后台渲染定时器
+ * 关键修复：释放 WebGL 上下文，避免与 BatchDetail 的 PanoramaViewer 冲突
+ * 移动端 WebGL 上下文数量有限（通常 2-8 个），必须及时释放
  */
 onDeactivated(() => {
-  logger.debug('[PointCloud] onDeactivated - 组件被缓存，完全保持状态')
+  logger.debug('[PointCloud] onDeactivated - 释放 WebGL 上下文')
 
-  // 所有状态完全保持
+  // 移除 resize 监听器
+  if (renderer && renderer.onResize) {
+    window.removeEventListener('resize', renderer.onResize)
+  }
+
+  // 释放渲染器（释放 WebGL 上下文）
+  if (renderer) {
+    try {
+      renderer.dispose()
+    } catch (e) {
+      logger.error('[PointCloud] dispose 渲染器失败: ' + e.message)
+    }
+    renderer = null
+  }
+  isRendererReady.value = false
 })
 
 /**
  * 组件从 keep-alive 缓存中激活时调用
+ * 关键修复：重新创建渲染器（WebGL 上下文已在 onDeactivated 中释放）
  * 从 BatchDetail 返回时，无论 view 还是 collect 模式，
  * 都可能发生了删除操作，需要重新加载点云和锚点
  *
@@ -2698,6 +2696,47 @@ onActivated(async () => {
   if (!dataDir) return
 
   console.log(`[PointCloud] 🔄 onActivated: 从 BatchDetail 返回, dataDir=${dataDir}`)
+
+  // 关键修复：如果渲染器已被释放（WebGL 上下文丢失），重新创建
+  if (!renderer && container.value) {
+    console.log('[PointCloud] 🔄 onActivated: 渲染器已释放，重新创建')
+
+    const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent)
+
+    const baseConfig = {
+      maxPoints: 5000000,
+      initialCapacity: 100000,
+      pixelRatioMax: isMobile ? 1 : 2,
+      targetFps: 30,
+      pointSize: isMobile ? 0.4 : 0.5,
+      cameraFov: 60,
+      cameraNear: 0.1,
+      cameraFar: 200,
+    }
+
+    renderer = usePointCloudRenderer(container.value, baseConfig)
+
+    const initialCameraHeight = 10
+    const cameraConfig = {
+      position: { x: 0, y: initialCameraHeight, z: 0 },
+      target: { x: 0, y: 0, z: 0 },
+      controls: {
+        minDistance: initialCameraHeight / 2,
+        maxDistance: initialCameraHeight * 2,
+        maxPolarAngle: Math.PI / 2,
+      },
+    }
+
+    renderer.init(cameraConfig)
+    isRendererReady.value = true
+    window.addEventListener('resize', renderer.onResize)
+
+    // 重新注册 HLMRF 锚点点击事件（renderer 重建后旧的事件绑定失效）
+    if (container.value && !_hlmrfClickRegistered) {
+      container.value.addEventListener('click', onContainerClick)
+      _hlmrfClickRegistered = true
+    }
+  }
 
   const { sessionDenseCloudExists, getSessionDenseCloudPath } = await import(
     '@/utils/pointCloud/reconstruction'
@@ -2828,27 +2867,29 @@ function createAnchorSprites(scene) {
  */
 function createAnchorSprite(station) {
   const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
+  canvas.width = 256
+  canvas.height = 256
   const ctx = canvas.getContext('2d')
 
   // 绘制圆形背景
   ctx.beginPath()
-  ctx.arc(32, 32, 28, 0, Math.PI * 2)
+  ctx.arc(128, 128, 112, 0, Math.PI * 2)
   ctx.fillStyle = '#ffffff'
   ctx.fill()
   ctx.strokeStyle = station.hexColor || '#000000'
-  ctx.lineWidth = 3
+  ctx.lineWidth = 12
   ctx.stroke()
 
   // 绘制文字
   ctx.fillStyle = '#000000'
-  ctx.font = 'bold 24px Arial'
+  ctx.font = 'bold 96px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(String(station.id + 1), 32, 32)
+  ctx.fillText(String(station.id + 1), 128, 128)
 
   const texture = new THREE.CanvasTexture(canvas)
+  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.LinearFilter
   // 设置 depthTest: false 使锚点不会被其他对象遮挡
   // 设置 depthWrite: false 避免影响其他对象的深度测试
   const material = new THREE.SpriteMaterial({

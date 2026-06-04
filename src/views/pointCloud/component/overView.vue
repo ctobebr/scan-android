@@ -71,8 +71,6 @@ import { ref, onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePanoramaViewer } from '@/composables/usePanoramaViewer.js'
 import { StatusBar } from '@capacitor/status-bar'
-import { setImmersive } from '@/utils/device/immersive'
-import { lockToLandscape, lockToPortrait } from '@/utils/device/screen'
 
 // 导入全景图片
 import img1 from '@/assets/overViewTest/342cb14e88ccd258660d621bb53825f6.png'
@@ -260,9 +258,6 @@ function handleVisibilityChange() {
 }
 
 onMounted(async () => {
-  // 设置横屏
-  await lockToLandscape()
-
   // 设置状态栏
   try {
     await StatusBar.setOverlaysWebView({ overlay: true })
@@ -270,13 +265,6 @@ onMounted(async () => {
     await StatusBar.setStyle({ style: 'LIGHT' })
   } catch (err) {
     console.warn('StatusBar 设置失败:', err)
-  }
-
-  // 设置沉浸式
-  try {
-    setImmersive(true)
-  } catch (err) {
-    console.warn('沉浸式设置失败:', err)
   }
 
   // 延迟初始化，确保容器已渲染
@@ -297,22 +285,12 @@ onBeforeUnmount(async () => {
     viewer = null
   }
 
-  // 恢复竖屏
-  await lockToPortrait()
-
   // 恢复状态栏
   try {
     await StatusBar.setBackgroundColor({ color: '#0a0a1a' })
     await StatusBar.setStyle({ style: 'LIGHT' })
   } catch (err) {
     console.warn('StatusBar 恢复失败:', err)
-  }
-
-  // 关闭沉浸式
-  try {
-    setImmersive(false)
-  } catch (err) {
-    console.warn('沉浸式关闭失败:', err)
   }
 })
 
