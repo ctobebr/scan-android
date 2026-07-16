@@ -81,10 +81,13 @@
 import { ref, computed, onMounted, onActivated, onUnmounted, watch } from 'vue'
 import { showLoadingToast, closeToast, showToast, showConfirmDialog  } from 'vant'
 import { parseSessionIdToFormattedTime } from '@/utils/format/sessionId'
-import { Share } from '@capacitor/share'
+import { registerPlugin } from '@capacitor/core'
 import { StatusBar } from '@capacitor/status-bar'
 import { useFoldersStore } from '@/stores/folders'
 import * as storage from '@/api/pointCloudStorage'
+
+// 注册原生分享插件
+const SharePlugin = registerPlugin('SharePlugin')
 
 const folderStore = useFoldersStore()
 
@@ -438,11 +441,13 @@ const onShareClick = async (folderName, projectName, sessionId) => {
     console.log('[FileList] zipSessionToFile result', res)
     closeToast()
 
-    if (res && res.uri) {
-      await Share.share({
+    if (res && res.path) {
+      // 使用原生 SharePlugin 分享 ZIP 文件
+      await SharePlugin.shareFile({
+        filePath: res.path,
         title: `${zipBaseName}.zip`,
-        url: res.uri,
         dialogTitle: '选择应用分享压缩包',
+        mimeType: 'application/zip',
       })
       // 添加分享成功提示
       showToast({

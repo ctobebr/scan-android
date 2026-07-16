@@ -12,7 +12,14 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
+        // 注册原生插件
+        initialPlugins.add(ZipPlugin.class);
+        initialPlugins.add(SharePlugin.class);
+
         super.onCreate(savedInstanceState);
+
+        // 初始化 AppContextHolder
+        AppContextHolder.init(getApplication());
 
         try {
             getBridge().getWebView().addJavascriptInterface(new Object() {

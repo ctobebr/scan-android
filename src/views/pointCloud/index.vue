@@ -156,7 +156,7 @@ let dataBatchCounter = ref(0) // 当前点位编号
 let parser = null
 const accumulationBuffer = []
 const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
-const MAX_POINTS_PER_BATCH = 500000 // 单个点位最大点云数
+const MAX_POINTS_PER_BATCH = 5000000 // 单个点位最大点云数
 /**
  * setInterval定时器，每33检查一次缓冲区====缓冲区最多10000个点，超出这个上限时，丢弃缓冲区中旧的点数据
  * 如果正在采集 && 缓冲区至少有3个点
@@ -467,7 +467,7 @@ async function saveCurrentBatch() {
     const tempFolderName = storage.path.getTempSessionName(currentSessionId)
 
     // 添加文件头
-    const header = 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)'
+    const header = 'pitch yaw distance'
     const linesWithHeader = [header, ...currentBatchData.rawLines]
 
     // 保存当前点位的数据到批次文件夹
@@ -609,7 +609,7 @@ async function cleanupBluetoothSession() {
   try {
     bluetoothStore.setCleanupStatus(true) // 清理中
     await stopSessionParser() // 取消订阅
-    bluetoothStore.handleSendEnd() // 发送结束指令
+    // 测试模式：不再发送结束指令，下位机持续发送A2数据
   } catch (e) {
     logger.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
@@ -879,75 +879,12 @@ function createSessionParser() {
   const parser = new parseBleData({
     enableDebug: true,
     getDataBatchCounter: () => `dataBatch_${dataBatchCounter.value.toString().padStart(3, '0')}`,
-    onStartPreview: async () => {
-      // 拍照前再次检查连接状态
-      if (deviceDisconnected.value) {
-        logger.warn(
-          '[createSessionParser] Device disconnected before starting camera preview. Aborting.',
-        )
-        throw new Error('Device disconnected before starting camera preview.')
-      }
-      return cameraHelper.startPreview('cameraPreview')
-    },
-    onSendCameraReady: async () => {
-      return bluetoothStore.handleSendCameraNextPhoto()
-    },
-    onTakePhoto: async ({ fileBaseName, meta }) => {
-      if (deviceDisconnected.value) {
-        logger.warn(
-          '[createSessionParser] Device disconnected before taking photo. Aborting photo capture.',
-        )
-        throw new Error('Device disconnected before taking photo.')
-      }
-      try {
-        // 构建目标目录路径：pointcloud/a7f3c9d1-{sessionId}/Batch_XXX
-        const tempFolderName = storage.path.getTempSessionName(currentSessionId)
-        const bid = dataBatchCounter.value
-        const targetDir = `pointcloud/${tempFolderName}/Batch_${String(bid).padStart(3, '0')}`
-        // 拍照并在后台保存（不阻塞主线程）
-        const photoData = await cameraHelper.captureAndSave(
-          fileBaseName + '====' + ++parser.reNameFlag,
-          targetDir,
-        )
-
-        if (photoData && photoData.filePath && photoData.fileName) {
-          // 只保存文件路径，不保存base64数据
-          currentBatchData.photos.push({
-            name: photoData.fileName,
-            filePath: photoData.filePath,
-          })
-          if (currentBatchData.photos.length == 24) {
-            logger.debug(
-              '[PointCloud] 照片已添加到当前点位，当前照片数:',
-              currentBatchData.photos.length,
-            )
-          }
-        }
-        return photoData
-      } catch (e) {
-        logger.error('拍照获取失败', e)
-        throw e
-      }
-    },
-    onEndPreview: async () => {
-      return cameraHelper.stopPreview()
-    },
-    onPhotoSessionEnded: async () => {
-      // 当前点位拍照结束，保存点位数据
-      await saveCurrentBatch()
-
-      // 更新点位计数器
-      dataBatchCounter.value++
-      enableSave.value = true
-
-      // 添加按钮表示新生成的点位
-      batchButtons.value.push(dataBatchCounter.value)
-      isCollecting.value = false
-      logger.debug('[PointCloud] 点位保存完成，下一个点位编号:', dataBatchCounter.value)
-
-      // 停止会话解析器，清理资源但保持 parser 实例
-      await stopSessionParser()
-    },
+    // 测试模式：拍照相关回调设为空操作，不处理拍照指令
+    onStartPreview: async () => {},
+    onSendCameraReady: async () => {},
+    onTakePhoto: async () => {},
+    onEndPreview: async () => {},
+    onPhotoSessionEnded: async () => {},
   })
 
   return parser
@@ -980,17 +917,20 @@ async function subscribeToBluetoothNotifications(deviceId) {
 
           accumulationBuffer.push(...points)
           points.forEach((p) => {
-            // 根据数据类型决定保存格式
-            if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
-              // 完整数据：合并后的数据或单独的极坐标数据
-              // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
-              currentBatchData.rawLines.push(
-                `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
+               currentBatchData.rawLines.push(
+                `${p.pitch} ${p.yaw} ${p.distance / 10}`,
               )
-            } else {
-              // 只有XYZ数据（单格式模式）
-              currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
-            }
+            // // 根据数据类型决定保存格式
+            // if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
+            //   // 完整数据：合并后的数据或单独的极坐标数据
+            //   // x,y,z: 分米→米 (/10), pitchDeg,yawDeg: 度, distance: 分米→米 (/10)
+            //   currentBatchData.rawLines.push(
+            //     `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
+            //   )
+            // } else {
+            //   // 只有XYZ数据（单格式模式）
+            //   currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
+            // }
           })
           currentBatchData.pointCount += points.length
 
@@ -1067,18 +1007,36 @@ function startSessionParser() {
 }
 
 /**
- * 开始数据采集
+ * 开始/停止数据采集（切换模式）
+ * 第一次点击：开始接收A2极坐标数据进行点云渲染
+ * 再次点击：停止接收并保存点云数据到txt文件
  */
 async function startDataStream() {
+  // 如果正在采集中，点击按钮则停止采集并保存数据
   if (isCollecting.value) {
-    showToast({ message: '正在采集中...', position: 'bottom' })
+    isCollecting.value = false
+    // 停止会话解析器（取消订阅、清理资源）
+    await stopSessionParser()
+    // 保存当前点位数据到文件
+    if (currentBatchData.rawLines.length > 0) {
+      const savedPointCount = currentBatchData.pointCount
+      await saveCurrentBatch()
+      dataBatchCounter.value++
+      enableSave.value = true
+      batchButtons.value.push(dataBatchCounter.value)
+      showToast({ message: `点位${dataBatchCounter.value}保存完成，共${savedPointCount}个点`, position: 'bottom' })
+      logger.debug('[PointCloud] 点位保存完成，点位编号:', dataBatchCounter.value)
+    } else {
+      showToast({ message: '无点云数据可保存', position: 'bottom' })
+    }
     return
   }
+
   if (dataBatchCounter.value >= 50) {
-  // if (dataBatchCounter.value >= 5) {
     showToast({ message: '采集点位已达上限', position: 'bottom' })
-     return
+    return
   }
+
   // 开始新点位采集前，清空渲染器中的点云
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
@@ -1109,8 +1067,6 @@ async function startDataStream() {
       const rootDir = `pointcloud/${tempFolderName}`
       await storage.file.ensureDir(rootDir)
       logger.debug('[PointCloud] 会话根目录已创建:', rootDir)
-      //优化： 通知其他页面新增了文件夹（局部更新）
-      //存在问题： 当处于拍照阶段未结束时，滑动屏幕返回（无法监听这个事件）导致数据列表项展示有问题，无法识别保存的照片等效果（暂时不用解决）
       storage.session.dispatchFolderUpdate('partial_update', {
         action: 'folder_added',
         folders: [tempFolderName],
@@ -1128,10 +1084,10 @@ async function startDataStream() {
 
   isCollecting.value = true
 
-  // 先重置状态  再去发送开始指令
+  // 启动会话解析器（订阅蓝牙通知、启动渲染定时器）
   startSessionParser()
-  bluetoothStore.handleSendStart()
-  logger.debug('startDataStream click', '开始新点位采集，点位编号:', dataBatchCounter.value + 1)
+  // 测试模式：不再发送开始指令，下位机连接后自动发送A2数据
+  logger.debug('startDataStream click', '开始接收点云数据，点位编号:', dataBatchCounter.value + 1)
 }
 
 // ==============================================
