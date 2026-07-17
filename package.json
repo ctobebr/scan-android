@@ -10,6 +10,7 @@
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
     "test": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug && adb install -r -t app/build/outputs/apk/debug/app-debug.apk && cd ..",
+    "push-libs": "node ../scripts/push-native-libs.js",
     "console": "chcp 65001 && adb logcat | findstr /i \"console\""
   },
   "dependencies": {

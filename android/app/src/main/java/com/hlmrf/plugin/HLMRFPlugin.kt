@@ -11,8 +11,62 @@ import java.io.File
 @CapacitorPlugin(name = "HLMRFPlugin")
 class HLMRFPlugin : Plugin() {
     companion object {
-        init {
-            System.loadLibrary("hlmrf_plugin_core")
+        private var libraryLoaded = false
+
+        /**
+         * 部署目录中 .so 的加载顺序（按依赖关系排列）
+         */
+        private val NATIVE_LIB_LOAD_ORDER = listOf(
+            "libboost_system.so",
+            "libboost_atomic.so",
+            "libboost_date_time.so",
+            "libboost_iostreams.so",
+            "libboost_filesystem.so",
+            "libboost_regex.so",
+            "libflann_cpp.so",
+            "libqhull_r.so",
+            "libpcl_common.so",
+            "libpcl_octree.so",
+            "libpcl_kdtree.so",
+            "libpcl_search.so",
+            "libpcl_io_ply.so",
+            "libpcl_io.so",
+            "libpcl_filters.so",
+            "libpcl_keypoints.so",
+            "libpcl_sample_consensus.so",
+            "libpcl_features.so",
+            "libpcl_registration.so",
+            "libhlmrf_plugin_core.so",
+        )
+
+        private fun ensureLibrary() {
+            if (libraryLoaded) return
+
+            // 1. 先尝试从 APK 原生库目录加载
+            try {
+                System.loadLibrary("hlmrf_plugin_core")
+                libraryLoaded = true
+                return
+            } catch (_: UnsatisfiedLinkError) {
+                // 不在 APK 中，尝试从部署目录加载
+            }
+
+            // 2. 从内部存储的部署目录按依赖顺序加载
+            try {
+                val libDir = AppContextHolder.getNativeLibDir()
+                for (libName in NATIVE_LIB_LOAD_ORDER) {
+                    val libFile = File(libDir, libName)
+                    if (libFile.exists()) {
+                        System.load(libFile.absolutePath)
+                    }
+                }
+                libraryLoaded = true
+                return
+            } catch (e: UnsatisfiedLinkError) {
+                android.util.Log.e("HLMRFPlugin", "从部署目录加载失败", e)
+            } catch (e: Exception) {
+                android.util.Log.e("HLMRFPlugin", "从部署目录加载异常", e)
+            }
         }
     }
 
@@ -37,6 +91,12 @@ class HLMRFPlugin : Plugin() {
 
     @PluginMethod
     fun runRegistration(call: PluginCall) {
+        ensureLibrary()
+        if (!libraryLoaded) {
+            call.reject("原生库加载失败: libhlmrf_plugin_core.so 不可用，请运行 npm run push-libs")
+            return
+        }
+
         val inputDir = call.getString("inputDir")
         val outputDir = call.getString("outputDir")
         if (inputDir.isNullOrBlank() || outputDir.isNullOrBlank()) {

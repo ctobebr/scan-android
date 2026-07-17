@@ -31,8 +31,9 @@ export const useBluetoothStore = defineStore('bluetooth', {
         const hasBluetoothScan = result?.BLUETOOTH_SCAN === 'granted'
         const hasFineLocation = result?.ACCESS_FINE_LOCATION === 'granted'
         const hasCoarseLocation = result?.ACCESS_COARSE_LOCATION === 'granted'
-        // Android 要求：BLUETOOTH_SCAN + 任一位置权限
-        return hasBluetoothScan && (hasFineLocation || hasCoarseLocation)
+        // BLUETOOTH_SCAN（Android 12+）已声明 neverForLocation，不需要位置服务
+        // Android 11 及以下兼容：需要位置权限
+        return hasBluetoothScan || (hasFineLocation || hasCoarseLocation)
       } catch (err) {
         logger.warn('权限请求被拒绝或出错', err)
         return false
@@ -83,11 +84,11 @@ export const useBluetoothStore = defineStore('bluetooth', {
      */
     async initBluetoothOnly() {
       // 权限
-      logger.debug('检查蓝牙和位置权限')
+      logger.debug('检查蓝牙权限')
       if (!(await this.requestRequirePermissions())) {
         logger.warn('权限请求被拒绝')
         showToast({
-          message: '需要蓝牙和位置权限才能扫描设备',
+          message: '需要蓝牙权限才能扫描设备',
           position: 'bottom',
           duration: 3000,
         })
