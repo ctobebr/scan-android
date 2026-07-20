@@ -37,6 +37,7 @@
             android:label="@string/app_name"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:screenOrientation="portrait"
             android:exported="true">
 <!-- 
 standard (默认)：每次启动 Activity 都会创建一个新的实例放入任务栈。

@@ -161,13 +161,13 @@ onBeforeUnmount(() => {
 const _isNavigating = ref(false)
 
 const handleStartRecord = () => {
-  if (connectionStatus.value != 2) {
-    showToast({
-      message: '请先连接设备',
-      position: 'bottom',
-    })
-    return
-  }
+  // if (connectionStatus.value != 2) {
+  //   showToast({
+  //     message: '请先连接设备',
+  //     position: 'bottom',
+  //   })
+  //   return
+  // }
   if (_isNavigating.value) return
   _isNavigating.value = true
 

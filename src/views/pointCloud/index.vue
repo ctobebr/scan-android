@@ -4,46 +4,11 @@
       <!-- 摄像头预览容器（供 CameraPreview.attach 使用） -->
       <div id="cameraPreview" class="camera-preview-overlay"></div>
 
-      <!-- 采集进度卡片 -->
-      <div v-if="collectionProgress.isCollecting" class="collection-progress-card">
-        <div class="progress-icon">
-          <svg
-            class="radar-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <circle cx="12" cy="12" r="3" fill="#2a7aff" />
-            <circle cx="12" cy="12" r="6" stroke="#2a7aff" stroke-width="1.5" opacity="0.6" />
-            <circle cx="12" cy="12" r="9" stroke="#2a7aff" stroke-width="1" opacity="0.3" />
-            <path d="M12 3L12 6" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-            <path d="M12 18L12 21" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-            <path d="M3 12L6 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-            <path d="M18 12L21 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </div>
-        <div class="progress-title">采集中...</div>
-        <div class="progress-bar-container">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
-          </div>
-          <div class="progress-percentage">{{ Math.round(progressPercentage) }}%</div>
-        </div>
-        <div class="progress-stats">
-          <div class="stat-row">
-            <span class="stat-label">已采集:</span>
-            <span class="stat-value"
-              >{{ collectionProgress.currentPoints.toLocaleString() }} 点</span
-            >
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">速率:</span>
-            <span class="stat-value">{{ pointsPerSecond.toLocaleString() }} 点/秒</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">剩余:</span>
-            <span class="stat-value">{{ collectionProgress.remainingTime }} 秒</span>
-          </div>
+      <!-- HLMRF 多站点拼接进度横幅 -->
+      <div v-if="isHlmrfStitching" class="stitch-banner">
+        <div class="stitch-banner-content">
+          <div class="stitch-spinner"></div>
+          <span>{{ stitchProgressText || '多站点拼接中...' }}</span>
         </div>
       </div>
 
@@ -59,8 +24,8 @@
         <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
           预览
         </button>
-        <button class="stitch-btn" :disabled="saving || !enableSave || isStitching">
-          {{ isStitching ? stitchProgressText || '拼接中...' : '拼接' }}
+        <button class="stitch-btn" :disabled="saving || !enableSave || isStitching || isHlmrfStitching">
+          {{ isStitching || isHlmrfStitching ? stitchProgressText || '拼接中...' : '拼接' }}
         </button>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
@@ -70,7 +35,7 @@
           <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick" alt="编辑" />
           <button
             class="capture-btn"
-            :disabled="bluetoothStore.connectionStatus !== 2 || isCollecting.value"
+            :disabled="bluetoothStore.connectionStatus !== 2 || isCollecting.value || isHlmrfStitching"
             @click="startDataStream"
           ></button>
           <img
@@ -213,6 +178,8 @@ const savedDuringDialog = ref(false)
 
 const isStitching = ref(false)
 const stitchProgressText = ref('')
+// HLMRF 多站点拼接状态（与 PtcrPlugin 的 isStitching 独立）
+const isHlmrfStitching = ref(false)
 
 // 当前批次数据
 let currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
@@ -994,6 +961,10 @@ async function triggerHLMRFRegistration() {
         return
       }
 
+      // 非首个站位：显示多站点拼接进度横幅
+      isHlmrfStitching.value = true
+      stitchProgressText.value = '多站点拼接中...'
+
       const currentIdx1Based = currentIdx + 1
       const previousIdx = currentIdx - 1
 
@@ -1122,6 +1093,9 @@ async function triggerHLMRFRegistration() {
     } catch (error) {
       console.error(`[HLMRF] ❌ 异常: ${error.message}`)
       showToast({ message: `HLMRF 拼接异常: ${error.message || '未知错误'}`, position: 'bottom', duration: 5000 })
+    } finally {
+      // 无论成功/失败/异常，都隐藏拼接进度横幅
+      isHlmrfStitching.value = false
     }
   }, 2000)
 }
@@ -1880,7 +1854,13 @@ function createSessionParser() {
     enableDebug: true,
     getDataBatchCounter: () => `dataBatch_${dataBatchCounter.value.toString().padStart(3, '0')}`,
     onStartPreview: async () => {
-      startBackgroundPointCloudRender()
+      // 拍照阶段暂停点云渲染（节省性能，拍照阶段无点云传输）
+      // 先把 accumulationBuffer 残留点一次性推入 deferredRenderBuffer，避免丢点
+      cleanupAccumulationTimer()
+      if (accumulationBuffer.length > 0) {
+        deferredRenderBuffer.push(...accumulationBuffer.splice(0))
+      }
+      stopBackgroundRender()
       return cameraHelper.startPreview('cameraPreview')
     },
     onSendCameraReady: async () => {
@@ -2029,6 +2009,10 @@ function initAndStartRenderingTimer() {
     if (accumulationBuffer.length >= MIN_BATCH_SIZE) {
       const toDefer = accumulationBuffer.splice(0, Math.min(accumulationBuffer.length, 1000))
       deferredRenderBuffer.push(...toDefer)
+      // 修复：数据已到达 deferBuffer，但后台渲染可能已因等待超时而停止，需要重启
+      if (!isBackgroundRendering) {
+        startBackgroundPointCloudRender()
+      }
     }
   }, ACCUMULATION_INTERVAL)
 }
@@ -2041,7 +2025,7 @@ async function startDataStream() {
     showToast({ message: '正在采集中...', position: 'bottom' })
     return
   }
-  if (isStitching.value) {
+  if (isStitching.value || isHlmrfStitching.value) {
     showToast({ message: '算法拼接中，请等待完成后重试', position: 'bottom' })
     return
   }
@@ -2105,6 +2089,9 @@ async function startDataStream() {
   if (!accumulationTimer) {
     initAndStartRenderingTimer()
   }
+
+  // 启动实时渲染任务：采集阶段实时显示点云效果
+  startBackgroundPointCloudRender()
 
   hasStarted = true
 
@@ -2988,6 +2975,62 @@ function jumpToBatchDetail(stationId) {
   z-index: 5;
   pointer-events: none;
   background: transparent;
+}
+
+/* ========== HLMRF 多站点拼接进度横幅 ========== */
+.stitch-banner {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  pointer-events: none;
+  animation: bannerFadeIn 0.3s ease;
+}
+
+.stitch-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  background: rgba(16, 22, 32, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.stitch-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(42, 122, 255, 0.2);
+  border-top-color: #2a7aff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bannerFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .overlay-controls {
