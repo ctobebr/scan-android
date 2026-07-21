@@ -1563,6 +1563,10 @@ async function cleanupResourcesForExit(options = {}) {
         // 1. 清理定时器和事件监听器
         cleanupTimersAndListeners()
 
+        // 1.1 停止相机预览（兜底：防止拍照阶段滑动返回时相机未停止，
+        //     CameraPreview 插件视图可能保持横屏配置，导致返回主页后屏幕方向异常）
+        await stopCameraPreview()
+
         // 2. 清理多站点相关资源
         cleanupMultiStationResources()
 
