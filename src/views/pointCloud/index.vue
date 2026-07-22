@@ -199,7 +199,7 @@ let parser = null
 // 点云数据缓冲区
 const accumulationBuffer = []
 const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
-const MAX_POINTS_PER_BATCH = 100000 // 单个点位最大点云数
+const MAX_POINTS_PER_BATCH = 5000000 // 单个点位最大点云数
 
 // 延迟渲染相关状态
 const deferredRenderBuffer = [] // 延迟渲染缓冲区（采集期间暂存所有点数据）
@@ -2269,17 +2269,15 @@ async function init() {
       renderer = usePointCloudRenderer(container.value, baseConfig)
 
       // ========== 配置相机和缩放限制 ==========
-      // 初始相机高度10米，缩放范围控制为初始的两倍：5米-20米
+      // 初始相机高度10米，缩放范围：1米-50米
       const initialCameraHeight = 10
       const cameraConfig = {
         position: { x: 0, y: initialCameraHeight, z: 0 },
         target: { x: 0, y: 0, z: 0 },
         controls: {
-          minDistance: initialCameraHeight / 2, // 5米（初始的1/2）
-          maxDistance: initialCameraHeight * 2, // 20米（初始的2倍）
+          minDistance: 1,
+          maxDistance: 50,
           maxPolarAngle: Math.PI / 2,
-          // minDistance: initialCameraHeight / 10,
-          // maxDistance: initialCameraHeight * 10,
         },
       }
 
@@ -2712,8 +2710,8 @@ onActivated(async () => {
       position: { x: 0, y: initialCameraHeight, z: 0 },
       target: { x: 0, y: 0, z: 0 },
       controls: {
-        minDistance: initialCameraHeight / 2,
-        maxDistance: initialCameraHeight * 2,
+        minDistance: 1,
+        maxDistance: 50,
         maxPolarAngle: Math.PI / 2,
       },
     }
