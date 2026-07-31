@@ -2738,19 +2738,11 @@ onActivated(async () => {
     }
   }
 
-  const { sessionDenseCloudExists, getSessionDenseCloudPath } = await import(
-    '@/utils/pointCloud/reconstruction'
-  )
-  const cloudAvailable = await sessionDenseCloudExists(dataDir)
-
-  if (cloudAvailable) {
-    const cloudPath = getSessionDenseCloudPath(dataDir)
-    await parseAndRenderTxt(cloudPath)
-    console.log(`[PointCloud]    ✅ 点云渲染完成: ${pointCount.value} 个点`)
-  }
-
-  await loadHLMRFAnchorsForViewMode(dataDir)
-  console.log(`[PointCloud]    ✅ 锚点加载完成: ${hlmrfAnchorPositions.size} 个`)
+  // 修复：使用 loadAndRenderProjectData 统一加载点云数据，支持所有降级路径
+  // （session dense cloud → alignedBlock → first batch txt）
+  // loadAndRenderProjectData 内部会调用 loadHLMRFAnchorsForViewMode 加载锚点
+  await loadAndRenderProjectData(dataDir)
+  console.log(`[PointCloud]    ✅ 数据加载完成: ${pointCount.value} 个点, ${hlmrfAnchorPositions.size} 个锚点`)
 })
 
 /**
