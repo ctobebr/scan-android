@@ -202,11 +202,11 @@
           <div class="axis-item">
             <label>上限 <span class="unit">(degrees)</span></label>
             <van-field
-              v-model="pitchLimit.upperLimitRad"
+              v-model="pitchLimit.upperLimitDeg"
               type="text"
               placeholder="0.00"
               inputmode="decimal"
-              @blur="() => validateAndFormat('pitchLimit', 'upperLimitRad', 2)"
+              @blur="() => validateAndFormat('pitchLimit', 'upperLimitDeg', 2)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!pitchLimitErrors.upper"
@@ -218,11 +218,11 @@
           <div class="axis-item">
             <label>下限 <span class="unit">(degrees)</span></label>
             <van-field
-              v-model="pitchLimit.lowerLimitRad"
+              v-model="pitchLimit.lowerLimitDeg"
               type="text"
               placeholder="0.00"
               inputmode="decimal"
-              @blur="() => validateAndFormat('pitchLimit', 'lowerLimitRad', 2)"
+              @blur="() => validateAndFormat('pitchLimit', 'lowerLimitDeg', 2)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!pitchLimitErrors.lower"
@@ -317,8 +317,8 @@
         </div>
       </div>
 
-      <!-- PID参数设置卡片 -->
-      <div class="param-card">
+      <!-- PID参数设置卡片（已注释，暂停使用）-->
+      <!-- <div class="param-card">
         <div class="card-header">
           <div class="card-title">
             <span class="title-text">PID参数</span>
@@ -410,7 +410,7 @@
             </div>
           </div>
         </div>
-      </div>
+      </div> -->
 
       <!-- 底部双按钮行：刷新和恢复默认值 -->
       <div class="bottom-actions">
@@ -503,10 +503,10 @@ const speedParams = reactive({
 const scanTime = ref({
   seconds: SETTING_DEFAULT_VALUES.SCAN_TIME,
 })
-// 保留 2位小数 - 初始化时就格式化，修改 key 名以匹配返回的字段
+// 保留 2位小数 - 初始化时就格式化，修改 key 名以匹配返回的字段（单位：度）
 const pitchLimit = reactive({
-  upperLimitRad: SETTING_DEFAULT_VALUES.PITCH_LIMIT.upper.toFixed(2),
-  lowerLimitRad: SETTING_DEFAULT_VALUES.PITCH_LIMIT.lower.toFixed(2),
+  upperLimitDeg: SETTING_DEFAULT_VALUES.PITCH_LIMIT.upper.toFixed(2),
+  lowerLimitDeg: SETTING_DEFAULT_VALUES.PITCH_LIMIT.lower.toFixed(2),
 })
 
 // 输出格式设置
@@ -515,30 +515,30 @@ const outputFormat = reactive({
   polar: SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar,
 })
 
-// PID参数设置 - 保留4位小数
-const pidSettings = reactive({
-  loopType: SETTING_DEFAULT_VALUES.PID.loopType, // V: 速度环, A: 角度环
-  axis: SETTING_DEFAULT_VALUES.PID.axis, // X: X轴, Y: Y轴
-  p: SETTING_DEFAULT_VALUES.PID.p.toFixed(4),
-  i: SETTING_DEFAULT_VALUES.PID.i.toFixed(4),
-  d: SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
-})
+// // PID参数设置 - 保留4位小数
+// const pidSettings = reactive({
+//   loopType: SETTING_DEFAULT_VALUES.PID.loopType, // V: 速度环, A: 角度环
+//   axis: SETTING_DEFAULT_VALUES.PID.axis, // X: X轴, Y: Y轴
+//   p: SETTING_DEFAULT_VALUES.PID.p.toFixed(4),
+//   i: SETTING_DEFAULT_VALUES.PID.i.toFixed(4),
+//   d: SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
+// })
 
 // 俯仰角零偏设置 - 保留2位小数
 const pitchOffset = reactive({
   value: SETTING_DEFAULT_VALUES.PITCH_OFFSET.toFixed(2)
 })
 
-// PID选项
-const loopTypeOptions = [
-  { text: '速度环(V)', value: 'V' },
-  { text: '角度环(A)', value: 'A' }
-]
-
-const axisOptions = [
-  { text: 'X轴', value: 'x' },
-  { text: 'Y轴', value: 'y' }
-]
+// // PID选项
+// const loopTypeOptions = [
+//   { text: '速度环(V)', value: 'V' },
+//   { text: '角度环(A)', value: 'A' }
+// ]
+//
+// const axisOptions = [
+//   { text: 'X轴', value: 'x' },
+//   { text: 'Y轴', value: 'y' }
+// ]
 
 // 保存状态
 const savingState = reactive({
@@ -572,12 +572,12 @@ const pitchLimitErrors = reactive({
   lower: '',
 })
 
-// PID错误状态
-const pidErrors = reactive({
-  p: '',
-  i: '',
-  d: ''
-})
+// // PID错误状态
+// const pidErrors = reactive({
+//   p: '',
+//   i: '',
+//   d: ''
+// })
 
 // 俯仰角零偏错误状态
 const pitchOffsetErrors = reactive({
@@ -604,8 +604,8 @@ const isScanValid = computed(() => {
 const isPitchLimitValid = computed(() => {
   if (pitchLimitErrors.upper || pitchLimitErrors.lower) return false
 
-  const upper = parseFloat(pitchLimit.upperLimitRad)
-  const lower = parseFloat(pitchLimit.lowerLimitRad)
+  const upper = parseFloat(pitchLimit.upperLimitDeg)
+  const lower = parseFloat(pitchLimit.lowerLimitDeg)
   return upper > lower
 })
 
@@ -614,10 +614,10 @@ const hasPitchLimitEmptyError = computed(() => {
   return pitchLimitErrors.upper || pitchLimitErrors.lower
 })
 
-// PID参数是否有效
-const isPIDValid = computed(() => {
-  return !pidErrors.p && !pidErrors.i && !pidErrors.d
-})
+// // PID参数是否有效
+// const isPIDValid = computed(() => {
+//   return !pidErrors.p && !pidErrors.i && !pidErrors.d
+// })
 
 // 俯仰角零偏是否有效
 const isPitchOffsetValid = computed(() => {
@@ -695,31 +695,31 @@ const validateAndFormat = (category, field, decimals) => {
 
     case 'pitchLimit':
       value = pitchLimit[field]
-      const label = field === 'upperLimitRad' ? '上限' : '下限'
+      const label = field === 'upperLimitDeg' ? '上限' : '下限'
       errorMsg = validateNumber(value, label)
       if (!errorMsg) {
         const num = parseFloat(value)
         pitchLimit[field] = num.toFixed(decimals)
-        if (field === 'upperLimitRad') pitchLimitErrors.upper = ''
-        if (field === 'lowerLimitRad') pitchLimitErrors.lower = ''
+        if (field === 'upperLimitDeg') pitchLimitErrors.upper = ''
+        if (field === 'lowerLimitDeg') pitchLimitErrors.lower = ''
       } else {
-        if (field === 'upperLimitRad') pitchLimitErrors.upper = errorMsg
-        if (field === 'lowerLimitRad') pitchLimitErrors.lower = errorMsg
+        if (field === 'upperLimitDeg') pitchLimitErrors.upper = errorMsg
+        if (field === 'lowerLimitDeg') pitchLimitErrors.lower = errorMsg
       }
       break
 
-    case 'pid':
-      value = pidSettings[field]
-      const pidLabel = field.toUpperCase()
-      errorMsg = validateNumber(value, pidLabel)
-      if (!errorMsg) {
-        const num = parseFloat(value)
-        pidSettings[field] = num.toFixed(decimals)
-        pidErrors[field] = ''
-      } else {
-        pidErrors[field] = errorMsg
-      }
-      break
+    // case 'pid':
+    //   value = pidSettings[field]
+    //   const pidLabel = field.toUpperCase()
+    //   errorMsg = validateNumber(value, pidLabel)
+    //   if (!errorMsg) {
+    //     const num = parseFloat(value)
+    //     pidSettings[field] = num.toFixed(decimals)
+    //     pidErrors[field] = ''
+    //   } else {
+    //     pidErrors[field] = errorMsg
+    //   }
+    //   break
 
     case 'pitchOffset':
       value = pitchOffset[field]
@@ -959,12 +959,12 @@ const init = async () => {
       onOutputPolarResponse: (data) => {
         handleOutputPolarResponse(data)
       },
-      onVPIDResponse: (data) => {
-        handleVPIDResponse(data)
-      },
-      onAPIDResponse: (data) => {
-        handleAPIDResponse(data)
-      },
+      // onVPIDResponse: (data) => {
+      //   handleVPIDResponse(data)
+      // },
+      // onAPIDResponse: (data) => {
+      //   handleAPIDResponse(data)
+      // },
       onPitchOffsetResponse: (data) => {
         handlePitchOffsetResponse(data)
       },
@@ -1151,11 +1151,11 @@ function handleScanTimeResponse(data) {
 function handlePitchLimitResponse(data) {
   console.log('设置俯仰角上下限成功', JSON.stringify(data))
   if (data && typeof data === 'object') {
-    if (data.upperLimitRad !== undefined) {
-      pitchLimit.upperLimitRad = parseFloat(data.upperLimitRad).toFixed(2)
+    if (data.upperLimitDeg !== undefined) {
+      pitchLimit.upperLimitDeg = parseFloat(data.upperLimitDeg).toFixed(2)
     }
-    if (data.lowerLimitRad !== undefined) {
-      pitchLimit.lowerLimitRad = parseFloat(data.lowerLimitRad).toFixed(2)
+    if (data.lowerLimitDeg !== undefined) {
+      pitchLimit.lowerLimitDeg = parseFloat(data.lowerLimitDeg).toFixed(2)
     }
   }
   // 清除对应字段的错误
@@ -1196,41 +1196,41 @@ function handleOutputPolarResponse(data) {
   }
 }
 
-// 处理速度环PID响应
-function handleVPIDResponse(data) {
-  console.log('设置速度环PID成功', JSON.stringify(data))
-  if (data && typeof data === 'object') {
-    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(4)
-    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(4)
-    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(4)
-  }
-  // 清除对应字段的错误
-  pidErrors.p = ''
-  pidErrors.i = ''
-  pidErrors.d = ''
-  if (isFromSaveAction.value) {
-    showToast({ message: '速度环PID参数保存成功', position: 'bottom' })
-    isFromSaveAction.value = false // 重置标记
-  }
-}
-
-// 处理角度环PID响应
-function handleAPIDResponse(data) {
-  console.log('设置角度环PID成功', JSON.stringify(data))
-  if (data && typeof data === 'object') {
-    if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(4)
-    if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(4)
-    if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(4)
-  }
-  // 清除对应字段的错误
-  pidErrors.p = ''
-  pidErrors.i = ''
-  pidErrors.d = ''
-  if (isFromSaveAction.value) {
-    showToast({ message: '角度环PID参数保存成功', position: 'bottom' })
-    isFromSaveAction.value = false // 重置标记
-  }
-}
+// // 处理速度环PID响应
+// function handleVPIDResponse(data) {
+//   console.log('设置速度环PID成功', JSON.stringify(data))
+//   if (data && typeof data === 'object') {
+//     if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(4)
+//     if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(4)
+//     if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(4)
+//   }
+//   // 清除对应字段的错误
+//   pidErrors.p = ''
+//   pidErrors.i = ''
+//   pidErrors.d = ''
+//   if (isFromSaveAction.value) {
+//     showToast({ message: '速度环PID参数保存成功', position: 'bottom' })
+//     isFromSaveAction.value = false // 重置标记
+//   }
+// }
+//
+// // 处理角度环PID响应
+// function handleAPIDResponse(data) {
+//   console.log('设置角度环PID成功', JSON.stringify(data))
+//   if (data && typeof data === 'object') {
+//     if (data.p !== undefined) pidSettings.p = parseFloat(data.p).toFixed(4)
+//     if (data.i !== undefined) pidSettings.i = parseFloat(data.i).toFixed(4)
+//     if (data.d !== undefined) pidSettings.d = parseFloat(data.d).toFixed(4)
+//   }
+//   // 清除对应字段的错误
+//   pidErrors.p = ''
+//   pidErrors.i = ''
+//   pidErrors.d = ''
+//   if (isFromSaveAction.value) {
+//     showToast({ message: '角度环PID参数保存成功', position: 'bottom' })
+//     isFromSaveAction.value = false // 重置标记
+//   }
+// }
 
 // 处理俯仰角零偏响应
 function handlePitchOffsetResponse(data) {
@@ -1284,8 +1284,8 @@ const saveParam = async (type, silent = false) => {
       }
       break
     case 'pitchLimit':
-      validateAndFormat('pitchLimit', 'upperLimitRad', 2)
-      validateAndFormat('pitchLimit', 'lowerLimitRad', 2)
+      validateAndFormat('pitchLimit', 'upperLimitDeg', 2)
+      validateAndFormat('pitchLimit', 'lowerLimitDeg', 2)
       if (!isPitchLimitValid.value) {
         if (hasPitchLimitEmptyError.value) {
           showToast({ message: '请填写完整的俯仰角限位', position: 'bottom' })
@@ -1296,15 +1296,15 @@ const saveParam = async (type, silent = false) => {
       }
       break
 
-    case 'pid':
-      validateAndFormat('pid', 'p', 4)
-      validateAndFormat('pid', 'i', 4)
-      validateAndFormat('pid', 'd', 4)
-      if (!isPIDValid.value) {
-        showToast({ message: '请填写正确的PID参数', position: 'bottom' })
-        return
-      }
-      break
+    // case 'pid':
+    //   validateAndFormat('pid', 'p', 4)
+    //   validateAndFormat('pid', 'i', 4)
+    //   validateAndFormat('pid', 'd', 4)
+    //   if (!isPIDValid.value) {
+    //     showToast({ message: '请填写正确的PID参数', position: 'bottom' })
+    //     return
+    //   }
+    //   break
 
     case 'pitchOffset':
       validateAndFormat('pitchOffset', 'value', 2)
@@ -1344,28 +1344,28 @@ const saveParam = async (type, silent = false) => {
 
       case 'pitchLimit':
         await bluetoothStore.handleSendPitchLimit(
-          parseFloat(pitchLimit.upperLimitRad),
-          parseFloat(pitchLimit.lowerLimitRad),
+          parseFloat(pitchLimit.upperLimitDeg),
+          parseFloat(pitchLimit.lowerLimitDeg),
         )
         break
 
-      case 'pid':
-        if (pidSettings.loopType === 'V') {
-          await bluetoothStore.handleSendVPID(
-            pidSettings.axis,
-            parseFloat(pidSettings.p),
-            parseFloat(pidSettings.i),
-            parseFloat(pidSettings.d),
-          )
-        } else {
-          await bluetoothStore.handleSendAPID(
-            pidSettings.axis,
-            parseFloat(pidSettings.p),
-            parseFloat(pidSettings.i),
-            parseFloat(pidSettings.d),
-          )
-        }
-        break
+      // case 'pid':
+      //   if (pidSettings.loopType === 'V') {
+      //     await bluetoothStore.handleSendVPID(
+      //       pidSettings.axis,
+      //       parseFloat(pidSettings.p),
+      //       parseFloat(pidSettings.i),
+      //       parseFloat(pidSettings.d),
+      //     )
+      //   } else {
+      //     await bluetoothStore.handleSendAPID(
+      //       pidSettings.axis,
+      //       parseFloat(pidSettings.p),
+      //       parseFloat(pidSettings.i),
+      //       parseFloat(pidSettings.d),
+      //     )
+      //   }
+      //   break
 
       case 'pitchOffset':
         await bluetoothStore.handleSendPitchOffset(parseFloat(pitchOffset.value))
@@ -1383,21 +1383,21 @@ const saveParam = async (type, silent = false) => {
   }
 }
 
-// 处理PID选择器变更
-const handlePIDSelectorChange = async () => {
-  if (deviceDisconnected.value) return
-
-  try {
-    if (pidSettings.loopType === 'V') {
-      await bluetoothStore.handleReadVPID(pidSettings.axis)
-    } else {
-      await bluetoothStore.handleReadAPID(pidSettings.axis)
-    }
-  } catch (error) {
-    console.error('读取PID参数失败:', error)
-    showToast({ message: '读取PID参数失败', position: 'bottom' })
-  }
-}
+// // 处理PID选择器变更
+// const handlePIDSelectorChange = async () => {
+//   if (deviceDisconnected.value) return
+//
+//   try {
+//     if (pidSettings.loopType === 'V') {
+//       await bluetoothStore.handleReadVPID(pidSettings.axis)
+//     } else {
+//       await bluetoothStore.handleReadAPID(pidSettings.axis)
+//     }
+//   } catch (error) {
+//     console.error('读取PID参数失败:', error)
+//     showToast({ message: '读取PID参数失败', position: 'bottom' })
+//   }
+// }
 
 // 处理输出格式开关变化
 // 添加 silent 参数，保持与 saveParam 一致
@@ -1461,10 +1461,10 @@ const resetToDefault = async () => {
     scanErrors.seconds = ''
     pitchLimitErrors.upper = ''
     pitchLimitErrors.lower = ''
-    // 清除PID错误
-    pidErrors.p = ''
-    pidErrors.i = ''
-    pidErrors.d = ''
+    // // 清除PID错误
+    // pidErrors.p = ''
+    // pidErrors.i = ''
+    // pidErrors.d = ''
     // 清除俯仰角零偏错误
     pitchOffsetErrors.value = ''
 
@@ -1478,19 +1478,19 @@ const resetToDefault = async () => {
 
     scanTime.value.seconds = SETTING_DEFAULT_VALUES.SCAN_TIME // 数字，不转字符串
 
-    pitchLimit.upperLimitRad = SETTING_DEFAULT_VALUES.PITCH_LIMIT.upper.toFixed(2)
-    pitchLimit.lowerLimitRad = SETTING_DEFAULT_VALUES.PITCH_LIMIT.lower.toFixed(2)
+    pitchLimit.upperLimitDeg = SETTING_DEFAULT_VALUES.PITCH_LIMIT.upper.toFixed(2)
+    pitchLimit.lowerLimitDeg = SETTING_DEFAULT_VALUES.PITCH_LIMIT.lower.toFixed(2)
 
     // 输出格式默认值
     outputFormat.xyz = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.xyz
     outputFormat.polar = SETTING_DEFAULT_VALUES.OUTPUT_FORMAT.polar
 
-    // PID参数默认值 - 保留4位小数
-    pidSettings.loopType = SETTING_DEFAULT_VALUES.PID.loopType
-    pidSettings.axis = SETTING_DEFAULT_VALUES.PID.axis
-    pidSettings.p = SETTING_DEFAULT_VALUES.PID.p.toFixed(4)
-    pidSettings.i = SETTING_DEFAULT_VALUES.PID.i.toFixed(4)
-    pidSettings.d = SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
+    // // PID参数默认值 - 保留4位小数
+    // pidSettings.loopType = SETTING_DEFAULT_VALUES.PID.loopType
+    // pidSettings.axis = SETTING_DEFAULT_VALUES.PID.axis
+    // pidSettings.p = SETTING_DEFAULT_VALUES.PID.p.toFixed(4)
+    // pidSettings.i = SETTING_DEFAULT_VALUES.PID.i.toFixed(4)
+    // pidSettings.d = SETTING_DEFAULT_VALUES.PID.d.toFixed(4)
 
     // 俯仰角零偏默认值 - 保留2位小数
     pitchOffset.value = SETTING_DEFAULT_VALUES.PITCH_OFFSET.toFixed(2)
@@ -1502,7 +1502,7 @@ const resetToDefault = async () => {
     await saveParam('scan', true)
     await saveParam('pitchLimit', true)
     await saveParam('pitchOffset', true)
-    await saveParam('pid', true)
+    // await saveParam('pid', true)
 
     // 输出格式需要单独发送，也使用 silent 模式----暂时不启用
     // await handleOutputChange('xyz', outputFormat.xyz, true)
@@ -1536,10 +1536,10 @@ const readAllParams = async () => {
       bluetoothStore.handleReadPitchOffset(),
       // bluetoothStore.handleReadOutputXYZ(),
       bluetoothStore.handleReadOutputPolar(),
-      // 读取当前选中的PID参数
-      pidSettings.loopType === 'V' ?
-        bluetoothStore.handleReadVPID(pidSettings.axis) :
-        bluetoothStore.handleReadAPID(pidSettings.axis)
+      // // 读取当前选中的PID参数
+      // pidSettings.loopType === 'V' ?
+      //   bluetoothStore.handleReadVPID(pidSettings.axis) :
+      //   bluetoothStore.handleReadAPID(pidSettings.axis)
     ])
     // 只有一个提示
     showToast({ message: '参数已刷新', position: 'bottom' })

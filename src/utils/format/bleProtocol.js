@@ -193,8 +193,8 @@ export class parseBleData {
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ]: this._handleReadOutputXYZ,
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR]: this._handleReadOutputPolar,
       [DEVICE_DATA_COMMANDS.CMD_READ_PITCH_OFFSET]: this._handleReadPitchOffset,
-      [DEVICE_DATA_COMMANDS.CMD_READ_V_PID]: this._handleReadVPID,
-      [DEVICE_DATA_COMMANDS.CMD_READ_A_PID]: this._handleReadAPID,
+      // [DEVICE_DATA_COMMANDS.CMD_READ_V_PID]: this._handleReadVPID,
+      // [DEVICE_DATA_COMMANDS.CMD_READ_A_PID]: this._handleReadAPID,
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
       // [CONTROL_COMMANDS.CMD_GET_POS]: this._handleGetPos,
       // [CONTROL_COMMANDS.CMD_SET_HOME]: this._handleSetHome,
@@ -1091,17 +1091,17 @@ export class parseBleData {
       return
     }
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    const upperLimitRad = view.getFloat32(0, true)
-    const lowerLimitRad = view.getFloat32(4, true)
+    const upperLimitDeg = view.getFloat32(0, true)
+    const lowerLimitDeg = view.getFloat32(4, true)
 
     logger.debug(
-      '✅ 收到下位机俯仰角限制响应: 俯仰角上限_rad=' +
-        upperLimitRad +
-        ', 俯仰角下限_rad=' +
-        lowerLimitRad,
+      '✅ 收到下位机俯仰角限制响应: 俯仰角上限_deg=' +
+        upperLimitDeg +
+        ', 俯仰角下限_deg=' +
+        lowerLimitDeg,
     )
     if (this.options.onPitchLimitResponse) {
-      this.options.onPitchLimitResponse({ upperLimitRad, lowerLimitRad })
+      this.options.onPitchLimitResponse({ upperLimitDeg, lowerLimitDeg })
     }
   }
 
@@ -1141,65 +1141,65 @@ export class parseBleData {
     }
   }
 
-  /**
-   * 处理读取速度环PID的响应
-   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
-   */
-  _handleReadVPID(data) {
-    if (data.byteLength !== 16) {
-      logger.warn('速度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
-      return
-    }
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    const axis = view.getUint32(0, true) // 0:X, 1:Y，小端序
-    const p = view.getFloat32(4, true)
-    const i = view.getFloat32(8, true)
-    const d = view.getFloat32(12, true)
-
-    logger.debug(
-      '✅ 收到下位机速度环PID响应: 轴=' +
-        (axis === 0 ? 'X' : 'Y') +
-        ', P=' +
-        p +
-        ', I=' +
-        i +
-        ', D=' +
-        d,
-    )
-    if (this.options.onVPIDResponse) {
-      this.options.onVPIDResponse({ axis: axis === 0 ? 'x' : 'y', p, i, d })
-    }
-  }
-
-  /**
-   * 处理读取角度环PID的响应
-   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
-   */
-  _handleReadAPID(data) {
-    if (data.byteLength !== 16) {
-      logger.warn('角度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
-      return
-    }
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    const axis = view.getUint32(0, true) // 0:X, 1:Y，小端序
-    const p = view.getFloat32(4, true)
-    const i = view.getFloat32(8, true)
-    const d = view.getFloat32(12, true)
-
-    logger.debug(
-      '✅ 收到下位机角度环PID响应: 轴=' +
-        (axis === 0 ? 'X' : 'Y') +
-        ', P=' +
-        p +
-        ', I=' +
-        i +
-        ', D=' +
-        d,
-    )
-    if (this.options.onAPIDResponse) {
-      this.options.onAPIDResponse({ axis: axis === 0 ? 'x' : 'y', p, i, d })
-    }
-  }
+  // /**
+  //  * 处理读取速度环PID的响应
+  //  * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+  //  */
+  // _handleReadVPID(data) {
+  //   if (data.byteLength !== 16) {
+  //     logger.warn('速度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
+  //     return
+  //   }
+  //   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  //   const axis = view.getUint32(0, true) // 0:X, 1:Y，小端序
+  //   const p = view.getFloat32(4, true)
+  //   const i = view.getFloat32(8, true)
+  //   const d = view.getFloat32(12, true)
+  //
+  //   logger.debug(
+  //     '✅ 收到下位机速度环PID响应: 轴=' +
+  //       (axis === 0 ? 'X' : 'Y') +
+  //       ', P=' +
+  //       p +
+  //       ', I=' +
+  //       i +
+  //       ', D=' +
+  //       d,
+  //   )
+  //   if (this.options.onVPIDResponse) {
+  //     this.options.onVPIDResponse({ axis: axis === 0 ? 'x' : 'y', p, i, d })
+  //   }
+  // }
+  //
+  // /**
+  //  * 处理读取角度环PID的响应
+  //  * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+  //  */
+  // _handleReadAPID(data) {
+  //   if (data.byteLength !== 16) {
+  //     logger.warn('角度环PID数据长度错误，期望 16 字节，实际:', data.byteLength)
+  //     return
+  //   }
+  //   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  //   const axis = view.getUint32(0, true) // 0:X, 1:Y，小端序
+  //   const p = view.getFloat32(4, true)
+  //   const i = view.getFloat32(8, true)
+  //   const d = view.getFloat32(12, true)
+  //
+  //   logger.debug(
+  //     '✅ 收到下位机角度环PID响应: 轴=' +
+  //       (axis === 0 ? 'X' : 'Y') +
+  //       ', P=' +
+  //       p +
+  //       ', I=' +
+  //       i +
+  //       ', D=' +
+  //       d,
+  //   )
+  //   if (this.options.onAPIDResponse) {
+  //     this.options.onAPIDResponse({ axis: axis === 0 ? 'x' : 'y', p, i, d })
+  //   }
+  // }
 
   /**
    * 处理读取俯仰角零偏的响应

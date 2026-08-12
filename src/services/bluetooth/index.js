@@ -262,8 +262,8 @@ export class BluetoothService {
     return this.control.sendSetScanTime(deviceId, serviceUUID, characteristicUUID, seconds)
   }
 
-  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitRad, lowerLimitRad) {
-    return this.control.sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitRad, lowerLimitRad)
+  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitDeg, lowerLimitDeg) {
+    return this.control.sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitDeg, lowerLimitDeg)
   }
 
   async sendSetOutputXYZ(deviceId, serviceUUID, characteristicUUID, on) {
@@ -274,13 +274,13 @@ export class BluetoothService {
     return this.control.sendSetOutputPolar(deviceId, serviceUUID, characteristicUUID, on)
   }
 
-  async sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
-    return this.control.sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d)
-  }
-
-  async sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
-    return this.control.sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d)
-  }
+  // async sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
+  //   return this.control.sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d)
+  // }
+  //
+  // async sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
+  //   return this.control.sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d)
+  // }
 
   async sendSetPitchOffset(deviceId, serviceUUID, characteristicUUID, offset) {
     return this.control.sendSetPitchOffset(deviceId, serviceUUID, characteristicUUID, offset)
@@ -324,13 +324,13 @@ export class BluetoothService {
     return this.query.sendReadOutputPolar(deviceId, serviceUUID, characteristicUUID)
   }
 
-  async sendReadVPID(deviceId, serviceUUID, characteristicUUID, axis) {
-    return this.query.sendReadVPID(deviceId, serviceUUID, characteristicUUID, axis)
-  }
-
-  async sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis) {
-    return this.query.sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis)
-  }
+  // async sendReadVPID(deviceId, serviceUUID, characteristicUUID, axis) {
+  //   return this.query.sendReadVPID(deviceId, serviceUUID, characteristicUUID, axis)
+  // }
+  //
+  // async sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis) {
+  //   return this.query.sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis)
+  // }
 
   // ==================== 资源管理代理 ====================
 

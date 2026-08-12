@@ -83,7 +83,7 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_ROTATE_SPEED: 0x12,
   /** 设置扫描时间 data {uint16:秒} data位长度2字节 */
   CMD_SET_SCAN_TIME: 0x13,
-  /** 设置俯仰角上下限 (单位: 弧度 rad) data位长度8字节 */
+  /** 设置俯仰角上下限 data{float:上限,float:下限} 单位:度 data位长度8字节 */
   CMD_SET_PITCH_LIMIT: 0x14,
   /** 设置输出xyz data{bool:on/off} */
   CMD_SET_OUTPUT_XYZ: 0x15,
@@ -91,10 +91,10 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_OUTPUT_POLAR: 0x16,
   /** 设置俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
   CMD_SET_PITCH_OFFSET: 0x17,
-  /** 设置速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
-  CMD_SET_V_PID: 0x1E,
-  /** 设置角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
-  CMD_SET_A_PID: 0x1F,
+  // /** 设置速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
+  // CMD_SET_V_PID: 0x1E,
+  // /** 设置角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
+  // CMD_SET_A_PID: 0x1F,
   /** 拍照准备就绪，通知下位机(设备)可以开始接收拍照指令(0x91) */
   CMD_CTRL_CAMERA_NEXT_PHOTO: 0x91,
 })
@@ -117,7 +117,7 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_READ_ROTATE_SPEED: 0x32,
   /** 读取扫描时间 data {uint16:秒} data位长度2字节 */
   CMD_READ_SCAN_TIME: 0x33,
-  /** 读取俯仰角上下限 data位长度8字节 */
+  /** 读取俯仰角上下限 data{float:上限,float:下限} 单位:度 data位长度8字节 */
   CMD_READ_PITCH_LIMIT: 0x34,
   /** 是否是输出XYZ值 data{bool:on/off} */
   CMD_READ_OUTPUT_XYZ: 0x35,
@@ -125,10 +125,10 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_READ_OUTPUT_POLAR: 0x36,
   /** 读取俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
   CMD_READ_PITCH_OFFSET: 0x37,
-  /** 读取速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
-  CMD_READ_V_PID: 0x3E,
-  /** 读取角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
-  CMD_READ_A_PID: 0x3F,
+  // /** 读取速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
+  // CMD_READ_V_PID: 0x3E,
+  // /** 读取角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
+  // CMD_READ_A_PID: 0x3F,
 
   /** 控制上位机拍照（附带角度值回传）data{int:yaw,int:pitch}单位：弧度 */
   CMD_CTRL_CAMERA: 0x81,
@@ -165,21 +165,21 @@ export const SETTING_DEFAULT_VALUES = {
   SPEED: { pitch: 0.002, yaw: 0.00005 },
   /** 扫描时间默认值（秒） */
   SCAN_TIME: 250,
-  /** 俯仰角上下限默认值（弧度） */
-  PITCH_LIMIT: { upper: 0.8 * 3.14, lower: 0.1 * 3.14 },
+  /** 俯仰角上下限默认值（度）- 上限为仰角170°，下限为俯角-70° */
+  PITCH_LIMIT: { upper: 170, lower: -70 },
   /** 输出格式默认值 */
   OUTPUT_FORMAT: {
     xyz: true,
     polar: false,
   },
-  /** PID参数默认值 */
-  PID: {
-    loopType: 'V', // 速度环
-    axis: 'x', // x轴
-    p: 0,
-    i: 0,
-    d: 0
-  },
+  // /** PID参数默认值 */
+  // PID: {
+  //   loopType: 'V', // 速度环
+  //   axis: 'x', // x轴
+  //   p: 0,
+  //   i: 0,
+  //   d: 0
+  // },
   /** 俯仰角零偏默认值（度） */
   PITCH_OFFSET: 0.0
 }

@@ -171,21 +171,21 @@ export class ControlCommands {
    * @param {string} deviceId - 设备 ID
    * @param {string} serviceUUID - 服务 UUID
    * @param {string} characteristicUUID - 特征 UUID
-   * @param {number} upperLimitRad - 俯仰角上限 (单位: 弧度 rad)
-   * @param {number} lowerLimitRad - 俯仰角下限 (单位: 弧度 rad)
+   * @param {number} upperLimitDeg - 俯仰角上限 (单位: 度)
+   * @param {number} lowerLimitDeg - 俯仰角下限 (单位: 度)
    */
-  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitRad, lowerLimitRad) {
+  async sendSetPitchLimit(deviceId, serviceUUID, characteristicUUID, upperLimitDeg, lowerLimitDeg) {
     // 添加特有参数验证
     // 原因：防御性编程，确保俯仰角限制为有效数值
-    validateNumber(upperLimitRad, 'upperLimitRad')
-    validateNumber(lowerLimitRad, 'lowerLimitRad')
+    validateNumber(upperLimitDeg, 'upperLimitDeg')
+    validateNumber(lowerLimitDeg, 'lowerLimitDeg')
 
-    logger.withContext({ deviceId, upperLimitRad, lowerLimitRad }).debug('发送设置俯仰角上下限指令')
+    logger.withContext({ deviceId, upperLimitDeg, lowerLimitDeg }).debug('发送设置俯仰角上下限指令')
 
     const buffer = new ArrayBuffer(8) // 2 * float = 8 bytes
     const view = new DataView(buffer)
-    view.setFloat32(0, upperLimitRad, true) // 上限 limit, 小端序，第一个 float
-    view.setFloat32(4, lowerLimitRad, true) // 下限 limit, 小端序，第二个 float (偏移 4 字节)
+    view.setFloat32(0, upperLimitDeg, true) // 上限 limit, 小端序，第一个 float
+    view.setFloat32(4, lowerLimitDeg, true) // 下限 limit, 小端序，第二个 float (偏移 4 字节)
     try {
       await this.parent.sendCommand(
         deviceId,
@@ -262,85 +262,85 @@ export class ControlCommands {
     }
   }
 
-  /**
-   * 发送"设置速度环PID"指令
-   * @param {string} deviceId - 设备 ID
-   * @param {string} serviceUUID - 服务 UUID
-   * @param {string} characteristicUUID - 特征 UUID
-   * @param {string} axis - 轴，'x' 或 'y'
-   * @param {number} p - P参数 (float)
-   * @param {number} i - I参数 (float)
-   * @param {number} d - D参数 (float)
-   */
-  async sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
-    // 添加特有参数验证
-    // 原因：防御性编程，确保PID参数为有效数值
-    validateAxis(axis, 'axis')
-    validateNumber(p, 'p')
-    validateNumber(i, 'i')
-    validateNumber(d, 'd')
-
-    logger.withContext({ deviceId, axis, p, i, d }).debug('发送设置速度环PID指令')
-
-    const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
-    const view = new DataView(buffer)
-    view.setUint32(0, axis === 'x' ? 0 : 1, true) // 轴值：x=0, y=1，小端序
-    view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
-    view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
-    view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
-    try {
-      await this.parent.sendCommand(
-        deviceId,
-        serviceUUID,
-        characteristicUUID,
-        CONTROL_COMMANDS.CMD_SET_V_PID,
-        buffer,
-      )
-    } catch (error) {
-      logger.withContext({ deviceId, command: 'CMD_SET_V_PID' }).error('发送设置速度环PID指令失败', error)
-      throw error
-    }
-  }
-
-  /**
-   * 发送"设置角度环PID"指令
-   * @param {string} deviceId - 设备 ID
-   * @param {string} serviceUUID - 服务 UUID
-   * @param {string} characteristicUUID - 特征 UUID
-   * @param {string} axis - 轴，'x' 或 'y'
-   * @param {number} p - P参数 (float)
-   * @param {number} i - I参数 (float)
-   * @param {number} d - D参数 (float)
-   */
-  async sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
-    // 添加特有参数验证
-    // 原因：防御性编程，确保PID参数为有效数值
-    validateAxis(axis, 'axis')
-    validateNumber(p, 'p')
-    validateNumber(i, 'i')
-    validateNumber(d, 'd')
-
-    logger.withContext({ deviceId, axis, p, i, d }).debug('发送设置角度环PID指令')
-
-    const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
-    const view = new DataView(buffer)
-    view.setUint32(0, axis === 'x' ? 0 : 1, true) // 轴值：x=0, y=1，小端序
-    view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
-    view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
-    view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
-    try {
-      await this.parent.sendCommand(
-        deviceId,
-        serviceUUID,
-        characteristicUUID,
-        CONTROL_COMMANDS.CMD_SET_A_PID,
-        buffer,
-      )
-    } catch (error) {
-      logger.withContext({ deviceId, command: 'CMD_SET_A_PID' }).error('发送设置角度环PID指令失败', error)
-      throw error
-    }
-  }
+  // /**
+  //  * 发送"设置速度环PID"指令
+  //  * @param {string} deviceId - 设备 ID
+  //  * @param {string} serviceUUID - 服务 UUID
+  //  * @param {string} characteristicUUID - 特征 UUID
+  //  * @param {string} axis - 轴，'x' 或 'y'
+  //  * @param {number} p - P参数 (float)
+  //  * @param {number} i - I参数 (float)
+  //  * @param {number} d - D参数 (float)
+  //  */
+  // async sendSetVPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
+  //   // 添加特有参数验证
+  //   // 原因：防御性编程，确保PID参数为有效数值
+  //   validateAxis(axis, 'axis')
+  //   validateNumber(p, 'p')
+  //   validateNumber(i, 'i')
+  //   validateNumber(d, 'd')
+  //
+  //   logger.withContext({ deviceId, axis, p, i, d }).debug('发送设置速度环PID指令')
+  //
+  //   const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
+  //   const view = new DataView(buffer)
+  //   view.setUint32(0, axis === 'x' ? 0 : 1, true) // 轴值：x=0, y=1，小端序
+  //   view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
+  //   view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
+  //   view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
+  //   try {
+  //     await this.parent.sendCommand(
+  //       deviceId,
+  //       serviceUUID,
+  //       characteristicUUID,
+  //       CONTROL_COMMANDS.CMD_SET_V_PID,
+  //       buffer,
+  //     )
+  //   } catch (error) {
+  //     logger.withContext({ deviceId, command: 'CMD_SET_V_PID' }).error('发送设置速度环PID指令失败', error)
+  //     throw error
+  //   }
+  // }
+  //
+  // /**
+  //  * 发送"设置角度环PID"指令
+  //  * @param {string} deviceId - 设备 ID
+  //  * @param {string} serviceUUID - 服务 UUID
+  //  * @param {string} characteristicUUID - 特征 UUID
+  //  * @param {string} axis - 轴，'x' 或 'y'
+  //  * @param {number} p - P参数 (float)
+  //  * @param {number} i - I参数 (float)
+  //  * @param {number} d - D参数 (float)
+  //  */
+  // async sendSetAPID(deviceId, serviceUUID, characteristicUUID, axis, p, i, d) {
+  //   // 添加特有参数验证
+  //   // 原因：防御性编程，确保PID参数为有效数值
+  //   validateAxis(axis, 'axis')
+  //   validateNumber(p, 'p')
+  //   validateNumber(i, 'i')
+  //   validateNumber(d, 'd')
+  //
+  //   logger.withContext({ deviceId, axis, p, i, d }).debug('发送设置角度环PID指令')
+  //
+  //   const buffer = new ArrayBuffer(16) // 4 bytes axis + 3 * float = 16 bytes
+  //   const view = new DataView(buffer)
+  //   view.setUint32(0, axis === 'x' ? 0 : 1, true) // 轴值：x=0, y=1，小端序
+  //   view.setFloat32(4, p, true) // P参数，小端序 (偏移 4 字节)
+  //   view.setFloat32(8, i, true) // I参数，小端序 (偏移 8 字节)
+  //   view.setFloat32(12, d, true) // D参数，小端序 (偏移 12 字节)
+  //   try {
+  //     await this.parent.sendCommand(
+  //       deviceId,
+  //       serviceUUID,
+  //       characteristicUUID,
+  //       CONTROL_COMMANDS.CMD_SET_A_PID,
+  //       buffer,
+  //     )
+  //   } catch (error) {
+  //     logger.withContext({ deviceId, command: 'CMD_SET_A_PID' }).error('发送设置角度环PID指令失败', error)
+  //     throw error
+  //   }
+  // }
 
   /**
    * 发送"设置俯仰角零偏"指令

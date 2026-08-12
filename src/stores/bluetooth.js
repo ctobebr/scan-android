@@ -385,10 +385,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
         '发送设置扫描时间指令失败'
       )
     },
-    async handleSendPitchLimit(upperLimitRad, lowerLimitRad) {
+    async handleSendPitchLimit(upperLimitDeg, lowerLimitDeg) {
       return this.sendBluetoothCommand(
         (...args) => bluetoothService.sendSetPitchLimit(...args),
-        [upperLimitRad, lowerLimitRad],
+        [upperLimitDeg, lowerLimitDeg],
         null,
         '发送设置俯仰角上下限指令失败'
       )
@@ -500,39 +500,39 @@ export const useBluetoothStore = defineStore('bluetooth', {
       )
     },
 
-    /**
-     * 发送设置速度环PID指令
-     * @param {string} axis - 轴，'x'或'y'
-     * @param {number} p - P参数
-     * @param {number} i - I参数
-     * @param {number} d - D参数
-     */
-    async handleSendVPID(axis, p, i, d) {
-      return this.sendBluetoothCommand(
-        (...args) => bluetoothService.sendSetVPID(...args),
-        [axis, p, i, d],
-        '发送设置速度环PID指令成功',
-        '发送设置速度环PID指令失败',
-        true
-      )
-    },
-
-    /**
-     * 发送设置角度环PID指令
-     * @param {string} axis - 轴，'x'或'y'
-     * @param {number} p - P参数
-     * @param {number} i - I参数
-     * @param {number} d - D参数
-     */
-    async handleSendAPID(axis, p, i, d) {
-      return this.sendBluetoothCommand(
-        (...args) => bluetoothService.sendSetAPID(...args),
-        [axis, p, i, d],
-        '发送设置角度环PID指令成功',
-        '发送设置角度环PID指令失败',
-        true
-      )
-    },
+    // /**
+    //  * 发送设置速度环PID指令
+    //  * @param {string} axis - 轴，'x'或'y'
+    //  * @param {number} p - P参数
+    //  * @param {number} i - I参数
+    //  * @param {number} d - D参数
+    //  */
+    // async handleSendVPID(axis, p, i, d) {
+    //   return this.sendBluetoothCommand(
+    //     (...args) => bluetoothService.sendSetVPID(...args),
+    //     [axis, p, i, d],
+    //     '发送设置速度环PID指令成功',
+    //     '发送设置速度环PID指令失败',
+    //     true
+    //   )
+    // },
+    //
+    // /**
+    //  * 发送设置角度环PID指令
+    //  * @param {string} axis - 轴，'x'或'y'
+    //  * @param {number} p - P参数
+    //  * @param {number} i - I参数
+    //  * @param {number} d - D参数
+    //  */
+    // async handleSendAPID(axis, p, i, d) {
+    //   return this.sendBluetoothCommand(
+    //     (...args) => bluetoothService.sendSetAPID(...args),
+    //     [axis, p, i, d],
+    //     '发送设置角度环PID指令成功',
+    //     '发送设置角度环PID指令失败',
+    //     true
+    //   )
+    // },
 
     /**
      * 发送设置俯仰角零偏指令
@@ -548,33 +548,33 @@ export const useBluetoothStore = defineStore('bluetooth', {
       )
     },
 
-    /**
-     * 发送读取速度环PID指令
-     * @param {string} axis - 轴，'x'或'y'
-     */
-    async handleReadVPID(axis) {
-      return this.sendBluetoothCommand(
-        (...args) => bluetoothService.sendReadVPID(...args),
-        [axis],
-        '发送读取速度环PID指令成功',
-        '发送读取速度环PID指令失败',
-        true
-      )
-    },
-
-    /**
-     * 发送读取角度环PID指令
-     * @param {string} axis - 轴，'x'或'y'
-     */
-    async handleReadAPID(axis) {
-      return this.sendBluetoothCommand(
-        (...args) => bluetoothService.sendReadAPID(...args),
-        [axis],
-        '发送读取角度环PID指令成功',
-        '发送读取角度环PID指令失败',
-        true
-      )
-    },
+    // /**
+    //  * 发送读取速度环PID指令
+    //  * @param {string} axis - 轴，'x'或'y'
+    //  */
+    // async handleReadVPID(axis) {
+    //   return this.sendBluetoothCommand(
+    //     (...args) => bluetoothService.sendReadVPID(...args),
+    //     [axis],
+    //     '发送读取速度环PID指令成功',
+    //     '发送读取速度环PID指令失败',
+    //     true
+    //   )
+    // },
+    //
+    // /**
+    //  * 发送读取角度环PID指令
+    //  * @param {string} axis - 轴，'x'或'y'
+    //  */
+    // async handleReadAPID(axis) {
+    //   return this.sendBluetoothCommand(
+    //     (...args) => bluetoothService.sendReadAPID(...args),
+    //     [axis],
+    //     '发送读取角度环PID指令成功',
+    //     '发送读取角度环PID指令失败',
+    //     true
+    //   )
+    // },
 
     /**
      * 发送读取俯仰角零偏指令
