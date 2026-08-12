@@ -87,6 +87,7 @@ export const session = {
 
 import {
   saveBatch,
+  savePhotosOnly,
   listBatches,
   // readBatch,
   deleteBatch,
@@ -100,6 +101,8 @@ import {
 export const batch = {
   /** 保存批次数据 */
   save: saveBatch,
+  /** 仅保存批次照片（txt 已通过流式写入） */
+  savePhotos: savePhotosOnly,
   /** 列出会话下的所有批次 */
   list: listBatches,
   /** 读取批次数据 */

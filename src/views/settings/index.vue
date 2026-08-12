@@ -277,6 +277,117 @@
         </div>
       </div>
 
+      <!-- 水平拍照角度步进卡片 -->
+      <div class="param-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="title-text">水平拍照角度步进</span>
+          </div>
+          <van-button
+            size="small"
+            type="primary"
+            plain
+            @click="saveParam('yawStep')"
+            :loading="savingState.yawStep"
+            :disabled="deviceDisconnected || savingState.yawStep || !isYawStepValid"
+            style="width: 64px;"
+            >保存</van-button
+          >
+        </div>
+
+        <div class="scan-row">
+          <div class="scan-input">
+            <van-field
+              v-model="yawStep.value"
+              type="text"
+              placeholder="30.0"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('yawStep', 'value', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!yawStepErrors.value"
+            >
+              <template #right-icon>
+                <span class="unit">(degrees)</span>
+              </template>
+            </van-field>
+          </div>
+        </div>
+        <div v-if="yawStepErrors.value" class="field-error-hint">
+          <van-icon name="warning-o" /> {{ yawStepErrors.value }}
+        </div>
+      </div>
+
+      <!-- 俯仰角目标卡片 -->
+      <div class="param-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="title-text">俯仰角目标</span>
+          </div>
+          <van-button
+            size="small"
+            type="primary"
+            plain
+            @click="saveParam('pitchTargets')"
+            :loading="savingState.pitchTargets"
+            :disabled="deviceDisconnected || savingState.pitchTargets || !isPitchTargetsValid"
+            style="width: 64px;"
+            >保存</van-button
+          >
+        </div>
+
+        <div class="multi-axis-section">
+          <div class="axis-item">
+            <label>目标1 <span class="unit">(degrees)</span></label>
+            <van-field
+              v-model="pitchTargets.pitch0"
+              type="text"
+              placeholder="-42.0"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pitchTargets', 'pitch0', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pitchTargetsErrors.pitch0"
+            />
+            <div v-if="pitchTargetsErrors.pitch0" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pitchTargetsErrors.pitch0 }}
+            </div>
+          </div>
+          <div class="axis-item">
+            <label>目标2 <span class="unit">(degrees)</span></label>
+            <van-field
+              v-model="pitchTargets.pitch1"
+              type="text"
+              placeholder="-72.0"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pitchTargets', 'pitch1', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pitchTargetsErrors.pitch1"
+            />
+            <div v-if="pitchTargetsErrors.pitch1" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pitchTargetsErrors.pitch1 }}
+            </div>
+          </div>
+          <div class="axis-item">
+            <label>目标3 <span class="unit">(degrees)</span></label>
+            <van-field
+              v-model="pitchTargets.pitch2"
+              type="text"
+              placeholder="-102.0"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pitchTargets', 'pitch2', 2)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pitchTargetsErrors.pitch2"
+            />
+            <div v-if="pitchTargetsErrors.pitch2" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pitchTargetsErrors.pitch2 }}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 输出格式设置卡片  目前同时开启会渲染两套点云，一个是偏移校准前一个是偏移校准后。。保存的txt一个点位也会包含两行xyz数据-->
       <div class="param-card output-format-card">
         <div class="card-header">
@@ -529,6 +640,18 @@ const pitchOffset = reactive({
   value: SETTING_DEFAULT_VALUES.PITCH_OFFSET.toFixed(2)
 })
 
+// 水平拍照角度步进 - 保留2位小数，范围0-360度
+const yawStep = reactive({
+  value: SETTING_DEFAULT_VALUES.YAW_STEP.toFixed(2)
+})
+
+// 三个俯仰角目标 - 保留2位小数，范围-180到180度
+const pitchTargets = reactive({
+  pitch0: SETTING_DEFAULT_VALUES.PITCH_TARGETS.pitch0.toFixed(2),
+  pitch1: SETTING_DEFAULT_VALUES.PITCH_TARGETS.pitch1.toFixed(2),
+  pitch2: SETTING_DEFAULT_VALUES.PITCH_TARGETS.pitch2.toFixed(2)
+})
+
 // // PID选项
 // const loopTypeOptions = [
 //   { text: '速度环(V)', value: 'V' },
@@ -547,6 +670,8 @@ const savingState = reactive({
   scan: false,
   pitchLimit: false,
   pitchOffset: false, // 俯仰角零偏保存状态
+  yawStep: false, // 水平拍照角度步进保存状态
+  pitchTargets: false, // 俯仰角目标保存状态
   outputFormat: false, // 输出格式保存状态
   pid: false // PID保存状态
 })
@@ -582,6 +707,18 @@ const pitchLimitErrors = reactive({
 // 俯仰角零偏错误状态
 const pitchOffsetErrors = reactive({
   value: ''
+})
+
+// 水平拍照角度步进错误状态
+const yawStepErrors = reactive({
+  value: ''
+})
+
+// 俯仰角目标错误状态
+const pitchTargetsErrors = reactive({
+  pitch0: '',
+  pitch1: '',
+  pitch2: ''
 })
 
 // ========== 计算属性 - 校验状态 ==========
@@ -622,6 +759,19 @@ const hasPitchLimitEmptyError = computed(() => {
 // 俯仰角零偏是否有效
 const isPitchOffsetValid = computed(() => {
   return !pitchOffsetErrors.value
+})
+
+// 水平拍照角度步进是否有效
+const isYawStepValid = computed(() => {
+  if (yawStepErrors.value) return false
+  const val = parseFloat(yawStep.value)
+  return val >= 0 && val <= 360
+})
+
+// 俯仰角目标是否有效
+const isPitchTargetsValid = computed(() => {
+  if (pitchTargetsErrors.pitch0 || pitchTargetsErrors.pitch1 || pitchTargetsErrors.pitch2) return false
+  return true
 })
 
 // ========== 校验函数 ==========
@@ -736,6 +886,41 @@ const validateAndFormat = (category, field, decimals) => {
         }
       } else {
         pitchOffsetErrors[field] = errorMsg
+      }
+      break
+
+    case 'yawStep':
+      value = yawStep[field]
+      errorMsg = validateNumber(value, '水平拍照角度步进')
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        if (num < 0 || num > 360) {
+          errorMsg = '步进值必须在0~360之间'
+          yawStepErrors[field] = errorMsg
+        } else {
+          yawStep[field] = num.toFixed(decimals)
+          yawStepErrors[field] = ''
+        }
+      } else {
+        yawStepErrors[field] = errorMsg
+      }
+      break
+
+    case 'pitchTargets':
+      value = pitchTargets[field]
+      const targetLabel = field === 'pitch0' ? '目标1' : (field === 'pitch1' ? '目标2' : '目标3')
+      errorMsg = validateNumber(value, targetLabel)
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        if (num < -180 || num > 180) {
+          errorMsg = targetLabel + '必须在-180~180之间'
+          pitchTargetsErrors[field] = errorMsg
+        } else {
+          pitchTargets[field] = num.toFixed(decimals)
+          pitchTargetsErrors[field] = ''
+        }
+      } else {
+        pitchTargetsErrors[field] = errorMsg
       }
       break
   }
@@ -967,6 +1152,12 @@ const init = async () => {
       // },
       onPitchOffsetResponse: (data) => {
         handlePitchOffsetResponse(data)
+      },
+      onYawStepResponse: (data) => {
+        handleYawStepResponse(data)
+      },
+      onPitchTargetsResponse: (data) => {
+        handlePitchTargetsResponse(data)
       },
     })
 
@@ -1248,6 +1439,38 @@ function handlePitchOffsetResponse(data) {
   }
 }
 
+// 处理水平拍照角度步进响应
+function handleYawStepResponse(data) {
+  console.log('设置水平拍照角度步进成功', JSON.stringify(data))
+  if (data && typeof data === 'object') {
+    if (data.value !== undefined) {
+      yawStep.value = parseFloat(data.value).toFixed(2)
+    }
+  }
+  yawStepErrors.value = ''
+  if (isFromSaveAction.value) {
+    showToast({ message: '水平拍照角度步进保存成功', position: 'bottom' })
+    isFromSaveAction.value = false
+  }
+}
+
+// 处理俯仰角目标响应
+function handlePitchTargetsResponse(data) {
+  console.log('设置俯仰角目标成功', JSON.stringify(data))
+  if (data && typeof data === 'object') {
+    if (data.pitch0 !== undefined) pitchTargets.pitch0 = parseFloat(data.pitch0).toFixed(2)
+    if (data.pitch1 !== undefined) pitchTargets.pitch1 = parseFloat(data.pitch1).toFixed(2)
+    if (data.pitch2 !== undefined) pitchTargets.pitch2 = parseFloat(data.pitch2).toFixed(2)
+  }
+  pitchTargetsErrors.pitch0 = ''
+  pitchTargetsErrors.pitch1 = ''
+  pitchTargetsErrors.pitch2 = ''
+  if (isFromSaveAction.value) {
+    showToast({ message: '俯仰角目标保存成功', position: 'bottom' })
+    isFromSaveAction.value = false
+  }
+}
+
 // 保存单个参数 - 移除 showToast 参数，不在发送后提示
 // 设置标记，表示这是来自保存操作的响应
 // 添加 silent 参数，用于控制是否显示提示（恢复默认值时使用）
@@ -1313,6 +1536,28 @@ const saveParam = async (type, silent = false) => {
         return
       }
       break
+
+    case 'yawStep':
+      validateAndFormat('yawStep', 'value', 2)
+      if (!isYawStepValid.value) {
+        if (yawStepErrors.value) {
+          showToast({ message: yawStepErrors.value, position: 'bottom' })
+        } else {
+          showToast({ message: '步进值必须在0~360之间', position: 'bottom' })
+        }
+        return
+      }
+      break
+
+    case 'pitchTargets':
+      validateAndFormat('pitchTargets', 'pitch0', 2)
+      validateAndFormat('pitchTargets', 'pitch1', 2)
+      validateAndFormat('pitchTargets', 'pitch2', 2)
+      if (!isPitchTargetsValid.value) {
+        showToast({ message: '请填写正确的俯仰角目标值（-180~180）', position: 'bottom' })
+        return
+      }
+      break
   }
 
   try {
@@ -1369,6 +1614,18 @@ const saveParam = async (type, silent = false) => {
 
       case 'pitchOffset':
         await bluetoothStore.handleSendPitchOffset(parseFloat(pitchOffset.value))
+        break
+
+      case 'yawStep':
+        await bluetoothStore.handleSendYawStep(parseFloat(yawStep.value))
+        break
+
+      case 'pitchTargets':
+        await bluetoothStore.handleSendPitchTargets(
+          parseFloat(pitchTargets.pitch0),
+          parseFloat(pitchTargets.pitch1),
+          parseFloat(pitchTargets.pitch2),
+        )
         break
     }
   } catch (error) {
@@ -1467,6 +1724,12 @@ const resetToDefault = async () => {
     // pidErrors.d = ''
     // 清除俯仰角零偏错误
     pitchOffsetErrors.value = ''
+    // 清除水平拍照角度步进错误
+    yawStepErrors.value = ''
+    // 清除俯仰角目标错误
+    pitchTargetsErrors.pitch0 = ''
+    pitchTargetsErrors.pitch1 = ''
+    pitchTargetsErrors.pitch2 = ''
 
     // 先更新UI显示为默认值并格式化
     calibParams.x = SETTING_DEFAULT_VALUES.CALIB.x.toFixed(2)
@@ -1495,6 +1758,14 @@ const resetToDefault = async () => {
     // 俯仰角零偏默认值 - 保留2位小数
     pitchOffset.value = SETTING_DEFAULT_VALUES.PITCH_OFFSET.toFixed(2)
 
+    // 水平拍照角度步进默认值 - 保留2位小数
+    yawStep.value = SETTING_DEFAULT_VALUES.YAW_STEP.toFixed(2)
+
+    // 三个俯仰角目标默认值 - 保留2位小数
+    pitchTargets.pitch0 = SETTING_DEFAULT_VALUES.PITCH_TARGETS.pitch0.toFixed(2)
+    pitchTargets.pitch1 = SETTING_DEFAULT_VALUES.PITCH_TARGETS.pitch1.toFixed(2)
+    pitchTargets.pitch2 = SETTING_DEFAULT_VALUES.PITCH_TARGETS.pitch2.toFixed(2)
+
 
     // 使用 silent 模式调用保存函数，不触发单个提示
     await saveParam('calib', true)
@@ -1502,6 +1773,8 @@ const resetToDefault = async () => {
     await saveParam('scan', true)
     await saveParam('pitchLimit', true)
     await saveParam('pitchOffset', true)
+    await saveParam('yawStep', true)
+    await saveParam('pitchTargets', true)
     // await saveParam('pid', true)
 
     // 输出格式需要单独发送，也使用 silent 模式----暂时不启用
@@ -1534,6 +1807,8 @@ const readAllParams = async () => {
       bluetoothStore.handleReadScanTime(),
       bluetoothStore.handleReadPitchLimit(),
       bluetoothStore.handleReadPitchOffset(),
+      bluetoothStore.handleReadYawStep(),
+      bluetoothStore.handleReadPitchTargets(),
       // bluetoothStore.handleReadOutputXYZ(),
       bluetoothStore.handleReadOutputPolar(),
       // // 读取当前选中的PID参数

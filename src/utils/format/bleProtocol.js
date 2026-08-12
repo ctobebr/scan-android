@@ -193,6 +193,8 @@ export class parseBleData {
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_XYZ]: this._handleReadOutputXYZ,
       [DEVICE_DATA_COMMANDS.CMD_READ_OUTPUT_POLAR]: this._handleReadOutputPolar,
       [DEVICE_DATA_COMMANDS.CMD_READ_PITCH_OFFSET]: this._handleReadPitchOffset,
+      [DEVICE_DATA_COMMANDS.CMD_READ_YAW_STEP]: this._handleReadYawStep,
+      [DEVICE_DATA_COMMANDS.CMD_READ_PITCH_TARGETS]: this._handleReadPitchTargets,
       // [DEVICE_DATA_COMMANDS.CMD_READ_V_PID]: this._handleReadVPID,
       // [DEVICE_DATA_COMMANDS.CMD_READ_A_PID]: this._handleReadAPID,
       // [CONTROL_COMMANDS.CMD_SET_ROTATE_SPEED]: this._handleSetSpeed,
@@ -1216,6 +1218,44 @@ export class parseBleData {
     logger.debug('✅ 收到下位机俯仰角零偏响应: 零偏值_deg=' + offset)
     if (this.options.onPitchOffsetResponse) {
       this.options.onPitchOffsetResponse({ value: offset })
+    }
+  }
+
+  /**
+   * 处理读取水平拍照角度步进的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadYawStep(data) {
+    if (data.byteLength !== 4) {
+      logger.warn('水平拍照角度步进数据长度错误，期望 4 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const yawStep = view.getFloat32(0, true) // 步进值，小端序，单位：度
+
+    logger.debug('✅ 收到下位机水平拍照角度步进响应: yawStep_deg=' + yawStep)
+    if (this.options.onYawStepResponse) {
+      this.options.onYawStepResponse({ value: yawStep })
+    }
+  }
+
+  /**
+   * 处理读取三个俯仰角目标的响应
+   * @param {Uint8Array} data - 从蓝牙接收到的原始数据
+   */
+  _handleReadPitchTargets(data) {
+    if (data.byteLength !== 12) {
+      logger.warn('俯仰角目标数据长度错误，期望 12 字节，实际:', data.byteLength)
+      return
+    }
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    const pitch0 = view.getFloat32(0, true) // 小端序，单位：度
+    const pitch1 = view.getFloat32(4, true) // (偏移 4 字节)
+    const pitch2 = view.getFloat32(8, true) // (偏移 8 字节)
+
+    logger.debug('✅ 收到下位机俯仰角目标响应: pitch0=' + pitch0 + ', pitch1=' + pitch1 + ', pitch2=' + pitch2)
+    if (this.options.onPitchTargetsResponse) {
+      this.options.onPitchTargetsResponse({ pitch0, pitch1, pitch2 })
     }
   }
 

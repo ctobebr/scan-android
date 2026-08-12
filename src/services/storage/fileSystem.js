@@ -143,6 +143,34 @@ export async function writeFile(path, data, opts = {}) {
 }
 
 /**
+ * 追加写入文件（如果文件不存在则创建）
+ * 用于点云采集的流式写入，避免全量数据缓存在内存中
+ * @param {string} path - 文件路径（相对于 External 目录）
+ * @param {string} data - 要追加的数据
+ * @param {Object} [opts={}] - 可选参数
+ * @param {string} [opts.encoding] - 编码格式
+ * @returns {Promise<void>}
+ * @throws {FilePathError} 当路径无效或追加失败时抛出
+ */
+export async function appendFile(path, data, opts = {}) {
+  const sanitizedPath = sanitizePath(path)
+  if (!sanitizedPath) {
+    throw new FilePathError(ErrorCodes.VALIDATION_ERROR, '文件路径无效')
+  }
+
+  return retryOperation(
+    () =>
+      Filesystem.appendFile({
+        path: sanitizedPath,
+        data,
+        directory: Directory.External,
+        encoding: opts.encoding,
+      }),
+    `追加写入文件 ${sanitizedPath}`,
+  )
+}
+
+/**
  * 删除文件
  * @param {string} path - 文件路径
  * @returns {Promise<void>}

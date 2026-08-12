@@ -374,6 +374,70 @@ export class ControlCommands {
   }
 
   /**
+   * 发送"设置水平拍照角度步进"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} yawStep - 水平拍照角度步进值 (float, 单位: 度)
+   */
+  async sendSetYawStep(deviceId, serviceUUID, characteristicUUID, yawStep) {
+    validateNumber(yawStep, 'yawStep')
+
+    logger.withContext({ deviceId, yawStep }).debug('发送设置水平拍照角度步进指令')
+
+    const buffer = new ArrayBuffer(4) // 1 * float = 4 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, yawStep, true) // 步进值，小端序
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_YAW_STEP,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_YAW_STEP' }).error('发送设置水平拍照角度步进指令失败', error)
+      throw error
+    }
+  }
+
+  /**
+   * 发送"设置三个俯仰角目标"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} pitch0 - 第一个俯仰角目标 (float, 单位: 度)
+   * @param {number} pitch1 - 第二个俯仰角目标 (float, 单位: 度)
+   * @param {number} pitch2 - 第三个俯仰角目标 (float, 单位: 度)
+   */
+  async sendSetPitchTargets(deviceId, serviceUUID, characteristicUUID, pitch0, pitch1, pitch2) {
+    validateNumber(pitch0, 'pitch0')
+    validateNumber(pitch1, 'pitch1')
+    validateNumber(pitch2, 'pitch2')
+
+    logger.withContext({ deviceId, pitch0, pitch1, pitch2 }).debug('发送设置三个俯仰角目标指令')
+
+    const buffer = new ArrayBuffer(12) // 3 * float = 12 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, pitch0, true) // 小端序
+    view.setFloat32(4, pitch1, true) // (偏移 4 字节)
+    view.setFloat32(8, pitch2, true) // (偏移 8 字节)
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_PITCH_TARGETS,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_PITCH_TARGETS' }).error('发送设置三个俯仰角目标指令失败', error)
+      throw error
+    }
+  }
+
+  /**
    * 发送"拍照准备就绪"指令(0x91)
    * @description 通知下位机当前已准备就绪，可以开始接收拍照指令
    * @param {string} deviceId - 设备 ID

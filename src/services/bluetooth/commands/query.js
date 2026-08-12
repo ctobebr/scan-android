@@ -229,35 +229,79 @@ export class QueryCommands {
   //     throw error
   //   }
   // }
-  //
-  // /**
-  //  * 发送"读取角度环PID"指令
-  //  * @param {string} deviceId - 设备 ID
-  //  * @param {string} serviceUUID - 服务 UUID
-  //  * @param {string} characteristicUUID - 特征 UUID
-  //  * @param {string} axis - 轴，'x' 或 'y'
-  //  */
-  // async sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis) {
-  //   // 添加特有参数验证
-  //   // 原因：防御性编程，确保轴参数有效
-  //   validateAxis(axis, 'axis')
-  //
-  //   logger.withContext({ deviceId, axis }).debug('发送读取角度环PID指令')
-  //
-  //   const buffer = new ArrayBuffer(1) // 1 byte axis
-  //   const view = new Uint8Array(buffer)
-  //   view[0] = axis === 'x' ? 0 : 1 // 轴值：x=0, y=1
-  //   try {
-  //     await this.parent.sendCommand(
-  //       deviceId,
-  //       serviceUUID,
-  //       characteristicUUID,
-  //       DEVICE_DATA_COMMANDS.CMD_READ_A_PID,
-  //       buffer,
-  //     )
-  //   } catch (error) {
-  //     logger.withContext({ deviceId, command: 'CMD_READ_A_PID' }).error('发送读取角度环PID指令失败', error)
-  //     throw error
-  //   }
-  // }
+//
+// /**
+//  * 发送"读取角度环PID"指令
+//  * @param {string} deviceId - 设备 ID
+//  * @param {string} serviceUUID - 服务 UUID
+//  * @param {string} characteristicUUID - 特征 UUID
+//  * @param {string} axis - 轴，'x' 或 'y'
+//  */
+// async sendReadAPID(deviceId, serviceUUID, characteristicUUID, axis) {
+//   // 添加特有参数验证
+//   // 原因：防御性编程，确保轴参数有效
+//   validateAxis(axis, 'axis')
+//
+//   logger.withContext({ deviceId, axis }).debug('发送读取角度环PID指令')
+//
+//   const buffer = new ArrayBuffer(1) // 1 byte axis
+//   const view = new Uint8Array(buffer)
+//   view[0] = axis === 'x' ? 0 : 1 // 轴值：x=0, y=1
+//   try {
+//     await this.parent.sendCommand(
+//       deviceId,
+//       serviceUUID,
+//       characteristicUUID,
+//       DEVICE_DATA_COMMANDS.CMD_READ_A_PID,
+//       buffer,
+//     )
+//   } catch (error) {
+//     logger.withContext({ deviceId, command: 'CMD_READ_A_PID' }).error('发送读取角度环PID指令失败', error)
+//     throw error
+//   }
+// }
+
+  /**
+   * 发送"读取水平拍照角度步进"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadYawStep(deviceId, serviceUUID, characteristicUUID) {
+    logger.withContext({ deviceId }).debug('发送读取水平拍照角度步进指令')
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_YAW_STEP,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_YAW_STEP' }).error('发送读取水平拍照角度步进指令失败', error)
+      throw error
+    }
+  }
+
+  /**
+   * 发送"读取三个俯仰角目标"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadPitchTargets(deviceId, serviceUUID, characteristicUUID) {
+    logger.withContext({ deviceId }).debug('发送读取三个俯仰角目标指令')
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_PITCH_TARGETS,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_PITCH_TARGETS' }).error('发送读取三个俯仰角目标指令失败', error)
+      throw error
+    }
+  }
 }

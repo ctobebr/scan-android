@@ -184,6 +184,8 @@ import { setPanoramaCache } from '@/utils/panoramaCache'
 import { showToast, showLoadingToast, closeToast } from 'vant'
 import { generateOptimizedSessionId } from '@/utils/format/sessionId'
 import { Filesystem, Directory, FilesystemEncoding } from '@capacitor/filesystem'
+import { appendFile } from '@/services/storage/fileSystem'
+import { buildPointCloudDataFileName } from '@/utils/storage/path'
 
 // ==============================================
 // 路由和状态管理
@@ -215,7 +217,14 @@ const isStitching = ref(false)
 const stitchProgressText = ref('')
 
 // 当前批次数据
-let currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
+let currentBatchData = { photos: [], pointCount: 0 }
+
+// 流式写入相关状态（txt 分批次追加写入，替代 rawLines 全量内存缓存）
+let batchWriteBuffer = []              // 批量写入缓冲区
+let currentTxtFilePath = null          // 当前批次的 txt 文件路径
+let hasRenderLimitReached = false      // 渲染上限是否已达到（用于一次性提示）
+let hasSaveLimitReached = false        // 保存上限是否已达到（用于一次性提示）
+let isTxtHeaderWritten = false         // txt 文件头是否已写入
 
 // 当前会话ID
 let currentSessionId = null
@@ -232,7 +241,11 @@ let parser = null
 // 点云数据缓冲区
 const accumulationBuffer = []
 const MAX_BUFFER_SIZE = 10000 // 缓冲区上限   超过就丢弃
-const MAX_POINTS_PER_BATCH = 100000 // 单个点位最大点云数
+// 渲染/保存上限分离：达到渲染上限后停止渲染但继续保存，达到保存上限后停止保存
+const RENDER_LIMIT = 1000000 // 渲染上限
+const SAVE_LIMIT = 2000000 // 保存上限
+const BATCH_WRITE_SIZE = 5000 // 流式写入批量行数阈值
+const MAX_POINTS_PER_BATCH = SAVE_LIMIT // 兼容引用（保持外部引用名不变）
 
 // 延迟渲染相关状态
 const deferredRenderBuffer = [] // 延迟渲染缓冲区（采集期间暂存所有点数据）
@@ -523,10 +536,11 @@ async function loadBatchButtons() {
 function resetForNewProject() {
   dataBatchCounter.value = 0
   batchButtons.value = []
-  currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
+  currentBatchData = { photos: [], pointCount: 0 }
   currentFolderName = null
   enableSave.value = false
   cleanupMultiStationResources()
+  resetStreamWriteState()
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
     pointCount.value = 0
@@ -537,9 +551,10 @@ function resetForNewProject() {
  * 重置为新点位
  */
 function resetForNewBatch() {
-  currentBatchData = { rawLines: [], photos: [], pointCount: 0 }
+  currentBatchData = { photos: [], pointCount: 0 }
   clearAccumulationBuffer()
   deferredRenderBuffer.length = 0
+  resetStreamWriteState()
   if (renderer && typeof renderer.resetPointCloud === 'function') {
     renderer.resetPointCloud()
     pointCount.value = 0
@@ -547,44 +562,102 @@ function resetForNewBatch() {
 }
 
 /**
- * 保存当前点位数据
- *
- * 根据采集过程中实际接收到的数据格式自动选择文件头：
- * - 仅XYZ:    x(m) y(m) z(m)
- * - 含极坐标: x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)
+ * 格式化点为 txt 行字符串
+ * @param {Object} p - 点数据
+ * @returns {string} 格式化的行
  */
-async function saveCurrentBatch() {
+function formatPointLine(p) {
+  if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
+    currentBatchData.hasPolarData = true
+    return `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`
+  }
+  return `${p.x / 10} ${p.y / 10} ${p.z / 10}`
+}
+
+/**
+ * 获取当前批次 txt 文件路径（与 storage.batch.save 的路径保持一致）
+ */
+function getCurrentTxtFilePath() {
+  if (currentTxtFilePath) return currentTxtFilePath
+
+  const saveFolderName = currentFolderName || storage.path.getTempSessionName(currentSessionId)
+  const bid = dataBatchCounter.value
+  const batchDir = storage.path.batchFolder(saveFolderName, bid)
+  currentTxtFilePath = `${batchDir}/${buildPointCloudDataFileName()}`
+  return currentTxtFilePath
+}
+
+/**
+ * 确保 txt 文件头已写入
+ * 在首次收到数据时调用，根据数据格式决定文件头
+ * @param {boolean} hasPolarData - 是否为极坐标格式
+ */
+async function ensureTxtHeader(hasPolarData) {
+  if (isTxtHeaderWritten) return
+
+  const filePath = getCurrentTxtFilePath()
+  // 确保批次目录存在（appendFile 不会自动创建父目录）
+  await storage.file.ensureDir(filePath.substring(0, filePath.lastIndexOf('/')))
+
+  const header = hasPolarData
+    ? 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)\n'
+    : 'x(m) y(m) z(m)\n'
+  await appendFile(filePath, header, { encoding: 'utf8' })
+  isTxtHeaderWritten = true
+}
+
+/**
+ * 批量追加写入到 txt 文件
+ * 将 batchWriteBuffer 中缓存的数据一次性追加到 txt 文件
+ */
+async function flushBatchWriteBuffer() {
+  if (batchWriteBuffer.length === 0) return
+
+  const data = batchWriteBuffer.join('\n') + '\n'
+  batchWriteBuffer = []
+
+  try {
+    await appendFile(getCurrentTxtFilePath(), data, { encoding: 'utf8' })
+  } catch (e) {
+    logger.error('[StreamWrite] 追加写入失败', e)
+    // 写入失败的数据放回缓冲区头部，等待下次重试
+    batchWriteBuffer.unshift(...data.trim().split('\n'))
+  }
+}
+
+/**
+ * 重置流式写入状态（新批次采集时调用）
+ */
+function resetStreamWriteState() {
+  batchWriteBuffer = []
+  currentTxtFilePath = null
+  hasRenderLimitReached = false
+  hasSaveLimitReached = false
+  isTxtHeaderWritten = false
+}
+
+/**
+ * 保存当前批次照片数据
+ * txt 文件已通过流式写入完成，此函数仅处理照片
+ */
+async function saveCurrentBatchPhotos() {
   if (!currentSessionId) return
 
   const bid = dataBatchCounter.value
-  if (currentBatchData.rawLines.length === 0 && currentBatchData.photos.length === 0) {
-    return
-  }
+  if (currentBatchData.photos.length === 0) return
 
   try {
     const saveFolderName = currentFolderName || storage.path.getTempSessionName(currentSessionId)
-
-    // 根据实际数据格式动态选择文件头（而非写死6列）
-    const header = currentBatchData.hasPolarData
-      ? 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)'
-      : 'x(m) y(m) z(m)'
-    const linesWithHeader = [header, ...currentBatchData.rawLines]
-
-    await storage.batch.save(saveFolderName, bid, linesWithHeader, currentBatchData.photos)
+    // 仅保存照片，txt 已通过流式写入
+    await storage.batch.savePhotos(saveFolderName, bid, currentBatchData.photos)
     logger.debug(
-      '[PointCloud] 点位保存成功',
+      '[PointCloud] 照片保存成功',
       bid,
-      '点云行数:',
-      linesWithHeader.length - 1,
       '照片数:',
       currentBatchData.photos.length,
-      '格式:',
-      currentBatchData.hasPolarData ? 'XYZ+极坐标(6列)' : 'XYZ(3列)',
     )
-
-    currentBatchData = { rawLines: [], photos: [], pointCount: 0, hasPolarData: false }
   } catch (e) {
-    logger.error('[PointCloud] saveCurrentBatch error', e)
+    logger.error('[PointCloud] saveCurrentBatchPhotos error', e)
     throw e
   }
 }
@@ -1589,6 +1662,13 @@ async function cleanupResourcesForExit(options = {}) {
         // 1. 清理定时器和事件监听器
         cleanupTimersAndListeners()
 
+        // 1.1 刷新流式写入缓冲区（确保异常退出时数据不丢失）
+        if (batchWriteBuffer.length > 0) {
+          await flushBatchWriteBuffer().catch((e) =>
+            logger.warn('[PointCloud] 退出时刷新写入缓冲区失败', e),
+          )
+        }
+
         // 2. 清理多站点相关资源
         cleanupMultiStationResources()
 
@@ -1924,27 +2004,85 @@ function createSessionParser() {
       await flushDeferredRender()
       stopBackgroundRender()
 
-      // 2. 保存当前点位数据
-      await saveCurrentBatch()
+      // 2. 刷新流式写入缓冲区（写入剩余不满 BATCH_WRITE_SIZE 的数据）
+      await flushBatchWriteBuffer()
 
-      // 3. 更新点位计数器
+      // 3. 保存照片数据（txt 已通过流式写入完成）
+      await saveCurrentBatchPhotos()
+
+      // 4. 更新点位计数器
       dataBatchCounter.value++
       enableSave.value = true
       batchButtons.value.push(dataBatchCounter.value)
       stopCollectionProgress()
 
-      // 4. 暂停解析器（保持蓝牙订阅）
+      // 5. 暂停解析器（保持蓝牙订阅）
       if (parser) parser.pause()
       clearAccumulationBuffer()
       resetSessionParserState()
 
-      // 5. 触发 HLMRF 多站点拼接 + PtcrPlugin 单站点拼接
+      // 6. 触发 HLMRF 多站点拼接 + PtcrPlugin 单站点拼接
       triggerHLMRFRegistration()
       triggerAutoStitch()
     },
   })
 
   return parser
+}
+
+/**
+ * 处理一批新解析的点（流式写入核心逻辑）
+ * 分离渲染上限与保存上限，并在采集过程中分批追加写入 txt 文件
+ * @param {Array} points - 解析出的点数据
+ */
+async function handlePointsStream(points) {
+  // 检查保存上限，达到后不再保存新点但继续解析指令
+  if (currentBatchData.pointCount >= SAVE_LIMIT) {
+    if (!hasSaveLimitReached) {
+      hasSaveLimitReached = true
+      logger.warn(`点位点云数量已达到保存上限 ${SAVE_LIMIT}，停止保存`)
+      showToast({ message: '点云数量已达保存上限', position: 'bottom' })
+    }
+    return
+  }
+
+  // 确保文件头已写入（首次收到数据时）
+  const firstPoint = points[0]
+  const hasPolarData =
+    firstPoint.pitch !== undefined &&
+    firstPoint.yaw !== undefined &&
+    firstPoint.distanceM !== undefined
+  await ensureTxtHeader(hasPolarData)
+
+  // 1. 渲染判断：未达渲染上限时推入渲染缓冲区
+  if (currentBatchData.pointCount < RENDER_LIMIT) {
+    // 检查缓冲区上限  超出上限时丢弃同等数量旧点位
+    if (accumulationBuffer.length > MAX_BUFFER_SIZE) {
+      const overflow = accumulationBuffer.length - MAX_BUFFER_SIZE + points.length
+      accumulationBuffer.splice(0, overflow)
+    }
+    accumulationBuffer.push(...points)
+  } else if (!hasRenderLimitReached) {
+    hasRenderLimitReached = true
+    logger.info(`渲染上限已达 ${RENDER_LIMIT}，停止渲染但继续保存`)
+    showToast({ message: '渲染上限已达，继续保存中', position: 'bottom' })
+  }
+
+  // 2. 保存判断：未达保存上限时格式化并缓存（仅取剩余容量内的点）
+  const remainingCapacity = SAVE_LIMIT - currentBatchData.pointCount
+  const pointsToSave = points.slice(0, remainingCapacity)
+  for (const p of pointsToSave) {
+    batchWriteBuffer.push(formatPointLine(p))
+  }
+  currentBatchData.pointCount += pointsToSave.length
+
+  // 更新采集进度中的点云计数
+  collectionProgress.value.currentPoints = currentBatchData.pointCount
+
+  // 3. 批量写入判断：攒满 BATCH_WRITE_SIZE 行时追加写入（异步，不阻塞 BLE 回调）
+  if (batchWriteBuffer.length >= BATCH_WRITE_SIZE) {
+    flushBatchWriteBuffer()
+  }
 }
 
 /**
@@ -1958,7 +2096,7 @@ async function subscribeToBluetoothNotifications(deviceId) {
       deviceId,
       NUS_SERVICE_UUID,
       NUS_NOTIFY_CHAR_UUID,
-      (uint8) => {
+      async (uint8) => {
         try {
           // 快速路径：非采集状态或 parser 暂停时直接跳过
           if (!isCollecting.value || !parser || parser.isPaused()) {
@@ -1972,40 +2110,7 @@ async function subscribeToBluetoothNotifications(deviceId) {
             logger.warn('parse errors', errors)
           }
           if (points && points.length > 0) {
-            // 检查单个站位点云数量上限，达到上限后不保存新点但继续解析指令
-            if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
-              return
-            }
-            // 检查缓冲区上限  超出上限时丢弃同等数量旧点位
-            if (accumulationBuffer.length > MAX_BUFFER_SIZE) {
-              const overflow = accumulationBuffer.length - MAX_BUFFER_SIZE + points.length
-              accumulationBuffer.splice(0, overflow)
-            }
-
-            accumulationBuffer.push(...points)
-            points.forEach((p) => {
-              // 根据数据类型决定保存格式
-              if (p.pitch !== undefined && p.yaw !== undefined && p.distanceM !== undefined) {
-                // 极坐标数据：标记为含极坐标格式，保存6列
-                currentBatchData.hasPolarData = true
-                currentBatchData.rawLines.push(
-                  `${p.x / 10} ${p.y / 10} ${p.z / 10} ${p.pitchDeg} ${p.yawDeg} ${p.distanceM / 10}`,
-                )
-              } else {
-                // 仅XYZ数据（单格式模式）：3列
-                currentBatchData.rawLines.push(`${p.x / 10} ${p.y / 10} ${p.z / 10}`)
-              }
-            })
-            currentBatchData.pointCount += points.length
-
-            // 更新采集进度中的点云计数
-            collectionProgress.value.currentPoints = currentBatchData.pointCount
-
-            // 达到上限时只提示，不停止订阅和采集
-            if (currentBatchData.pointCount >= MAX_POINTS_PER_BATCH) {
-              logger.warn(`点位点云数量已达到上限 ${MAX_POINTS_PER_BATCH}，停止接收`)
-              showToast({ message: '当前点位点云数量已达上限', position: 'bottom' })
-            }
+            await handlePointsStream(points)
           }
         } catch (e) {
           logger.error('notification handler error', e)
@@ -2090,8 +2195,9 @@ async function startDataStream() {
   }
 
   // 重置当前点位数据
-  currentBatchData = { rawLines: [], photos: [], pointCount: 0, hasPolarData: false }
+  currentBatchData = { photos: [], pointCount: 0, hasPolarData: false }
   clearAccumulationBuffer()
+  resetStreamWriteState()
 
   isCollecting.value = true
 
@@ -2265,7 +2371,7 @@ async function init() {
       const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent)
 
       const baseConfig = {
-        maxPoints: 5000000,
+        maxPoints: 1000000,
         initialCapacity: 100000,
         pixelRatioMax: isMobile ? 1 : 2,
         targetFps: 30,
@@ -2704,7 +2810,7 @@ onActivated(async () => {
     const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent)
 
     const baseConfig = {
-      maxPoints: 5000000,
+      maxPoints: 1000000,
       initialCapacity: 100000,
       pixelRatioMax: isMobile ? 1 : 2,
       targetFps: 30,

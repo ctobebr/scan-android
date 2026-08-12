@@ -559,6 +559,57 @@ export async function saveBatch(folderName, batchId, dataLines, photos = []) {
 }
 
 /**
+ * 仅保存批次照片（txt 已通过流式写入完成）
+ * 用于点云采集流式写入场景：txt 文件在采集过程中已分批追加写入，
+ * 会话结束时只需保存照片，无需重复写入 txt。
+ * @param {string} folderName - 文件夹名（临时文件夹名或正式文件夹名）
+ * @param {number|string} batchId - 批次ID
+ * @param {Array} photos - 照片信息数组
+ * @returns {Promise<Object>} 保存结果
+ * @throws {FilePathError} 当参数无效或保存失败时抛出
+ */
+export async function savePhotosOnly(folderName, batchId, photos = []) {
+  validateSessionId(folderName)
+  validateBatchId(batchId)
+  validatePhotosArray(photos)
+
+  const normalizedBatchId = normalizeBatchId(batchId)
+
+  logger.info('开始保存批次照片（txt 已流式写入）', {
+    folderName,
+    batchId,
+    photoCount: photos.length,
+  })
+
+  try {
+    const paths = await prepareBatchPaths(folderName, normalizedBatchId)
+    const photoUris = await savePhotos(paths.sessionPath, paths.batchFolderName, photos)
+
+    logger.info('批次照片保存成功', { folderName, photoCount: photoUris.length })
+
+    dispatchFolderUpdate('partial_update', {
+      action: 'batch_updated',
+      folders: [folderName],
+    })
+
+    return {
+      folder: paths.sessionPath,
+      batchFolder: `${paths.sessionPath}/${paths.batchFolderName}`,
+      filePath: paths.txtFilePath,
+      photoPaths: photoUris,
+      photoCount: photoUris.length,
+      folderName,
+      batchId: normalizedBatchId,
+    }
+  } catch (error) {
+    logger.error('批次照片保存失败', { folderName, batchId, error: error.message })
+    throw error instanceof FilePathError
+      ? error
+      : new FilePathError(ErrorCodes.FILESYSTEM_ERROR, `保存批次照片失败: ${error.message}`)
+  }
+}
+
+/**
  * 列出指定会话下的所有批次
  * @param {string} sessionId - 会话ID
  * @returns {Promise<string[]>} 批次名称数组

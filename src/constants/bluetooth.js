@@ -91,6 +91,10 @@ export const CONTROL_COMMANDS = Object.freeze({
   CMD_SET_OUTPUT_POLAR: 0x16,
   /** 设置俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
   CMD_SET_PITCH_OFFSET: 0x17,
+  /** 设置水平拍照角度步进 data{float:步进值} 单位:度 data位长度4字节 */
+  CMD_SET_YAW_STEP: 0x18,
+  /** 设置三个俯仰角目标 data{float:pitch0,float:pitch1,float:pitch2} 单位:度 data位长度12字节 */
+  CMD_SET_PITCH_TARGETS: 0x19,
   // /** 设置速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   // CMD_SET_V_PID: 0x1E,
   // /** 设置角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
@@ -125,6 +129,10 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_READ_OUTPUT_POLAR: 0x36,
   /** 读取俯仰角零偏 data{float:零偏值} 单位:度 data位长度4字节 */
   CMD_READ_PITCH_OFFSET: 0x37,
+  /** 读取水平拍照角度步进 data{float:步进值} 单位:度 data位长度4字节 */
+  CMD_READ_YAW_STEP: 0x38,
+  /** 读取三个俯仰角目标 data{float:pitch0,float:pitch1,float:pitch2} 单位:度 data位长度12字节 */
+  CMD_READ_PITCH_TARGETS: 0x39,
   // /** 读取速度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
   // CMD_READ_V_PID: 0x3E,
   // /** 读取角度环PID data{uint32 axis:pitch/yaw,float:P,float:I,float:D} data位长度16字节 */
@@ -181,5 +189,9 @@ export const SETTING_DEFAULT_VALUES = {
   //   d: 0
   // },
   /** 俯仰角零偏默认值（度） */
-  PITCH_OFFSET: 0.0
+  PITCH_OFFSET: 0.0,
+  /** 水平拍照角度步进默认值（度） */
+  YAW_STEP: 30.0,
+  /** 三个俯仰角目标默认值（度） */
+  PITCH_TARGETS: { pitch0: -42, pitch1: -72, pitch2: -102 }
 }

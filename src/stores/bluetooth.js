@@ -548,6 +548,26 @@ export const useBluetoothStore = defineStore('bluetooth', {
       )
     },
 
+    async handleSendYawStep(yawStep) {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendSetYawStep(...args),
+        [yawStep],
+        '发送设置水平拍照角度步进指令成功',
+        '发送设置水平拍照角度步进指令失败',
+        true
+      )
+    },
+
+    async handleSendPitchTargets(pitch0, pitch1, pitch2) {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendSetPitchTargets(...args),
+        [pitch0, pitch1, pitch2],
+        '发送设置俯仰角目标指令成功',
+        '发送设置俯仰角目标指令失败',
+        true
+      )
+    },
+
     // /**
     //  * 发送读取速度环PID指令
     //  * @param {string} axis - 轴，'x'或'y'
@@ -585,6 +605,26 @@ export const useBluetoothStore = defineStore('bluetooth', {
         [],
         '发送读取俯仰角零偏指令成功',
         '发送读取俯仰角零偏指令失败',
+        true
+      )
+    },
+
+    async handleReadYawStep() {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendReadYawStep(...args),
+        [],
+        '发送读取水平拍照角度步进指令成功',
+        '发送读取水平拍照角度步进指令失败',
+        true
+      )
+    },
+
+    async handleReadPitchTargets() {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendReadPitchTargets(...args),
+        [],
+        '发送读取俯仰角目标指令成功',
+        '发送读取俯仰角目标指令失败',
         true
       )
     },
