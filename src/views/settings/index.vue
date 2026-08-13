@@ -1126,6 +1126,9 @@ const init = async () => {
     }
     parser = new parseBleData({
       enableDebug: true,
+      onSendAck: async (cmd) => {
+        return bluetoothStore.handleSendAck(cmd)
+      },
       onCalibParamResponse: (data) => {
         handleCalibParamResponse(data)
       },

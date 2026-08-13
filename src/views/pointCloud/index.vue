@@ -160,7 +160,7 @@ import { StatusBar } from '@capacitor/status-bar'
 import { bluetoothService } from '@/services/bluetooth'
 import cameraHelper from '@/utils/device/camera'
 import { parseBleData } from '@/utils/format/bleProtocol'
-import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
+import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, CONTROL_COMMANDS } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
 // 导入全局日志工具
 import { createLogger } from '@/utils/logger'
@@ -1535,9 +1535,21 @@ function cleanupRenderer() {
 async function cleanupBluetoothSession() {
   try {
     bluetoothStore.setCleanupStatus(true) // 清理中
-    await stopSessionParser() // 取消订阅
 
-    bluetoothStore.handleSendEnd() // 发送结束指令-----取消订阅是取消接收下位机消息，上位机依旧可以给下位机发送消息
+    // 先发送 0x02 带ACK等待（在取消订阅之前，确保能收到ACK）
+    if (parser && !parser.isPaused()) {
+      const stopOk = await parser._sendWithAck(
+        () => bluetoothStore.handleSendEnd(),
+        CONTROL_COMMANDS.CMD_STOP,  // 0x02
+      )
+      if (!stopOk) {
+        logger.warn('0x02 发送失败（未收到ACK），继续执行清理')
+      }
+    } else {
+      bluetoothStore.handleSendEnd()
+    }
+
+    await stopSessionParser() // 取消订阅
   } catch (e) {
     logger.warn('[PointCloudPage] 清理会话失败', e)
   } finally {
@@ -1966,6 +1978,9 @@ function createSessionParser() {
     onSendCameraReady: async () => {
       return bluetoothStore.handleSendCameraNextPhoto()
     },
+    onSendAck: async (cmd) => {
+      return bluetoothStore.handleSendAck(cmd)
+    },
     onTakePhoto: async ({ fileBaseName, meta }) => {
       try {
         const saveFolderName =
@@ -2228,7 +2243,21 @@ async function startDataStream() {
   // 启动采集进度显示
   startCollectionProgress()
 
-  bluetoothStore.handleSendStart()
+  // 发送 0x01 启动扫描（带 ACK 超时重传）
+  const startOk = await parser._sendWithAck(
+    () => bluetoothStore.handleSendStart(),
+    CONTROL_COMMANDS.CMD_START,  // 0x01
+  )
+
+  if (!startOk) {
+    logger.error('0x01 发送失败（未收到ACK）')
+    isCollecting.value = false
+    parser.pause()
+    stopCollectionProgress()
+    showToast({ message: '采集启动失败，请重试', position: 'bottom', duration: 3000 })
+    return
+  }
+
   logger.debug('startDataStream click', '开始新点位采集，点位编号:', dataBatchCounter.value + 1)
 }
 

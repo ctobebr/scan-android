@@ -641,6 +641,19 @@ export const useBluetoothStore = defineStore('bluetooth', {
         '发送拍照准备就绪指令失败'
       )
     },
+    /**
+     * 发送 ACK 确认帧(0xE0)
+     * @param {number} ackCmd - 被确认的命令字
+     * @description 接收方收到指令后立即回复 ACK，确认帧已收到
+     */
+    async handleSendAck(ackCmd) {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendAck(...args),
+        [ackCmd],
+        null,
+        '发送ACK指令失败'
+      )
+    },
     // ==========结束： 读取参数方法 ==========
     /**
      * 设置清理状态

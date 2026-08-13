@@ -3,7 +3,7 @@
  * 职责：处理所有设备控制相关的指令发送
  */
 
-import { CONTROL_COMMANDS } from '@/constants/bluetooth'
+import { CONTROL_COMMANDS, ACK_COMMANDS } from '@/constants/bluetooth'
 import { validateNumber, validateBoolean, validateNumberRange, validateAxis } from '../utils/validator.js'
 import { createLogger } from '@/utils/logger'
 
@@ -456,6 +456,33 @@ export class ControlCommands {
       )
     } catch (error) {
       logger.withContext({ deviceId, command: 'CMD_CTRL_CAMERA_NEXT_PHOTO' }).error('发送拍照准备就绪指令失败', error)
+      throw error
+    }
+  }
+
+  /**
+   * 发送 ACK 确认帧(0xE0)
+   * @description 接收方收到指令后立即回复 ACK，确认帧已收到（不等业务动作）
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} ackCmd - 被确认的命令字
+   */
+  async sendAck(deviceId, serviceUUID, characteristicUUID, ackCmd) {
+    validateNumber(ackCmd, 'ackCmd')
+    const buffer = new ArrayBuffer(1)
+    const view = new DataView(buffer)
+    view.setUint8(0, ackCmd)
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        ACK_COMMANDS.CMD_ACK,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_ACK' }).error('发送ACK指令失败', error)
       throw error
     }
   }

@@ -146,6 +146,30 @@ export const DEVICE_DATA_COMMANDS = Object.freeze({
   CMD_CTRL_CAMERA_START: 0x83,
 })
 
+// ========== ACK 确认命令（双向）==========
+
+/**
+ * ACK 确认命令枚举（双向：上位机和下位机均可发送/接收）
+ * @constant {Object}
+ */
+export const ACK_COMMANDS = Object.freeze({
+  /** ACK 确认帧 data{uint8:被确认的命令字} */
+  CMD_ACK: 0xe0,
+})
+
+/**
+ * ACK 超时时间（毫秒）
+ * BLE 连接间隔 15-50ms，300ms 提供 3-10 倍往返余量，匹配主流 BLE 应用实践
+ * @constant {number}
+ */
+export const ACK_TIMEOUT_MS = 300
+
+/**
+ * ACK 最大重传次数（共 3 次尝试）
+ * @constant {number}
+ */
+export const ACK_MAX_RETRY = 2
+
 // ========== 协议限制常量 ==========
 
 /**

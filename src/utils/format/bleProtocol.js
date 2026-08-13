@@ -28,6 +28,9 @@
 import {
   CONTROL_COMMANDS,
   DEVICE_DATA_COMMANDS,
+  ACK_COMMANDS,
+  ACK_TIMEOUT_MS,
+  ACK_MAX_RETRY,
   PROTOCOL_HEADER_HIGH,
   PROTOCOL_HEADER_LOW,
   MAX_DATA_LENGTH,
@@ -103,6 +106,12 @@ export class parseBleData {
 
     // 解析器暂停状态（方案C：页面级订阅，站位间切换时不取消订阅，仅暂停解析）
     this._paused = false
+
+    // ====== ACK 可靠传输状态 ======
+    this._ackTimers = {}          // ACK 超时定时器 { cmd_key: timerId }
+    this._ackResolvers = {}       // ACK Promise resolvers { cmd_key: resolveFn }
+    this.lastProcessedPhoto = { yaw: 0, pitch: 0 }  // 幂等：最后处理的拍照角度（弧度）
+    this.photoSessionEnded = false                  // 幂等：拍照会话是否已结束（0x82已处理过）
   }
 
   pause() {
@@ -110,6 +119,7 @@ export class parseBleData {
     this.resetProtocolState()
     this.protocolState.accumulatedPoints = []
     this._clearPendingMergeData()
+    this._clearAllAckTimers()
   }
 
   resume() {
@@ -139,6 +149,11 @@ export class parseBleData {
 
     // 重置照片重命名标志
     this.reNameFlag = 0
+
+    // 重置 ACK 状态
+    this._clearAllAckTimers()
+    this.photoSessionEnded = false
+    this.lastProcessedPhoto = { yaw: 0, pitch: 0 }
   }
 
   isPaused() {
@@ -179,6 +194,7 @@ export class parseBleData {
       // [CONTROL_COMMANDS.CMD_START]: this._handleStart,
       // [CONTROL_COMMANDS.CMD_STOP]: this._handleStop,
 
+      [ACK_COMMANDS.CMD_ACK]: this._handleAck,
       [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START]: this._handleStartTakePhoto,
       [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE]: this._handleEndTakePhoto,
       [DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA]: this._handleTakePhoto,
@@ -506,15 +522,126 @@ export class parseBleData {
   //   logger.debug(' CMD_STOP (0x' + CONTROL_COMMANDS.CMD_STOP.toString(16) + ') received')
   // }
 
+  // ======================== ACK 可靠传输方法 ========================
+
+  /**
+   * 处理收到的 ACK 帧（下位机确认帧已收到）
+   * @param {Uint8Array} data - ACK 数据（1字节：被确认的命令字）
+   */
+  _handleAck(data) {
+    if (!data || data.length < 1) return
+    const ackedCmd = data[0]
+    logger.debug(`收到ACK: 0x${ackedCmd.toString(16).padStart(2, '0')}`)
+    this._clearAckTimeout(ackedCmd)
+  }
+
+  /**
+   * 发送 ACK 给下位机（立即发送，不等业务逻辑）
+   * @param {number} cmd - 被确认的命令字
+   */
+  _sendAck(cmd) {
+    if (this.options.onSendAck) {
+      this.options.onSendAck(cmd).catch((err) => {
+        logger.error('发送ACK失败', { cmd: `0x${cmd.toString(16)}`, err })
+      })
+    }
+  }
+
+  /**
+   * 发送需要 ACK 确认的指令（带超时重传）
+   * @param {Function} sendFn - 实际发送函数（返回 Promise）
+   * @param {number} cmd - 命令字（用于匹配 ACK）
+   * @param {number} [timeoutMs=300] - 超时时间(ms)
+   * @param {number} [maxRetries=2] - 最大重试次数
+   * @returns {Promise<boolean>} true=收到ACK, false=重传耗尽
+   */
+  async _sendWithAck(sendFn, cmd, timeoutMs = ACK_TIMEOUT_MS, maxRetries = ACK_MAX_RETRY) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        await sendFn()
+      } catch (err) {
+        logger.error(`发送指令 0x${cmd.toString(16)} 失败`, err)
+      }
+
+      const ackReceived = await this._waitForAck(cmd, timeoutMs)
+      if (ackReceived) return true
+
+      if (attempt < maxRetries) {
+        logger.warn(`指令 0x${cmd.toString(16)} 未收到ACK，第${attempt + 1}次重传`)
+      }
+    }
+    logger.error(`指令 0x${cmd.toString(16)} 重传${maxRetries}次后仍未收到ACK`)
+    return false
+  }
+
+  /**
+   * 等待对应命令的 ACK
+   * @param {number} cmd - 命令字
+   * @param {number} timeoutMs - 超时时间
+   * @returns {Promise<boolean>}
+   */
+  _waitForAck(cmd, timeoutMs) {
+    return new Promise((resolve) => {
+      const key = `ack_0x${cmd.toString(16)}`
+      this._ackResolvers[key] = resolve
+
+      this._ackTimers[key] = setTimeout(() => {
+        delete this._ackResolvers[key]
+        delete this._ackTimers[key]
+        resolve(false)
+      }, timeoutMs)
+    })
+  }
+
+  /**
+   * 清除单个命令的 ACK 超时（收到 ACK 时调用）
+   * @param {number} cmd - 命令字
+   */
+  _clearAckTimeout(cmd) {
+    const key = `ack_0x${cmd.toString(16)}`
+    if (this._ackTimers[key]) {
+      clearTimeout(this._ackTimers[key])
+      delete this._ackTimers[key]
+    }
+    if (this._ackResolvers[key]) {
+      this._ackResolvers[key](true)
+      delete this._ackResolvers[key]
+    }
+  }
+
+  /**
+   * 清除所有 ACK 超时定时器（pause/reset/断开连接时调用）
+   */
+  _clearAllAckTimers() {
+    if (this._ackTimers) {
+      Object.values(this._ackTimers).forEach((t) => clearTimeout(t))
+      this._ackTimers = {}
+    }
+    if (this._ackResolvers) {
+      Object.values(this._ackResolvers).forEach((r) => r(false))
+      this._ackResolvers = {}
+    }
+  }
+
   _handleStartTakePhoto() {
-    // 收到开始拍照指令：进入拍照预览并让调用方启动预览
-    // 幂等性检查：如果预览正在启动中(active=true但previewStarted=false)，忽略重复的0x83指令
+    // ① 立即回复 ACK（不等业务逻辑）
+    this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START)  // 0x83
+
+    // ② 幂等性检查：如果预览正在启动中，忽略重复的0x83指令
     if (this.protocolState.photoSession.active && !this.protocolState.photoSession.previewStarted) {
       logger.debug('预览启动中，忽略重复的0x83指令')
       return
     }
+    // ② 幂等性检查：预览已启动，仅重发0x91
+    if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
+      logger.debug('预览已启动，忽略重复的0x83指令，重发0x91')
+      this._sendCameraReadyNotification()
+      return
+    }
+
     this.protocolState.photoSession.active = true
     this.protocolState.photoSession.previewStarted = false
+    this.photoSessionEnded = false  // 新拍照会话开始，重置结束标志
 
     if (this.options.onStartPreview) {
       this.cameraReadyPromise = Promise.resolve()
@@ -547,11 +674,12 @@ export class parseBleData {
    */
   async _sendCameraReadyNotification() {
     if (this.options.onSendCameraReady) {
-      try {
-        await this.options.onSendCameraReady()
-        // logger.debug('已发送拍照准备就绪通知(0x91)')
-      } catch (err) {
-        logger.error('发送拍照准备就绪通知失败', err)
+      const ok = await this._sendWithAck(
+        () => this.options.onSendCameraReady(),
+        CONTROL_COMMANDS.CMD_CTRL_CAMERA_NEXT_PHOTO,  // 0x91
+      )
+      if (!ok) {
+        logger.error('0x91 发送失败（未收到ACK），拍照流程可能中断')
       }
     }
   }
@@ -561,6 +689,26 @@ export class parseBleData {
       // logger.debug('_handleTakePhoto start', { data: uint8ArrayToHex(data) })
     }
     logger.info('CMD_CTRL_CAMERA received 接收到拍照指令  0x81 执行拍照逻辑')
+
+    // ① 立即回复 ACK（不等拍照完成）
+    this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA)  // 0x81
+
+    // ② 角度幂等检查：对比上次处理的拍照角度（容差 0.035 rad ≈ 2°）
+    const metaForIdempotency = this.parseBinaryTakePhotoData(data)
+    if (metaForIdempotency) {
+      if (
+        Math.abs(metaForIdempotency.yawRad - this.lastProcessedPhoto.yaw) < 0.035 &&
+        Math.abs(metaForIdempotency.pitchRad - this.lastProcessedPhoto.pitch) < 0.035
+      ) {
+        logger.debug('_handleTakePhoto: 重复的拍照角度，忽略（已回复ACK）')
+        return
+      }
+      // 记录本次角度（非重复才更新）
+      this.lastProcessedPhoto = {
+        yaw: metaForIdempotency.yawRad,
+        pitch: metaForIdempotency.pitchRad,
+      }
+    }
 
     // --- 将拍照请求加入处理流程 ---
     return new Promise((resolve, reject) => {
@@ -674,6 +822,16 @@ export class parseBleData {
     })
   }
   _handleEndTakePhoto() {
+    // ① 立即回复 ACK
+    this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE)  // 0x82
+
+    // ② 幂等检查
+    if (this.photoSessionEnded) {
+      logger.debug('_handleEndTakePhoto: 拍照会话已结束，忽略重复0x82')
+      return
+    }
+    this.photoSessionEnded = true
+
     logger.debug('收到结束拍照请求')
 
     // --- 检查是否有拍照正在进行 ---

@@ -298,6 +298,10 @@ export class BluetoothService {
     return this.control.sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID)
   }
 
+  async sendAck(deviceId, serviceUUID, characteristicUUID, ackCmd) {
+    return this.control.sendAck(deviceId, serviceUUID, characteristicUUID, ackCmd)
+  }
+
   // ==================== 查询指令代理 ====================
 
   async sendReadPitchOffset(deviceId, serviceUUID, characteristicUUID) {
