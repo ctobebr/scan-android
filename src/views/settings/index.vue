@@ -109,13 +109,13 @@
 
         <div class="dual-row">
           <div class="axis-item">
-            <label>pitch <span class="unit">(rad/ms)</span></label>
+            <label>pitch <span class="unit">(rpm)</span></label>
             <van-field
               v-model="speedParams.pitchSpeed"
               type="text"
-              placeholder="0.00000"
+              placeholder="16.7"
               inputmode="decimal"
-              @blur="() => validateAndFormat('speed', 'pitchSpeed', 5)"
+              @blur="() => validateAndFormat('speed', 'pitchSpeed', 1)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!speedErrors.pitchSpeed"
@@ -125,13 +125,13 @@
             </div>
           </div>
           <div class="axis-item">
-            <label>yaw <span class="unit">(rad/ms)</span></label>
+            <label>yaw <span class="unit">(rpm)</span></label>
             <van-field
               v-model="speedParams.yawSpeed"
               type="text"
-              placeholder="0.00005"
+              placeholder="2.9"
               inputmode="decimal"
-              @blur="() => validateAndFormat('speed', 'yawSpeed', 5)"
+              @blur="() => validateAndFormat('speed', 'yawSpeed', 1)"
               @input="handleNumberInput"
               :disabled="deviceDisconnected"
               :error="!!speedErrors.yawSpeed"
@@ -1309,10 +1309,10 @@ function handleRotateSpeedResponse(data) {
   // 将收到的转动速度值更新到UI
   if (data && typeof data === 'object') {
     if (data.pitchSpeed !== undefined) {
-      speedParams.pitchSpeed = parseFloat(data.pitchSpeed).toFixed(5)
+      speedParams.pitchSpeed = parseFloat(data.pitchSpeed).toFixed(1)
     }
     if (data.yawSpeed !== undefined) {
-      speedParams.yawSpeed = parseFloat(data.yawSpeed).toFixed(5)
+      speedParams.yawSpeed = parseFloat(data.yawSpeed).toFixed(1)
     }
   }
   // 清除对应字段的错误
@@ -1739,8 +1739,8 @@ const resetToDefault = async () => {
     calibParams.y = SETTING_DEFAULT_VALUES.CALIB.y.toFixed(2)
     calibParams.z = SETTING_DEFAULT_VALUES.CALIB.z.toFixed(2)
 
-    speedParams.pitchSpeed = SETTING_DEFAULT_VALUES.SPEED.pitch.toFixed(5)
-    speedParams.yawSpeed = SETTING_DEFAULT_VALUES.SPEED.yaw.toFixed(5)
+    speedParams.pitchSpeed = SETTING_DEFAULT_VALUES.SPEED.pitch.toFixed(1)
+    speedParams.yawSpeed = SETTING_DEFAULT_VALUES.SPEED.yaw.toFixed(1)
 
     scanTime.value.seconds = SETTING_DEFAULT_VALUES.SCAN_TIME // 数字，不转字符串
 

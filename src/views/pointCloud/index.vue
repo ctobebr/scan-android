@@ -593,17 +593,24 @@ function getCurrentTxtFilePath() {
  * @param {boolean} hasPolarData - 是否为极坐标格式
  */
 async function ensureTxtHeader(hasPolarData) {
+  // 必须在 await 之前同步设置标志，防止 BLE 高频回调导致的竞态重复写入
   if (isTxtHeaderWritten) return
-
-  const filePath = getCurrentTxtFilePath()
-  // 确保批次目录存在（appendFile 不会自动创建父目录）
-  await storage.file.ensureDir(filePath.substring(0, filePath.lastIndexOf('/')))
-
-  const header = hasPolarData
-    ? 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)\n'
-    : 'x(m) y(m) z(m)\n'
-  await appendFile(filePath, header, { encoding: 'utf8' })
   isTxtHeaderWritten = true
+
+  try {
+    const filePath = getCurrentTxtFilePath()
+    // 确保批次目录存在（appendFile 不会自动创建父目录）
+    await storage.file.ensureDir(filePath.substring(0, filePath.lastIndexOf('/')))
+
+    const header = hasPolarData
+      ? 'x(m) y(m) z(m) pitchDeg(Deg) yawDeg(Deg) distance(m)\n'
+      : 'x(m) y(m) z(m)\n'
+    await appendFile(filePath, header, { encoding: 'utf8' })
+  } catch (e) {
+    // 写入失败时重置标志，允许下次重试
+    isTxtHeaderWritten = false
+    throw e
+  }
 }
 
 /**
@@ -782,20 +789,18 @@ async function parseAndRenderTxt(txtRelPath) {
   }
   const rawText = readResult.data
   const lines = rawText.trim().split('\n')
-  const firstLineMatch = lines[0].match(/[a-zA-Z]/)
   const points = []
-  const startLine = firstLineMatch ? 1 : 0
-  for (let i = startLine; i < lines.length; i++) {
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
     const parts = line.split(/\s+/)
-    if (parts.length >= 3) {
-      points.push({
-        x: parseFloat(parts[0]),
-        y: parseFloat(parts[1]),
-        z: parseFloat(parts[2]),
-      })
-    }
+    if (parts.length < 3) continue
+    // 跳过非数据行（如 header "x(m) y(m) z(m)" 或格式损坏的行）
+    const x = parseFloat(parts[0])
+    const y = parseFloat(parts[1])
+    const z = parseFloat(parts[2])
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) continue
+    points.push({ x, y, z })
   }
   if (points.length > 0 && renderer) {
     renderer.resetPointCloud()

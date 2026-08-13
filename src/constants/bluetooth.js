@@ -193,8 +193,8 @@ export const MAX_PACKET_SIZE = 512
 export const SETTING_DEFAULT_VALUES = {
   /** 标定参数默认值 */
   CALIB: { x: -52.52, y: 10, z: 1 },
-  /** 转动速度默认值 */
-  SPEED: { pitch: 0.002, yaw: 0.00005 },
+  /** 转动速度默认值（单位：rpm） */
+  SPEED: { pitch: 16.7, yaw: 2.9 },
   /** 扫描时间默认值（秒） */
   SCAN_TIME: 250,
   /** 俯仰角上下限默认值（度）- 上限为仰角170°，下限为俯角-70° */
