@@ -47,6 +47,49 @@ const logger = createLogger('BleProtocol')
 import { useBluetoothStore } from '@/stores/bluetooth'
 const bluetoothStore = useBluetoothStore()
 
+// 指令名称映射表（用于日志可读性）
+const CMD_NAMES = {
+  0x01: 'START[启动扫描]',
+  0x02: 'STOP[停止扫描]',
+  0x03: 'ROTATE[转动到目标]',
+  0x11: 'SET_CALIB[设置校准参数]',
+  0x12: 'SET_SPEED[设置转速]',
+  0x13: 'SET_SCAN_TIME[设置扫描时间]',
+  0x14: 'SET_PITCH_LIMIT[设置俯仰限位]',
+  0x15: 'SET_OUTPUT_XYZ[设置XYZ输出]',
+  0x16: 'SET_OUTPUT_POLAR[设置极坐标输出]',
+  0x17: 'SET_PITCH_OFFSET[设置俯仰零偏]',
+  0x18: 'SET_YAW_STEP[设置偏航步进]',
+  0x19: 'SET_PITCH_TARGETS[设置俯仰目标]',
+  0x31: 'READ_CALIB[读校准参数]',
+  0x32: 'READ_SPEED[读转速]',
+  0x33: 'READ_SCAN_TIME[读扫描时间]',
+  0x34: 'READ_PITCH_LIMIT[读俯仰限位]',
+  0x35: 'READ_OUTPUT_XYZ[读XYZ输出]',
+  0x36: 'READ_OUTPUT_POLAR[读极坐标输出]',
+  0x37: 'READ_PITCH_OFFSET[读俯仰零偏]',
+  0x38: 'READ_YAW_STEP[读偏航步进]',
+  0x39: 'READ_PITCH_TARGETS[读俯仰目标]',
+  0x81: 'CAMERA[拍照指令]',
+  0x82: 'CAMERA_COMPLETE[拍照结束]',
+  0x83: 'CAMERA_START[拍照开始]',
+  0x91: 'CAMERA_NEXT[拍照就绪]',
+  0xA1: 'POINT_XYZ[点云XYZ]',
+  0xA2: 'POINT_POLAR[点云极坐标]',
+  0xE0: 'ACK[确认帧]',
+}
+
+/**
+ * 获取指令名称（用于日志输出）
+ * @param {number} cmd - 命令字
+ * @returns {string} 格式化的指令名称
+ */
+function cmdName(cmd) {
+  const hex = `0x${cmd.toString(16).padStart(2, '0').toUpperCase()}`
+  const name = CMD_NAMES[cmd] || 'UNKNOWN'
+  return `${hex} ${name}`
+}
+
 // helper to convert Uint8Array to hex string
 function uint8ArrayToHex(arr) {
   if (!arr) return ''
@@ -221,8 +264,11 @@ export class parseBleData {
     }
     const handler = commandHandlers[cmd]
     if (handler) {
-      // 调用对应的处理器
-      handler.call(this, data)
+      // 调用对应的处理器（支持async handler，不阻塞协议解析主循环）
+      const result = handler.call(this, data)
+      if (result && typeof result.catch === 'function') {
+        result.catch((err) => logger.error('Handler error', { cmd: `0x${cmd.toString(16)}`, err }))
+      }
     } else {
       logger.warn('Received unknown command', { cmd: `0x${cmd.toString(16).padStart(2, '0')}` })
     }
@@ -531,19 +577,23 @@ export class parseBleData {
   _handleAck(data) {
     if (!data || data.length < 1) return
     const ackedCmd = data[0]
-    logger.debug(`收到ACK: 0x${ackedCmd.toString(16).padStart(2, '0')}`)
+    logger.info(`◀── 收到ACK  下位机确认收到 ${cmdName(ackedCmd)}`)
     this._clearAckTimeout(ackedCmd)
   }
 
   /**
-   * 发送 ACK 给下位机（立即发送，不等业务逻辑）
+   * 发送 ACK 给下位机（返回Promise，调用方可await确保ACK发送完成后再执行业务逻辑）
    * @param {number} cmd - 被确认的命令字
+   * @returns {Promise<void>}
    */
-  _sendAck(cmd) {
+  async _sendAck(cmd) {
     if (this.options.onSendAck) {
-      this.options.onSendAck(cmd).catch((err) => {
-        logger.error('发送ACK失败', { cmd: `0x${cmd.toString(16)}`, err })
-      })
+      try {
+        logger.info(`──▶ 发送ACK  确认收到下位机的 ${cmdName(cmd)}`)
+        await this.options.onSendAck(cmd)
+      } catch (err) {
+        logger.error('发送ACK失败', { cmd: cmdName(cmd), err })
+      }
     }
   }
 
@@ -558,19 +608,22 @@ export class parseBleData {
   async _sendWithAck(sendFn, cmd, timeoutMs = ACK_TIMEOUT_MS, maxRetries = ACK_MAX_RETRY) {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        if (attempt === 0) {
+          logger.info(`──▶ 发送指令 ${cmdName(cmd)}（等待ACK确认）`)
+        }
         await sendFn()
       } catch (err) {
-        logger.error(`发送指令 0x${cmd.toString(16)} 失败`, err)
+        logger.error(`发送指令 ${cmdName(cmd)} 失败`, err)
       }
 
       const ackReceived = await this._waitForAck(cmd, timeoutMs)
       if (ackReceived) return true
 
       if (attempt < maxRetries) {
-        logger.warn(`指令 0x${cmd.toString(16)} 未收到ACK，第${attempt + 1}次重传`)
+        logger.warn(`◀── ${cmdName(cmd)} 未收到ACK，${timeoutMs}ms超时，第${attempt + 1}次重传`)
       }
     }
-    logger.error(`指令 0x${cmd.toString(16)} 重传${maxRetries}次后仍未收到ACK`)
+    logger.error(`◀── ${cmdName(cmd)} 重传${maxRetries}次后仍未收到ACK，放弃`)
     return false
   }
 
@@ -623,25 +676,24 @@ export class parseBleData {
     }
   }
 
-  _handleStartTakePhoto() {
-    // ① 立即回复 ACK（不等业务逻辑）
-    this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START)  // 0x83
-
-    // ② 幂等性检查：如果预览正在启动中，忽略重复的0x83指令
-    if (this.protocolState.photoSession.active && !this.protocolState.photoSession.previewStarted) {
-      logger.debug('预览启动中，忽略重复的0x83指令')
-      return
-    }
-    // ② 幂等性检查：预览已启动，仅重发0x91
-    if (this.protocolState.photoSession.active && this.protocolState.photoSession.previewStarted) {
-      logger.debug('预览已启动，忽略重复的0x83指令，重发0x91')
-      this._sendCameraReadyNotification()
+  async _handleStartTakePhoto() {
+    // ① 幂等性检查：如果已经在拍照会话中，fire-and-forget发送ACK后返回
+    // 关键：active必须在await _sendAck之前设置，否则await期间到达的重复0x83
+    // 会通过幂等检查，触发多次await _sendAck，导致BLE写队列拥塞
+    if (this.protocolState.photoSession.active) {
+      this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START)  // fire-and-forget
+      logger.debug('◀── 收到重复 0x83 CAMERA_START[拍照开始]，已忽略（预览已启动）')
       return
     }
 
+    // ② 先标记active=true，防止await期间重复0x83进入业务逻辑
     this.protocolState.photoSession.active = true
     this.protocolState.photoSession.previewStarted = false
     this.photoSessionEnded = false  // 新拍照会话开始，重置结束标志
+
+    // ③ 确保ACK在预览启动之前发送完成（await BLE写操作）
+    logger.info('◀── 收到 0x83 CAMERA_START[拍照开始]，准备启动相机预览')
+    await this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START)  // 0x83
 
     if (this.options.onStartPreview) {
       this.cameraReadyPromise = Promise.resolve()
@@ -650,7 +702,7 @@ export class parseBleData {
           if (this.protocolState.photoSession.active) {
             this.protocolState.photoSession.previewStarted = !!ok
             if (ok) {
-              logger.info('相机预览已通过回调启动')
+              logger.info('相机预览启动成功，通知下位机可以拍照')
               this._sendCameraReadyNotification()
             }
           }
@@ -664,7 +716,6 @@ export class parseBleData {
     } else {
       this.cameraReadyPromise = Promise.resolve(false)
     }
-    logger.info('_handleStartTakePhoto over')
   }
 
   /**
@@ -679,19 +730,16 @@ export class parseBleData {
         CONTROL_COMMANDS.CMD_CTRL_CAMERA_NEXT_PHOTO,  // 0x91
       )
       if (!ok) {
-        logger.error('0x91 发送失败（未收到ACK），拍照流程可能中断')
+        logger.error('0x91 CAMERA_NEXT[拍照就绪] 发送失败，拍照流程可能中断')
       }
     }
   }
 
   async _handleTakePhoto(data) {
-    if (this.enableDebugLogging) {
-      // logger.debug('_handleTakePhoto start', { data: uint8ArrayToHex(data) })
-    }
-    logger.info('CMD_CTRL_CAMERA received 接收到拍照指令  0x81 执行拍照逻辑')
+    logger.info('◀── 收到 0x81 CAMERA[拍照指令]，准备执行拍照')
 
-    // ① 立即回复 ACK（不等拍照完成）
-    this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA)  // 0x81
+    // ① 确保ACK在拍照业务逻辑之前发送完成（await BLE写操作）
+    await this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA)  // 0x81
 
     // ② 角度幂等检查：对比上次处理的拍照角度（容差 0.035 rad ≈ 2°）
     const metaForIdempotency = this.parseBinaryTakePhotoData(data)
@@ -700,7 +748,7 @@ export class parseBleData {
         Math.abs(metaForIdempotency.yawRad - this.lastProcessedPhoto.yaw) < 0.035 &&
         Math.abs(metaForIdempotency.pitchRad - this.lastProcessedPhoto.pitch) < 0.035
       ) {
-        logger.debug('_handleTakePhoto: 重复的拍照角度，忽略（已回复ACK）')
+        logger.debug('◀── 收到重复 0x81 CAMERA[拍照指令]，角度未变，已忽略（ACK已回复）')
         return
       }
       // 记录本次角度（非重复才更新）
@@ -740,6 +788,8 @@ export class parseBleData {
           const yawStr = meta.yawDeg !== undefined ? meta.yawDeg.toFixed(2) : meta.yawRaw
           const pitchStr = meta.pitchDeg !== undefined ? meta.pitchDeg.toFixed(2) : meta.pitchRaw
           const fileBaseName = `${currentBatchCounter}_${pitchStr}_${yawStr}`
+
+          logger.info(`📸 拍照中 yaw=${yawStr}° pitch=${pitchStr}°`)
 
           if (!this.protocolState.photoSession.active) {
             logger.warn('收到拍照命令但未处于拍照会话，自动进入预览')
@@ -782,6 +832,7 @@ export class parseBleData {
              * 测试代码结束============
              */
             await this.options.onTakePhoto({ fileBaseName, meta }) // 关闭测试代码后，启用这行代码
+            logger.info(`──▶ 发送 0x91 CAMERA_NEXT[拍照就绪]（通知下位机拍下一张）`)
           }
         } catch (err) {
           logger.error('HandleTakePhoto 内部发生错误:', err)
@@ -821,18 +872,18 @@ export class parseBleData {
       }
     })
   }
-  _handleEndTakePhoto() {
-    // ① 立即回复 ACK
-    this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE)  // 0x82
+  async _handleEndTakePhoto() {
+    // ① 确保ACK在业务逻辑之前发送完成（await BLE写操作）
+    await this._sendAck(DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE)  // 0x82
 
     // ② 幂等检查
     if (this.photoSessionEnded) {
-      logger.debug('_handleEndTakePhoto: 拍照会话已结束，忽略重复0x82')
+      logger.debug('◀── 收到重复 0x82 CAMERA_COMPLETE[拍照结束]，已忽略')
       return
     }
     this.photoSessionEnded = true
 
-    logger.debug('收到结束拍照请求')
+    logger.info('◀── 收到 0x82 CAMERA_COMPLETE[拍照结束]，准备退出预览')
 
     // --- 检查是否有拍照正在进行 ---
     if (this.isProcessingPhoto) {
@@ -860,7 +911,7 @@ export class parseBleData {
         this.protocolState.photoSession.previewStarted = false
       }
       this.cameraReadyPromise = null
-      logger.debug('[_handleEndTakePhoto  结束拍照退出相机预览页面')
+      logger.info('✅ 拍照会话结束，已退出相机预览')
 
       if (
         this.options.onPhotoSessionEnded &&
@@ -1235,7 +1286,7 @@ export class parseBleData {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const seconds = view.getUint16(0, true)
 
-    logger.debug('✅ 收到下位机扫描时间响应: 扫描时间_秒=' + seconds)
+    logger.info(`◀── 收到 0x33 READ_SCAN_TIME[读扫描时间] 响应: ${seconds}秒`)
     if (this.options.onScanTimeResponse) {
       this.options.onScanTimeResponse({ seconds })
     }

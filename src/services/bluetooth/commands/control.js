@@ -445,7 +445,7 @@ export class ControlCommands {
    * @param {string} characteristicUUID - 特征 UUID
    */
   async sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID) {
-    logger.withContext({ deviceId }).debug('发送拍照准备就绪指令(0x91)')
+    logger.withContext({ deviceId }).debug('──▶ 发送 0x91 CAMERA_NEXT[拍照就绪]')
     try {
       await this.parent.sendCommand(
         deviceId,

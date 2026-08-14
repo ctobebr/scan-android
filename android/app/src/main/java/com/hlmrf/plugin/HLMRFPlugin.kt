@@ -29,12 +29,12 @@ class HLMRFPlugin : Plugin() {
             "libpcl_octree.so",
             "libpcl_kdtree.so",
             "libpcl_search.so",
+            "libpcl_sample_consensus.so",
             "libpcl_io_ply.so",
             "libpcl_io.so",
             "libpcl_filters.so",
-            "libpcl_keypoints.so",
-            "libpcl_sample_consensus.so",
             "libpcl_features.so",
+            "libpcl_keypoints.so",
             "libpcl_registration.so",
             "libhlmrf_plugin_core.so",
         )
@@ -52,20 +52,27 @@ class HLMRFPlugin : Plugin() {
             }
 
             // 2. 从内部存储的部署目录按依赖顺序加载
+            val libDir = AppContextHolder.getNativeLibDir()
+            var loadedCount = 0
             try {
-                val libDir = AppContextHolder.getNativeLibDir()
                 for (libName in NATIVE_LIB_LOAD_ORDER) {
                     val libFile = File(libDir, libName)
                     if (libFile.exists()) {
                         System.load(libFile.absolutePath)
+                        loadedCount++
+                    } else {
+                        android.util.Log.w("HLMRFPlugin", "  .so 不存在: $libName")
                     }
                 }
-                libraryLoaded = true
+                if (loadedCount > 0) {
+                    libraryLoaded = true
+                    android.util.Log.i("HLMRFPlugin", "原生库加载成功 ($loadedCount/${NATIVE_LIB_LOAD_ORDER.size})")
+                }
                 return
             } catch (e: UnsatisfiedLinkError) {
-                android.util.Log.e("HLMRFPlugin", "从部署目录加载失败", e)
+                android.util.Log.e("HLMRFPlugin", "从部署目录加载失败 (已加载 $loadedCount)", e)
             } catch (e: Exception) {
-                android.util.Log.e("HLMRFPlugin", "从部署目录加载异常", e)
+                android.util.Log.e("HLMRFPlugin", "从部署目录加载异常 (已加载 $loadedCount)", e)
             }
         }
     }

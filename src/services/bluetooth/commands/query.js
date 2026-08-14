@@ -99,7 +99,7 @@ export class QueryCommands {
    * @param {string} characteristicUUID - 特征 UUID
    */
   async sendReadScanCycles(deviceId, serviceUUID, characteristicUUID) {
-    logger.withContext({ deviceId }).debug('发送读取扫描时间指令')
+    logger.withContext({ deviceId }).debug('──▶ 发送 0x33 READ_SCAN_TIME[读扫描时间]')
     try {
       await this.sendReadCommand(
         deviceId,

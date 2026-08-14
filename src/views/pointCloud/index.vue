@@ -3381,6 +3381,14 @@ function jumpToBatchDetail(stationId) {
   flex-shrink: 0;
 }
 
+.capture-btn:disabled {
+  background: #555;
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.1);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* .capture-btn::after {
   content: '';
   position: absolute;

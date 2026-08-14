@@ -91,7 +91,8 @@ export class DataIO {
         }
 
         await BleClient.write(deviceId, serviceUUID, characteristicUUID, value)
-        logger.withContext({ deviceId, serviceUUID, characteristicUUID }).info('二进制数据发送成功', {
+        // 只在debug级别输出原始字节，避免与业务日志重复
+        logger.withContext({ deviceId }).debug('──▶ BLE写入', {
           hex: Array.from(value)
             .map((b) => b.toString(16).padStart(2, '0'))
             .join(' ')
@@ -240,10 +241,11 @@ export class DataIO {
 
         const frame = buildProtocolFrame(command, payload)
         await this.writeBinaryData(deviceId, serviceUUID, characteristicUUID, frame)
+        // 原始帧字节只在debug级别输出，业务语义由调用方日志体现
         const frameHex = Array.from(frame)
           .map((b) => '0x' + b.toString(16).padStart(2, '0').toUpperCase())
           .join(', ')
-        logger.withContext({ deviceId, command: `0x${command.toString(16).padStart(2, '0').toUpperCase()}` }).info('指令已发送', { frame: `[${frameHex}]` })
+        logger.withContext({ deviceId }).debug('──▶ 帧已发送', { command: `0x${command.toString(16).padStart(2, '0').toUpperCase()}`, frame: `[${frameHex}]` })
         return true
       },
       BluetoothErrorCode.WRITE_FAILED,
