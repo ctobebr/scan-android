@@ -25,6 +25,7 @@ const cameraHelper = {
         parent: parentId,
         toBack: false,
         disableAudio: true,
+        focusMode: 'continuous', // 连续自动对焦：云台转动后画面变化，CAF持续搜索合焦
       })
       isPreviewRunning = true
       return true
@@ -91,11 +92,16 @@ const cameraHelper = {
         //   width: 3264, // 限制宽度
         //   height: 2448, // 限制高度
         // })
-        // 4K 宽高比 16:9 高分辨率需求、大屏显示=========实际3840*2160
+        // 等待自动对焦合焦：云台转动后CAF需要重新搜索对焦，
+        // 立即capture可能捕获到搜索中的画面导致糊片
+        await new Promise((r) => setTimeout(r, 300))
+
+        // 2K 宽高比 16:9 高清显示、打印小尺寸照片=========实际2560*1440
+        // 降低分辨率：对焦精度要求更低、快门时间更短，减少糊片概率
         const res = await CameraPreview.capture({
           quality: 90,
-          width: 3840, // 限制宽度
-          height: 2160, // 限制高度
+          width: 2560, // 限制宽度
+          height: 1440, // 限制高度
         })
         let base64 = res?.value || res?.data || ''
         if (!base64) {
