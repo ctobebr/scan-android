@@ -355,10 +355,15 @@ export const useBluetoothStore = defineStore('bluetooth', {
       }
     },
     async handleSendStart() {
-      return this.sendBluetoothCommand((...args) => bluetoothService.sendStartScan(...args), [], null, '发送开始指令失败')
+      // [fix] throwError=true：此指令被 bleProtocol._sendWithAck 包裹重传，
+      // 瞬时 write 异常（如 GATT busy）由重传机制兜底，不应在此弹"操作失败"
+      // toast（会与最终成功结果矛盾）；UI 只由 _sendWithAck 的最终返回值驱动
+      return this.sendBluetoothCommand((...args) => bluetoothService.sendStartScan(...args), [], null, '发送开始指令失败', true)
     },
     async handleSendEnd() {
-      return this.sendBluetoothCommand((...args) => bluetoothService.sendStopScan(...args), [], null, '发送结束指令失败')
+      // [fix] throwError=true：同 handleSendStart，被 _sendWithAck 包裹重传，
+      // 瞬时异常交由重传兜底，不弹中间失败 toast
+      return this.sendBluetoothCommand((...args) => bluetoothService.sendStopScan(...args), [], null, '发送结束指令失败', true)
     },
 
     async handleSendCalibParam(x, y, z) {
@@ -638,7 +643,10 @@ export const useBluetoothStore = defineStore('bluetooth', {
         (...args) => bluetoothService.sendCameraNextPhoto(...args),
         [],
         null,
-        '发送拍照准备就绪指令失败'
+        '发送拍照准备就绪指令失败',
+        // [fix] throwError=true：同 handleSendStart，被 _sendWithAck 包裹重传，
+        // 瞬时异常交由重传兜底，不弹中间失败 toast
+        true
       )
     },
     /**

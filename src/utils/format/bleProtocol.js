@@ -606,18 +606,31 @@ export class parseBleData {
    * @returns {Promise<boolean>} true=收到ACK, false=重传耗尽
    */
   async _sendWithAck(sendFn, cmd, timeoutMs = ACK_TIMEOUT_MS, maxRetries = ACK_MAX_RETRY) {
+    // [fix] 先挂 ACK 监听再发送：原实现先 await sendFn() 再挂 resolver，
+    // 下位机回 ACK 快于手机端 BLE write Promise resolve 时（WebView 桥延迟），
+    // ACK 到达时监听器未就绪被丢弃 → 无谓的超时重传。
+    // 现改为：每次发送前先注册 resolver，ACK 无论多快到达都能接住。
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         if (attempt === 0) {
           logger.info(`──▶ 发送指令 ${cmdName(cmd)}（等待ACK确认）`)
         }
-        await sendFn()
-      } catch (err) {
-        logger.error(`发送指令 ${cmdName(cmd)} 失败`, err)
-      }
 
-      const ackReceived = await this._waitForAck(cmd, timeoutMs)
-      if (ackReceived) return true
+        // 发送前先挂 ACK 监听（发送期间到达的 ACK 立即生效）
+        const ackPromise = this._waitForAck(cmd, timeoutMs)
+
+        await sendFn()
+
+        const ackReceived = await ackPromise
+        if (ackReceived) return true
+
+        // 本次未收到，清理监听后进入重传
+        this._removeAckListener(cmd)
+      } catch (err) {
+        // [fix] 瞬时发送异常（如 GATT busy）不中断重传循环，交由重传机制兜底
+        this._removeAckListener(cmd)
+        logger.error(`发送指令 ${cmdName(cmd)} 失败（第${attempt + 1}次尝试）`, err)
+      }
 
       if (attempt < maxRetries) {
         logger.warn(`◀── ${cmdName(cmd)} 未收到ACK，${timeoutMs}ms超时，第${attempt + 1}次重传`)
@@ -625,6 +638,19 @@ export class parseBleData {
     }
     logger.error(`◀── ${cmdName(cmd)} 重传${maxRetries}次后仍未收到ACK，放弃`)
     return false
+  }
+
+  /**
+   * 清理指定命令的 ACK 监听（超时/异常未收到 ACK 时调用，防止泄漏）
+   * @param {number} cmd - 命令字
+   */
+  _removeAckListener(cmd) {
+    const key = `ack_0x${cmd.toString(16)}`
+    if (this._ackTimers[key]) {
+      clearTimeout(this._ackTimers[key])
+      delete this._ackTimers[key]
+    }
+    delete this._ackResolvers[key]
   }
 
   /**
