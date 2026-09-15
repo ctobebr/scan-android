@@ -294,6 +294,14 @@ export class BluetoothService {
     return this.control.sendSetPitchTargets(deviceId, serviceUUID, characteristicUUID, pitch0, pitch1, pitch2)
   }
 
+  async sendSetAngleOffset(deviceId, serviceUUID, characteristicUUID, x, y, z) {
+    return this.control.sendSetAngleOffset(deviceId, serviceUUID, characteristicUUID, x, y, z)
+  }
+
+  async sendSetPitchDelay(deviceId, serviceUUID, characteristicUUID, delay) {
+    return this.control.sendSetPitchDelay(deviceId, serviceUUID, characteristicUUID, delay)
+  }
+
   async sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID) {
     return this.control.sendCameraNextPhoto(deviceId, serviceUUID, characteristicUUID)
   }
@@ -314,6 +322,14 @@ export class BluetoothService {
 
   async sendReadPitchTargets(deviceId, serviceUUID, characteristicUUID) {
     return this.query.sendReadPitchTargets(deviceId, serviceUUID, characteristicUUID)
+  }
+
+  async sendReadAngleOffset(deviceId, serviceUUID, characteristicUUID) {
+    return this.query.sendReadAngleOffset(deviceId, serviceUUID, characteristicUUID)
+  }
+
+  async sendReadPitchDelay(deviceId, serviceUUID, characteristicUUID) {
+    return this.query.sendReadPitchDelay(deviceId, serviceUUID, characteristicUUID)
   }
 
   async sendReadCommand(deviceId, serviceUUID, characteristicUUID, readCommand) {

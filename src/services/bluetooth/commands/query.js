@@ -304,4 +304,48 @@ export class QueryCommands {
       throw error
     }
   }
+
+  /**
+   * 发送"读取XYZ三轴零偏角度"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadAngleOffset(deviceId, serviceUUID, characteristicUUID) {
+    logger.withContext({ deviceId }).debug('发送读取XYZ三轴零偏角度指令')
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_ANGLE_OFFSET,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_ANGLE_OFFSET' }).error('发送读取XYZ三轴零偏角度指令失败', error)
+      throw error
+    }
+  }
+
+  /**
+   * 发送"读取俯仰轴延时角度"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   */
+  async sendReadPitchDelay(deviceId, serviceUUID, characteristicUUID) {
+    logger.withContext({ deviceId }).debug('发送读取俯仰轴延时角度指令')
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        DEVICE_DATA_COMMANDS.CMD_READ_PITCH_DELAY,
+        null,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_READ_PITCH_DELAY' }).error('发送读取俯仰轴延时角度指令失败', error)
+      throw error
+    }
+  }
 }

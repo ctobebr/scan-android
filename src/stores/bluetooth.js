@@ -573,6 +573,26 @@ export const useBluetoothStore = defineStore('bluetooth', {
       )
     },
 
+    async handleSendAngleOffset(x, y, z) {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendSetAngleOffset(...args),
+        [x, y, z],
+        '发送设置XYZ三轴零偏角度指令成功',
+        '发送设置XYZ三轴零偏角度指令失败',
+        true
+      )
+    },
+
+    async handleSendPitchDelay(delay) {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendSetPitchDelay(...args),
+        [delay],
+        '发送设置俯仰轴延时角度指令成功',
+        '发送设置俯仰轴延时角度指令失败',
+        true
+      )
+    },
+
     // /**
     //  * 发送读取速度环PID指令
     //  * @param {string} axis - 轴，'x'或'y'
@@ -630,6 +650,26 @@ export const useBluetoothStore = defineStore('bluetooth', {
         [],
         '发送读取俯仰角目标指令成功',
         '发送读取俯仰角目标指令失败',
+        true
+      )
+    },
+
+    async handleReadAngleOffset() {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendReadAngleOffset(...args),
+        [],
+        '发送读取XYZ三轴零偏角度指令成功',
+        '发送读取XYZ三轴零偏角度指令失败',
+        true
+      )
+    },
+
+    async handleReadPitchDelay() {
+      return this.sendBluetoothCommand(
+        (...args) => bluetoothService.sendReadPitchDelay(...args),
+        [],
+        '发送读取俯仰轴延时角度指令成功',
+        '发送读取俯仰轴延时角度指令失败',
         true
       )
     },

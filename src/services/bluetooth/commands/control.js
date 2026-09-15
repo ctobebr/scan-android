@@ -438,6 +438,74 @@ export class ControlCommands {
   }
 
   /**
+   * 发送"设置XYZ三轴零偏角度"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} x - X轴零偏角度 (float, 单位: 弧度)
+   * @param {number} y - Y轴零偏角度 (float, 单位: 弧度)
+   * @param {number} z - Z轴零偏角度 (float, 单位: 弧度)
+   */
+  async sendSetAngleOffset(deviceId, serviceUUID, characteristicUUID, x, y, z) {
+    // 添加特有参数验证
+    // 原因：防御性编程，确保零偏角度为有效数值
+    validateNumber(x, 'x')
+    validateNumber(y, 'y')
+    validateNumber(z, 'z')
+
+    logger.withContext({ deviceId, x, y, z }).debug('发送设置XYZ三轴零偏角度指令')
+
+    const buffer = new ArrayBuffer(12) // 3 * float = 12 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, x, true) // X轴零偏角度，小端序
+    view.setFloat32(4, y, true) // Y轴零偏角度，小端序 (偏移 4 字节)
+    view.setFloat32(8, z, true) // Z轴零偏角度，小端序 (偏移 8 字节)
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_ANGLE_OFFSET,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_ANGLE_OFFSET' }).error('发送设置XYZ三轴零偏角度指令失败', error)
+      throw error
+    }
+  }
+
+  /**
+   * 发送"设置俯仰轴延时角度"指令
+   * @param {string} deviceId - 设备 ID
+   * @param {string} serviceUUID - 服务 UUID
+   * @param {string} characteristicUUID - 特征 UUID
+   * @param {number} delay - 俯仰轴延时角度 (float, 单位: 弧度)
+   */
+  async sendSetPitchDelay(deviceId, serviceUUID, characteristicUUID, delay) {
+    // 添加特有参数验证
+    // 原因：防御性编程，确保延时角度为有效数值
+    validateNumber(delay, 'delay')
+
+    logger.withContext({ deviceId, delay }).debug('发送设置俯仰轴延时角度指令')
+
+    const buffer = new ArrayBuffer(4) // 1 * float = 4 bytes
+    const view = new DataView(buffer)
+    view.setFloat32(0, delay, true) // 延时值，小端序
+    try {
+      await this.parent.sendCommand(
+        deviceId,
+        serviceUUID,
+        characteristicUUID,
+        CONTROL_COMMANDS.CMD_SET_PITCH_DELAY,
+        buffer,
+      )
+    } catch (error) {
+      logger.withContext({ deviceId, command: 'CMD_SET_PITCH_DELAY' }).error('发送设置俯仰轴延时角度指令失败', error)
+      throw error
+    }
+  }
+
+  /**
    * 发送"拍照准备就绪"指令(0x91)
    * @description 通知下位机当前已准备就绪，可以开始接收拍照指令
    * @param {string} deviceId - 设备 ID

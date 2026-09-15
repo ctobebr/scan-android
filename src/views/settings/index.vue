@@ -13,7 +13,7 @@
             plain
             @click="saveParam('calib')"
             :loading="savingState.calib"
-            :disabled="deviceDisconnected || savingState.calib || !isCalibValid"
+            :disabled="deviceDisconnected || savingState.calib || !isCalibValid || !isAngleOffsetValid || !isPitchDelayValid"
             style="width: 64px;"
             >保存</van-button
           >
@@ -69,6 +69,74 @@
               <div v-if="calibErrors.z" class="field-error-hint">
                 <van-icon name="warning-o" /> {{ calibErrors.z }}
               </div>
+            </div>
+          </div>
+          <!-- 第二行 XYZ三轴零偏角度 -->
+          <div class="axis-row">
+            <div class="axis-item">
+              <label>X <span class="unit">(rad)</span></label>
+              <van-field
+                v-model="angleOffset.x"
+                type="text"
+                placeholder="0.000000"
+                inputmode="decimal"
+                @blur="() => validateAndFormat('angleOffset', 'x', 6)"
+                @input="handleNumberInput"
+                :disabled="deviceDisconnected"
+                :error="!!angleOffsetErrors.x"
+              />
+              <div v-if="angleOffsetErrors.x" class="field-error-hint">
+                <van-icon name="warning-o" /> {{ angleOffsetErrors.x }}
+              </div>
+            </div>
+            <div class="axis-item">
+              <label>Y <span class="unit">(rad)</span></label>
+              <van-field
+                v-model="angleOffset.y"
+                type="text"
+                placeholder="0.000000"
+                inputmode="decimal"
+                @blur="() => validateAndFormat('angleOffset', 'y', 6)"
+                @input="handleNumberInput"
+                :disabled="deviceDisconnected"
+                :error="!!angleOffsetErrors.y"
+              />
+              <div v-if="angleOffsetErrors.y" class="field-error-hint">
+                <van-icon name="warning-o" /> {{ angleOffsetErrors.y }}
+              </div>
+            </div>
+            <div class="axis-item">
+              <label>Z <span class="unit">(rad)</span></label>
+              <van-field
+                v-model="angleOffset.z"
+                type="text"
+                placeholder="0.000000"
+                inputmode="decimal"
+                @blur="() => validateAndFormat('angleOffset', 'z', 6)"
+                @input="handleNumberInput"
+                :disabled="deviceDisconnected"
+                :error="!!angleOffsetErrors.z"
+              />
+              <div v-if="angleOffsetErrors.z" class="field-error-hint">
+                <van-icon name="warning-o" /> {{ angleOffsetErrors.z }}
+              </div>
+            </div>
+          </div>
+          <!-- 第三行 俯仰轴延时角度 -->
+          <div class="axis-item">
+            <label>俯仰轴延时角度 <span class="unit">(rad)</span></label>
+            <van-field
+              v-model="pitchDelay.value"
+              type="text"
+              placeholder="0.000000"
+              inputmode="decimal"
+              @blur="() => validateAndFormat('pitchDelay', 'value', 6)"
+              @input="handleNumberInput"
+              :disabled="deviceDisconnected"
+              :error="!!pitchDelayErrors.value"
+            />
+            <div v-if="pitchDelayErrors.value" class="field-error-hint">
+              <van-icon name="warning-o" /> {{ pitchDelayErrors.value }}
             </div>
           </div>
           <!-- 第二行 pitch roll yaw -->
@@ -605,6 +673,16 @@ const calibParams = reactive({
   // roll: -0.05,
   // yaw: 1.47
 })
+// XYZ三轴零偏角度 - 保留6位小数（单位：弧度）
+const angleOffset = reactive({
+  x: SETTING_DEFAULT_VALUES.ANGLE_OFFSET.x.toFixed(6),
+  y: SETTING_DEFAULT_VALUES.ANGLE_OFFSET.y.toFixed(6),
+  z: SETTING_DEFAULT_VALUES.ANGLE_OFFSET.z.toFixed(6),
+})
+// 俯仰轴延时角度 - 保留6位小数（单位：弧度）
+const pitchDelay = reactive({
+  value: SETTING_DEFAULT_VALUES.PITCH_DELAY.toFixed(6),
+})
 // 保留 4位小数
 const speedParams = reactive({
   pitchSpeed: SETTING_DEFAULT_VALUES.SPEED.pitch,
@@ -683,6 +761,18 @@ const calibErrors = reactive({
   z: '',
 })
 
+// XYZ三轴零偏角度错误状态
+const angleOffsetErrors = reactive({
+  x: '',
+  y: '',
+  z: '',
+})
+
+// 俯仰轴延时角度错误状态
+const pitchDelayErrors = reactive({
+  value: ''
+})
+
 const speedErrors = reactive({
   pitchSpeed: '',
   yawSpeed: '',
@@ -725,6 +815,16 @@ const pitchTargetsErrors = reactive({
 // 标定参数是否有效
 const isCalibValid = computed(() => {
   return !calibErrors.x && !calibErrors.y && !calibErrors.z
+})
+
+// XYZ三轴零偏角度是否有效
+const isAngleOffsetValid = computed(() => {
+  return !angleOffsetErrors.x && !angleOffsetErrors.y && !angleOffsetErrors.z
+})
+
+// 俯仰轴延时角度是否有效
+const isPitchDelayValid = computed(() => {
+  return !pitchDelayErrors.value
 })
 
 // 速度参数是否有效
@@ -822,6 +922,30 @@ const validateAndFormat = (category, field, decimals) => {
         calibErrors[field] = ''
       } else {
         calibErrors[field] = errorMsg
+      }
+      break
+
+    case 'angleOffset':
+      value = angleOffset[field]
+      errorMsg = validateNumber(value, `${field.toUpperCase()}轴零偏角度`)
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        angleOffset[field] = num.toFixed(decimals)
+        angleOffsetErrors[field] = ''
+      } else {
+        angleOffsetErrors[field] = errorMsg
+      }
+      break
+
+    case 'pitchDelay':
+      value = pitchDelay[field]
+      errorMsg = validateNumber(value, '俯仰轴延时角度')
+      if (!errorMsg) {
+        const num = parseFloat(value)
+        pitchDelay[field] = num.toFixed(decimals)
+        pitchDelayErrors[field] = ''
+      } else {
+        pitchDelayErrors[field] = errorMsg
       }
       break
 
@@ -1132,6 +1256,12 @@ const init = async () => {
       onCalibParamResponse: (data) => {
         handleCalibParamResponse(data)
       },
+      onAngleOffsetResponse: (data) => {
+        handleAngleOffsetResponse(data)
+      },
+      onPitchDelayResponse: (data) => {
+        handlePitchDelayResponse(data)
+      },
       onRotateSpeedResponse: (data) => {
         handleRotateSpeedResponse(data)
       },
@@ -1298,6 +1428,44 @@ function handleCalibParamResponse(data) {
   calibErrors.x = ''
   calibErrors.y = ''
   calibErrors.z = ''
+  if (isFromSaveAction.value) {
+    showToast({ message: '标定参数保存成功', position: 'bottom' })
+    isFromSaveAction.value = false // 重置标记
+  }
+}
+
+// 处理XYZ三轴零偏角度响应
+function handleAngleOffsetResponse(data) {
+  console.log('设置XYZ三轴零偏角度成功', JSON.stringify(data))
+  // 将收到的零偏角度值更新到UI
+  if (data && typeof data === 'object') {
+    if (data.x !== undefined) angleOffset.x = parseFloat(data.x).toFixed(6)
+    if (data.y !== undefined) angleOffset.y = parseFloat(data.y).toFixed(6)
+    if (data.z !== undefined) angleOffset.z = parseFloat(data.z).toFixed(6)
+  }
+  // 清除对应字段的错误
+  angleOffsetErrors.x = ''
+  angleOffsetErrors.y = ''
+  angleOffsetErrors.z = ''
+  // 与标定参数共用保存流程，提示文案保持一致（首个响应触发提示）
+  if (isFromSaveAction.value) {
+    showToast({ message: '标定参数保存成功', position: 'bottom' })
+    isFromSaveAction.value = false // 重置标记
+  }
+}
+
+// 处理俯仰轴延时角度响应
+function handlePitchDelayResponse(data) {
+  console.log('设置俯仰轴延时角度成功', JSON.stringify(data))
+  // 将收到的延时角度值更新到UI
+  if (data && typeof data === 'object') {
+    if (data.value !== undefined) {
+      pitchDelay.value = parseFloat(data.value).toFixed(6)
+    }
+  }
+  // 清除对应字段的错误
+  pitchDelayErrors.value = ''
+  // 与标定参数共用保存流程，提示文案保持一致（首个响应触发提示）
   if (isFromSaveAction.value) {
     showToast({ message: '标定参数保存成功', position: 'bottom' })
     isFromSaveAction.value = false // 重置标记
@@ -1489,7 +1657,11 @@ const saveParam = async (type, silent = false) => {
       validateAndFormat('calib', 'x', 2)
       validateAndFormat('calib', 'y', 2)
       validateAndFormat('calib', 'z', 2)
-      if (!isCalibValid.value) {
+      validateAndFormat('angleOffset', 'x', 6)
+      validateAndFormat('angleOffset', 'y', 6)
+      validateAndFormat('angleOffset', 'z', 6)
+      validateAndFormat('pitchDelay', 'value', 6)
+      if (!isCalibValid.value || !isAngleOffsetValid.value || !isPitchDelayValid.value) {
         showToast({ message: '请填写正确的标定参数', position: 'bottom' })
         return
       }
@@ -1577,6 +1749,12 @@ const saveParam = async (type, silent = false) => {
           parseFloat(calibParams.y),
           parseFloat(calibParams.z),
         )
+        await bluetoothStore.handleSendAngleOffset(
+          parseFloat(angleOffset.x),
+          parseFloat(angleOffset.y),
+          parseFloat(angleOffset.z),
+        )
+        await bluetoothStore.handleSendPitchDelay(parseFloat(pitchDelay.value))
         break
 
       case 'speed':
@@ -1716,6 +1894,12 @@ const resetToDefault = async () => {
     calibErrors.x = ''
     calibErrors.y = ''
     calibErrors.z = ''
+    // 清除XYZ三轴零偏角度错误
+    angleOffsetErrors.x = ''
+    angleOffsetErrors.y = ''
+    angleOffsetErrors.z = ''
+    // 清除俯仰轴延时角度错误
+    pitchDelayErrors.value = ''
     speedErrors.pitchSpeed = ''
     speedErrors.yawSpeed = ''
     scanErrors.seconds = ''
@@ -1738,6 +1922,14 @@ const resetToDefault = async () => {
     calibParams.x = SETTING_DEFAULT_VALUES.CALIB.x.toFixed(2)
     calibParams.y = SETTING_DEFAULT_VALUES.CALIB.y.toFixed(2)
     calibParams.z = SETTING_DEFAULT_VALUES.CALIB.z.toFixed(2)
+
+    // XYZ三轴零偏角度默认值 - 保留6位小数
+    angleOffset.x = SETTING_DEFAULT_VALUES.ANGLE_OFFSET.x.toFixed(6)
+    angleOffset.y = SETTING_DEFAULT_VALUES.ANGLE_OFFSET.y.toFixed(6)
+    angleOffset.z = SETTING_DEFAULT_VALUES.ANGLE_OFFSET.z.toFixed(6)
+
+    // 俯仰轴延时角度默认值 - 保留6位小数
+    pitchDelay.value = SETTING_DEFAULT_VALUES.PITCH_DELAY.toFixed(6)
 
     speedParams.pitchSpeed = SETTING_DEFAULT_VALUES.SPEED.pitch.toFixed(1)
     speedParams.yawSpeed = SETTING_DEFAULT_VALUES.SPEED.yaw.toFixed(1)
@@ -1806,6 +1998,8 @@ const readAllParams = async () => {
     // 并发读取所有参数
     await Promise.all([
       bluetoothStore.handleReadCalibParam(),
+      bluetoothStore.handleReadAngleOffset(),
+      bluetoothStore.handleReadPitchDelay(),
       bluetoothStore.handleReadRotateSpeed(),
       bluetoothStore.handleReadScanTime(),
       bluetoothStore.handleReadPitchLimit(),
