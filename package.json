@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -16,7 +17,7 @@
   "dependencies": {
     "@byteowls/capacitor-filesharer": "^5.0.0",
     "@capacitor-community/bluetooth-le": "^3.0.0",
-    "@capacitor-community/camera-preview": "^5.0.0",
+    "@capacitor-community/camera-preview": "5.0.0",
     "@capacitor-community/keep-awake": "^4.0.0",
     "@capacitor/android": "^5.7.8",
     "@capacitor/app": "^5.0.8",
@@ -43,6 +44,7 @@
     "eslint": "^9.22.0",
     "eslint-plugin-vue": "~10.0.0",
     "globals": "^16.0.0",
+    "patch-package": "^8.0.1",
     "prettier": "3.5.3",
     "vite": "^6.2.4",
     "vite-plugin-vue-devtools": "^7.7.2"

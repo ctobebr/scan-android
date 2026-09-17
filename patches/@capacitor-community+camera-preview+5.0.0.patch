@@ -1,0 +1,149 @@
+diff --git a/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraActivity.java b/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraActivity.java
+index b0554fe..c10e456 100644
+--- a/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraActivity.java
++++ b/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraActivity.java
+@@ -329,6 +329,23 @@ public class CameraActivity extends Fragment {
+
+         mCamera = Camera.open(defaultCameraId);
+
++        // [anti-blur patch] 显式设置连续对焦(CAF)
++        // 原因：插件未实现 focusMode 选项(iOS-only)，Android 端对焦模式随机型默认值漂移，
++        // 云台转动后画面变化需要 CAF 持续跟踪合焦
++        try {
++            Camera.Parameters p = mCamera.getParameters();
++            List<String> focusModes = p.getSupportedFocusModes();
++            if (focusModes != null && focusModes.contains(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE)) {
++                p.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
++                mCamera.setParameters(p);
++                Log.i(TAG, "[anti-blur] focus mode = CONTINUOUS_PICTURE");
++            } else {
++                Log.w(TAG, "[anti-blur] CONTINUOUS_PICTURE not supported, modes=" + focusModes);
++            }
++        } catch (Exception e) {
++            Log.w(TAG, "[anti-blur] set focus mode failed: " + e.getMessage());
++        }
++
+         if (cameraParameters != null) {
+             mCamera.setParameters(cameraParameters);
+         }
+diff --git a/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraPreview.java b/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraPreview.java
+index 83ef9ad..9a65216 100644
+--- a/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraPreview.java
++++ b/node_modules/@capacitor-community/camera-preview/android/src/main/java/com/ahm/capacitor/camera/preview/CameraPreview.java
+@@ -202,6 +202,116 @@ public class CameraPreview extends Plugin implements CameraActivity.CameraPreviewListener {
+         call.resolve();
+     }
+
++    // [anti-blur patch] 以下 4 个方法为防糊补丁新增：
++    // 场景模式(ACTION运动模式)与曝光补偿(-EV)用于缩短快门时间抑制运动模糊，
++    // 均带支持性检查 + try-catch，机型不支持时仅 reject 不崩溃
++
++    @PluginMethod
++    public void getSupportedSceneModes(PluginCall call) {
++        if (this.hasCamera(call) == false) {
++            call.reject("Camera is not running");
++            return;
++        }
++
++        Camera camera = fragment.getCamera();
++        Camera.Parameters params = camera.getParameters();
++        List<String> supportedSceneModes = params.getSupportedSceneModes();
++        JSONArray jsonSceneModes = new JSONArray();
++
++        if (supportedSceneModes != null) {
++            for (int i = 0; i < supportedSceneModes.size(); i++) {
++                jsonSceneModes.put(new String(supportedSceneModes.get(i)));
++            }
++        }
++
++        JSObject jsObject = new JSObject();
++        jsObject.put("result", jsonSceneModes);
++        call.resolve(jsObject);
++    }
++
++    @PluginMethod
++    public void setSceneMode(PluginCall call) {
++        if (this.hasCamera(call) == false) {
++            call.reject("Camera is not running");
++            return;
++        }
++
++        String sceneMode = call.getString("sceneMode");
++        if (sceneMode == null || sceneMode.isEmpty() == true) {
++            call.reject("sceneMode required parameter is missing");
++            return;
++        }
++
++        Camera camera = fragment.getCamera();
++        Camera.Parameters params = camera.getParameters();
++
++        List<String> supportedSceneModes = params.getSupportedSceneModes();
++        if (supportedSceneModes == null || !supportedSceneModes.contains(sceneMode)) {
++            call.reject("scene mode not supported: " + sceneMode);
++            return;
++        }
++
++        try {
++            params.setSceneMode(sceneMode);
++            fragment.setCameraParameters(params);
++            call.resolve();
++        } catch (Exception e) {
++            call.reject("failed to set scene mode: " + e.getMessage());
++        }
++    }
++
++    @PluginMethod
++    public void getExposureCompensationRange(PluginCall call) {
++        if (this.hasCamera(call) == false) {
++            call.reject("Camera is not running");
++            return;
++        }
++
++        Camera camera = fragment.getCamera();
++        Camera.Parameters params = camera.getParameters();
++
++        JSObject jsObject = new JSObject();
++        jsObject.put("min", params.getMinExposureCompensation());
++        jsObject.put("max", params.getMaxExposureCompensation());
++        jsObject.put("step", (double) params.getExposureCompensationStep());
++        call.resolve(jsObject);
++    }
++
++    @PluginMethod
++    public void setExposureCompensation(PluginCall call) {
++        if (this.hasCamera(call) == false) {
++            call.reject("Camera is not running");
++            return;
++        }
++
++        Integer value = call.getInt("value");
++        if (value == null) {
++            call.reject("value required parameter is missing");
++            return;
++        }
++
++        Camera camera = fragment.getCamera();
++        Camera.Parameters params = camera.getParameters();
++
++        int min = params.getMinExposureCompensation();
++        int max = params.getMaxExposureCompensation();
++        if (min == 0 && max == 0) {
++            call.reject("exposure compensation not supported");
++            return;
++        }
++
++        int clamped = Math.max(min, Math.min(max, value));
++        try {
++            params.setExposureCompensation(clamped);
++            fragment.setCameraParameters(params);
++            JSObject jsObject = new JSObject();
++            jsObject.put("value", clamped);
++            call.resolve(jsObject);
++        } catch (Exception e) {
++            call.reject("failed to set exposure compensation: " + e.getMessage());
++        }
++    }
++
+     @PluginMethod
+     public void startRecordVideo(final PluginCall call) {
+         if (this.hasCamera(call) == false) {
