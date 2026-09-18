@@ -160,7 +160,7 @@ import { StatusBar } from '@capacitor/status-bar'
 import { bluetoothService } from '@/services/bluetooth'
 import cameraHelper from '@/utils/device/camera'
 import { parseBleData } from '@/utils/format/bleProtocol'
-import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, CONTROL_COMMANDS } from '@/constants/bluetooth'
+import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID, CONTROL_COMMANDS, SETTING_DEFAULT_VALUES } from '@/constants/bluetooth'
 import { App } from '@capacitor/app'
 // 导入全局日志工具
 import { createLogger } from '@/utils/logger'
@@ -265,6 +265,23 @@ const MIN_BATCH_SIZE = 3 //  进行渲染一次最少需要点数
 let pauseListener = null
 let resumeListener = null
 let hasStarted = false
+
+// ==============================================
+// 标定参数保存相关
+// 每次开始采集时从下位机读取7个标定值，写入项目根目录 calib_params.txt
+// 分享zip时随项目目录一起打包
+// ==============================================
+const calibSavedParams = {
+  x: SETTING_DEFAULT_VALUES.CALIB.x,
+  y: SETTING_DEFAULT_VALUES.CALIB.y,
+  z: SETTING_DEFAULT_VALUES.CALIB.z,
+  angleX: SETTING_DEFAULT_VALUES.ANGLE_OFFSET.x,
+  angleY: SETTING_DEFAULT_VALUES.ANGLE_OFFSET.y,
+  angleZ: SETTING_DEFAULT_VALUES.ANGLE_OFFSET.z,
+  pitchDelay: SETTING_DEFAULT_VALUES.PITCH_DELAY,
+}
+// 记录三组标定读取指令（标定参数/零偏角度/俯仰延时）的响应是否到达
+const calibReadState = { calib: false, angle: false, delay: false }
 
 let disconnectUnregister = null
 
@@ -2017,6 +2034,15 @@ function createSessionParser() {
     onScanTimeResponse: (data) => {
       handleScanTimeResponse(data)
     },
+    onCalibParamResponse: (data) => {
+      handleCalibParamResponse(data)
+    },
+    onAngleOffsetResponse: (data) => {
+      handleAngleOffsetResponse(data)
+    },
+    onPitchDelayResponse: (data) => {
+      handlePitchDelayResponse(data)
+    },
     onPhotoSessionEnded: async () => {
       console.log(`[PhotoSession] 📸 会话结束: 点位=${dataBatchCounter.value}, 点云=${currentBatchData.pointCount}, 照片=${currentBatchData.photos.length}`)
 
@@ -2234,6 +2260,10 @@ async function startDataStream() {
 
   hasStarted = true
 
+  // 每次开始采集时，读取下位机标定参数并写入项目根目录 calib_params.txt（覆盖）
+  const calibSaveFolder = currentFolderName || storage.path.getTempSessionName(currentSessionId)
+  await readAndSaveCalibParams(calibSaveFolder)
+
   // 发送读取扫描时间指令（复用已有订阅通道）
   await readScanTimeFromDevice()
 
@@ -2307,6 +2337,112 @@ function handleScanTimeResponse(data) {
   }
   hasScanTime.value = true
   logger.debug('[PointCloud] 扫描时间设置:', collectionProgress.value.scanTimeSeconds)
+}
+
+// ==============================================
+// 标定参数读取与保存相关
+// 每次开始采集时读取下位机7个标定值，写入项目根目录 calib_params.txt
+// ==============================================
+
+// 处理标定参数（X/Y/Z mm）响应
+function handleCalibParamResponse(data) {
+  if (data && typeof data === 'object') {
+    if (data.x !== undefined) calibSavedParams.x = parseFloat(data.x)
+    if (data.y !== undefined) calibSavedParams.y = parseFloat(data.y)
+    if (data.z !== undefined) calibSavedParams.z = parseFloat(data.z)
+  }
+  calibReadState.calib = true
+  logger.debug('[Calib] 标定参数响应:', JSON.stringify(data))
+}
+
+// 处理XYZ三轴零偏角度（rad）响应
+function handleAngleOffsetResponse(data) {
+  if (data && typeof data === 'object') {
+    if (data.x !== undefined) calibSavedParams.angleX = parseFloat(data.x)
+    if (data.y !== undefined) calibSavedParams.angleY = parseFloat(data.y)
+    if (data.z !== undefined) calibSavedParams.angleZ = parseFloat(data.z)
+  }
+  calibReadState.angle = true
+  logger.debug('[Calib] 零偏角度响应:', JSON.stringify(data))
+}
+
+// 处理俯仰轴延时角度（rad）响应
+function handlePitchDelayResponse(data) {
+  if (data && data.value !== undefined) {
+    calibSavedParams.pitchDelay = parseFloat(data.value)
+  }
+  calibReadState.delay = true
+  logger.debug('[Calib] 俯仰延时响应:', JSON.stringify(data))
+}
+
+/**
+ * 读取下位机标定参数并覆盖写入项目根目录 calib_params.txt
+ * 在每次开始采集时调用；读取失败/超时时用默认值兜底，保证 zip 内始终包含该文件
+ * @param {string} folderName - 项目文件夹名（pointcloud 下的目录名）
+ */
+async function readAndSaveCalibParams(folderName) {
+  try {
+    if (bluetoothStore.connectionStatus !== 2) {
+      logger.debug('[Calib] 设备未连接，使用默认值写入')
+      await saveCalibParamsToFile(folderName)
+      return
+    }
+
+    // 重置响应到达标记
+    calibReadState.calib = false
+    calibReadState.angle = false
+    calibReadState.delay = false
+
+    // 并发发送3条读取指令（响应通过 parser 回调异步返回）
+    await Promise.all([
+      bluetoothStore.handleReadCalibParam(),
+      bluetoothStore.handleReadAngleOffset(),
+      bluetoothStore.handleReadPitchDelay(),
+    ])
+
+    // 等待所有响应到达，最多等待 3 秒，避免阻塞采集启动
+    const deadline = Date.now() + 3000
+    while (!(calibReadState.calib && calibReadState.angle && calibReadState.delay) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+
+    const receivedCount = [calibReadState.calib, calibReadState.angle, calibReadState.delay].filter(Boolean).length
+    if (receivedCount < 3) {
+      logger.warn(`[Calib] 标定参数读取不完整(${receivedCount}/3)，未读取项使用默认值`)
+    }
+
+    await saveCalibParamsToFile(folderName)
+  } catch (e) {
+    logger.warn('[Calib] 读取标定参数失败，使用默认值写入:', e)
+    try {
+      await saveCalibParamsToFile(folderName)
+    } catch (writeErr) {
+      logger.error('[Calib] 写入 calib_params.txt 失败:', writeErr)
+    }
+  }
+}
+
+/**
+ * 将当前标定参数写入项目根目录 calib_params.txt（key=value 格式）
+ * @param {string} folderName - 项目文件夹名
+ */
+async function saveCalibParamsToFile(folderName) {
+  const lines = [
+    `calib_x_mm=${calibSavedParams.x.toFixed(2)}`,
+    `calib_y_mm=${calibSavedParams.y.toFixed(2)}`,
+    `calib_z_mm=${calibSavedParams.z.toFixed(2)}`,
+    `angle_offset_x_rad=${calibSavedParams.angleX.toFixed(6)}`,
+    `angle_offset_y_rad=${calibSavedParams.angleY.toFixed(6)}`,
+    `angle_offset_z_rad=${calibSavedParams.angleZ.toFixed(6)}`,
+    `pitch_delay_rad=${calibSavedParams.pitchDelay.toFixed(6)}`,
+  ]
+  await Filesystem.writeFile({
+    path: `pointcloud/${folderName}/calib_params.txt`,
+    data: lines.join('\n'),
+    directory: Directory.External,
+    encoding: FilesystemEncoding.UTF8,
+  })
+  logger.debug(`[Calib] 标定参数已保存: pointcloud/${folderName}/calib_params.txt`)
 }
 
 // ==============================================
