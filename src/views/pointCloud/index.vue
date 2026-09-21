@@ -4,48 +4,12 @@
       <!-- 摄像头预览容器（供 CameraPreview.attach 使用） -->
       <div id="cameraPreview" class="camera-preview-overlay"></div>
 
-      <!-- 采集进度卡片 -->
+      <!-- 采集进度卡片（已按需求注释：采集时不再弹倒计时卡片，直接实时渲染画布点云） -->
+      <!--
       <div v-if="collectionProgress.isCollecting" class="collection-progress-card">
-        <div class="progress-icon">
-          <svg
-            class="radar-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <circle cx="12" cy="12" r="3" fill="#2a7aff" />
-            <circle cx="12" cy="12" r="6" stroke="#2a7aff" stroke-width="1.5" opacity="0.6" />
-            <circle cx="12" cy="12" r="9" stroke="#2a7aff" stroke-width="1" opacity="0.3" />
-            <path d="M12 3L12 6" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-            <path d="M12 18L12 21" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-            <path d="M3 12L6 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-            <path d="M18 12L21 12" stroke="#2a7aff" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </div>
-        <div class="progress-title">采集中...</div>
-        <div class="progress-bar-container">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: progressPercentage + '%' }"></div>
-          </div>
-          <div class="progress-percentage">{{ Math.round(progressPercentage) }}%</div>
-        </div>
-        <div class="progress-stats">
-          <div class="stat-row">
-            <span class="stat-label">已采集:</span>
-            <span class="stat-value"
-              >{{ collectionProgress.currentPoints.toLocaleString() }} 点</span
-            >
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">速率:</span>
-            <span class="stat-value">{{ pointsPerSecond.toLocaleString() }} 点/秒</span>
-          </div>
-          <div class="stat-row">
-            <span class="stat-label">剩余:</span>
-            <span class="stat-value">{{ collectionProgress.remainingTime }} 秒</span>
-          </div>
-        </div>
+        ...
       </div>
+      -->
 
       <!-- 将按钮和统计信息放在 three-container 内部 -->
       <div class="overlay-controls">
@@ -59,9 +23,35 @@
         <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
           预览
         </button>
-        <button class="stitch-btn" :disabled="saving || !enableSave || isStitching">
-          {{ isStitching ? stitchProgressText || '拼接中...' : '拼接' }}
-        </button>
+        <!-- 拼接按钮 + 采集模式选择（模式按钮在拼接左侧，采集中禁用切换） -->
+        <div class="stitch-mode-group">
+          <div ref="modeSelectorRef" class="mode-selector">
+            <button
+              class="mode-btn"
+              :class="{ active: showModeDropdown }"
+              :disabled="isCollecting"
+              @click="toggleModeDropdown"
+            >
+              {{ currentModeLabel }}
+              <span class="mode-arrow" :class="{ expanded: showModeDropdown }">▾</span>
+            </button>
+            <div v-if="showModeDropdown" class="mode-dropdown">
+              <button
+                v-for="opt in modeOptions"
+                :key="opt.value"
+                class="mode-option"
+                :class="{ selected: collectionMode === opt.value }"
+                @click="selectCollectionMode(opt.value)"
+              >
+                <span>{{ opt.label }}</span>
+                <span v-if="collectionMode === opt.value" class="mode-check">✓</span>
+              </button>
+            </div>
+          </div>
+          <button class="stitch-btn" :disabled="saving || !enableSave || isStitching">
+            {{ isStitching ? stitchProgressText || '拼接中...' : '拼接' }}
+          </button>
+        </div>
         <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
           {{ saving ? '保存中...' : '保存' }}
         </button>
@@ -215,6 +205,22 @@ const savedDuringDialog = ref(false)
 
 const isStitching = ref(false)
 const stitchProgressText = ref('')
+
+// ==============================================
+// 采集模式（'photo': 采集+拍照（默认） | 'only': 仅采集）
+// ==============================================
+const collectionMode = ref('photo')
+const showModeDropdown = ref(false)
+const modeSelectorRef = ref(null)
+
+const modeOptions = [
+  { value: 'photo', label: '采集+拍照' },
+  { value: 'only', label: '仅采集' },
+]
+
+const currentModeLabel = computed(() =>
+  collectionMode.value === 'only' ? '仅采集' : '采集+拍照',
+)
 
 // 当前批次数据
 let currentBatchData = { photos: [], pointCount: 0 }
@@ -1146,7 +1152,11 @@ async function triggerHLMRFRegistration() {
             (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
           )
           if (!prevPointCloudFile) { logger.warn('[HLMRF] 上一批次无点云文件，跳过拼接'); return }
-          await copyFile(`${previousBatchFolder}/${prevPointCloudFile.name}`, `${stitchInputDir}/${prevPointCloudFile.name}`)
+          // 必须改名为累积云标准文件名（DENSE_CLOUD_FILE）再放入 stitch_input：
+          // 插件仅将以此命名的文件视为累积云并与当前站位合并输出单文件；
+          // 若保留 pointCloud_data_*.txt 原名，插件会把两站分开输出（_1.txt），
+          // 导致当前站位点云从累积结果中丢失
+          await copyFile(`${previousBatchFolder}/${prevPointCloudFile.name}`, `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
         }
       }
 
@@ -1986,6 +1996,48 @@ function checkDeviceConnection() {
 }
 
 /**
+ * 批次收尾（拍照会话结束 / 仅采集模式收到扫描结束信号后调用）
+ * @param {Object} options
+ * @param {boolean} options.withPanorama - 是否生成全景图（仅采集模式无照片，跳过）
+ */
+async function finalizeBatchData({ withPanorama }) {
+  // 1. 刷新延迟渲染并停止
+  await flushDeferredRender()
+  stopBackgroundRender()
+
+  // 2. 刷新流式写入缓冲区（写入剩余不满 BATCH_WRITE_SIZE 的数据）
+  await flushBatchWriteBuffer()
+
+  // 3. 保存照片数据（仅采集模式无照片，函数内部自动跳过）
+  await saveCurrentBatchPhotos()
+
+  // 4. 更新点位计数器
+  dataBatchCounter.value++
+  enableSave.value = true
+  batchButtons.value.push(dataBatchCounter.value)
+  stopCollectionProgress()
+
+  // 5. 渲染最后剩余的少量点（不足一轮渲染周期的点），避免站位结束时丢点
+  if (accumulationBuffer.length > 0 && renderer && isRendererReady.value) {
+    renderer.addPoints(accumulationBuffer.slice())
+    pointCount.value += accumulationBuffer.length
+  }
+
+  // 6. 暂停解析器（保持蓝牙订阅）
+  if (parser) parser.pause()
+  clearAccumulationBuffer()
+  resetSessionParserState()
+
+  // 7. 触发 HLMRF 多站点拼接（仅依赖点云，两种模式均执行）
+  triggerHLMRFRegistration()
+
+  // 8. PtcrPlugin 单站点拼接（依赖照片，仅"采集+拍照"模式执行）
+  if (withPanorama) {
+    triggerAutoStitch()
+  }
+}
+
+/**
  * 创建会话解析器实例
  * @returns {Object} - 会话解析器实例
  */
@@ -2045,31 +2097,18 @@ function createSessionParser() {
     },
     onPhotoSessionEnded: async () => {
       console.log(`[PhotoSession] 📸 会话结束: 点位=${dataBatchCounter.value}, 点云=${currentBatchData.pointCount}, 照片=${currentBatchData.photos.length}`)
+      await finalizeBatchData({ withPanorama: true })
+    },
+    // 仅采集模式：收到 0x83（下位机扫描结束信号）时触发批次收尾
+    // 前端对 0x83 完全静默（不 ACK），下位机重传约 3 次后自动放弃拍照任务并回到空闲态
+    onScanOnlyComplete: async () => {
+      console.log(`[ScanOnly] 📍 仅采集模式扫描结束（0x83），执行批次收尾`)
 
-      // 1. 刷新延迟渲染并停止
-      await flushDeferredRender()
-      stopBackgroundRender()
+      // 等待在途点云数据处理完成（0x83 与最后一批点云帧可能紧邻到达），
+      // 防止收尾 flush 早于最后一批点的写入导致丢点
+      await new Promise((resolve) => setTimeout(resolve, 300))
 
-      // 2. 刷新流式写入缓冲区（写入剩余不满 BATCH_WRITE_SIZE 的数据）
-      await flushBatchWriteBuffer()
-
-      // 3. 保存照片数据（txt 已通过流式写入完成）
-      await saveCurrentBatchPhotos()
-
-      // 4. 更新点位计数器
-      dataBatchCounter.value++
-      enableSave.value = true
-      batchButtons.value.push(dataBatchCounter.value)
-      stopCollectionProgress()
-
-      // 5. 暂停解析器（保持蓝牙订阅）
-      if (parser) parser.pause()
-      clearAccumulationBuffer()
-      resetSessionParserState()
-
-      // 6. 触发 HLMRF 多站点拼接 + PtcrPlugin 单站点拼接
-      triggerHLMRFRegistration()
-      triggerAutoStitch()
+      await finalizeBatchData({ withPanorama: false })
     },
   })
 
@@ -2178,10 +2217,70 @@ function initAndStartRenderingTimer() {
   accumulationTimer = setInterval(() => {
     if (!isRendererReady.value || !isCollecting.value) return
     if (accumulationBuffer.length >= MIN_BATCH_SIZE) {
-      const toDefer = accumulationBuffer.splice(0, Math.min(accumulationBuffer.length, 1000))
-      deferredRenderBuffer.push(...toDefer)
+      const chunk = accumulationBuffer.splice(0, Math.min(accumulationBuffer.length, 1000))
+      // 直接实时渲染当前站位点云
+      // 用 setInterval 驱动，避免依赖 rAF 后台渲染在 WebView 中被节流导致采集期间不显示
+      renderer.addPoints(chunk)
+      pointCount.value += chunk.length
     }
   }, ACCUMULATION_INTERVAL)
+}
+
+// ==============================================
+// 采集模式切换
+// ==============================================
+
+/**
+ * 切换模式下拉的显示/隐藏
+ * 采集中（含拍照会话期间）禁止切换，避免批次中途状态不一致
+ */
+function toggleModeDropdown() {
+  if (isCollecting.value) {
+    showToast({ message: '采集中，无法切换模式', position: 'bottom' })
+    return
+  }
+  showModeDropdown.value = !showModeDropdown.value
+}
+
+/**
+ * 点击模式选择器外部区域时关闭下拉
+ */
+function onDocClickCloseMode(e) {
+  if (modeSelectorRef.value && !modeSelectorRef.value.contains(e.target)) {
+    showModeDropdown.value = false
+  }
+}
+
+watch(showModeDropdown, (open) => {
+  if (open) {
+    document.addEventListener('click', onDocClickCloseMode)
+  } else {
+    document.removeEventListener('click', onDocClickCloseMode)
+  }
+})
+
+// 组件卸载时移除文档级点击监听，防止泄漏
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClickCloseMode)
+})
+
+/**
+ * 选择采集模式
+ * @param {string} mode - 'photo': 采集+拍照 | 'only': 仅采集
+ */
+function selectCollectionMode(mode) {
+  showModeDropdown.value = false
+  if (mode === collectionMode.value) return
+
+  collectionMode.value = mode
+  // 同步到协议解析器（解析器未创建时由 startDataStream 兜底同步）
+  if (parser) {
+    parser.setCollectOnly(mode === 'only')
+  }
+  showToast({
+    message: mode === 'only' ? '已切换为：仅采集' : '已切换为：采集+拍照',
+    position: 'bottom',
+  })
 }
 
 /**
@@ -2253,16 +2352,20 @@ async function startDataStream() {
     parser = createSessionParser()
   }
   parser.resume()
+  // 同步采集模式到解析器（仅采集模式下静默丢弃拍照流程指令）
+  parser.setCollectOnly(collectionMode.value === 'only')
+  // 在开始采集时把当前已知标定注入解析器（后续下位机响应会再次实时刷新）
+  pushCalibrationToParser()
 
   if (!accumulationTimer) {
     initAndStartRenderingTimer()
   }
+  // 实时渲染由 initAndStartRenderingTimer 内 setInterval 驱动（见其注释），无需再单独启动
 
   hasStarted = true
 
-  // 每次开始采集时，读取下位机标定参数并写入项目根目录 calib_params.txt（覆盖）
-  const calibSaveFolder = currentFolderName || storage.path.getTempSessionName(currentSessionId)
-  await readAndSaveCalibParams(calibSaveFolder)
+  // 每次开始采集时，从下位机读取标定参数（注入解析器用于新几何关系转换，不落盘）
+  await readCalibParamsFromDevice()
 
   // 发送读取扫描时间指令（复用已有订阅通道）
   await readScanTimeFromDevice()
@@ -2352,6 +2455,7 @@ function handleCalibParamResponse(data) {
     if (data.z !== undefined) calibSavedParams.z = parseFloat(data.z)
   }
   calibReadState.calib = true
+  pushCalibrationToParser()
   logger.debug('[Calib] 标定参数响应:', JSON.stringify(data))
 }
 
@@ -2363,6 +2467,7 @@ function handleAngleOffsetResponse(data) {
     if (data.z !== undefined) calibSavedParams.angleZ = parseFloat(data.z)
   }
   calibReadState.angle = true
+  pushCalibrationToParser()
   logger.debug('[Calib] 零偏角度响应:', JSON.stringify(data))
 }
 
@@ -2372,19 +2477,31 @@ function handlePitchDelayResponse(data) {
     calibSavedParams.pitchDelay = parseFloat(data.value)
   }
   calibReadState.delay = true
+  pushCalibrationToParser()
   logger.debug('[Calib] 俯仰延时响应:', JSON.stringify(data))
 }
 
+// 将当前已读取的标定参数注入解析器，供转台激光几何模型坐标转换使用
+// 单位约定：x/y/z 为 mm（需 /1000 转米），angleX/Y/Z 与 pitchDelay 为 rad（直接使用）
+function pushCalibrationToParser() {
+  if (!parser) return
+  parser.setCalibration({
+    t: [calibSavedParams.x / 1000, calibSavedParams.y / 1000, calibSavedParams.z / 1000],
+    rpy: [calibSavedParams.angleX, calibSavedParams.angleY, calibSavedParams.angleZ],
+    syncDelta: calibSavedParams.pitchDelay,
+  })
+}
+
 /**
- * 读取下位机标定参数并覆盖写入项目根目录 calib_params.txt
- * 在每次开始采集时调用；读取失败/超时时用默认值兜底，保证 zip 内始终包含该文件
- * @param {string} folderName - 项目文件夹名（pointcloud 下的目录名）
+ * 从下位机读取标定参数（7 项：x/y/z mm、三轴零偏角 rad、俯仰同步角 rad）
+ * 读取到的值通过 parser 回调实时注入解析器（见 handleCalibParamResponse 等），
+ * 供新几何关系坐标转换使用；此处不落盘到 txt。
+ * 在每次开始采集时调用；读取失败/超时时沿用上次已注入的标定参数。
  */
-async function readAndSaveCalibParams(folderName) {
+async function readCalibParamsFromDevice() {
   try {
     if (bluetoothStore.connectionStatus !== 2) {
-      logger.debug('[Calib] 设备未连接，使用默认值写入')
-      await saveCalibParamsToFile(folderName)
+      logger.debug('[Calib] 设备未连接，沿用当前标定参数')
       return
     }
 
@@ -2393,7 +2510,7 @@ async function readAndSaveCalibParams(folderName) {
     calibReadState.angle = false
     calibReadState.delay = false
 
-    // 并发发送3条读取指令（响应通过 parser 回调异步返回）
+    // 并发发送3条读取指令（响应通过 parser 回调异步返回并注入解析器）
     await Promise.all([
       bluetoothStore.handleReadCalibParam(),
       bluetoothStore.handleReadAngleOffset(),
@@ -2408,41 +2525,11 @@ async function readAndSaveCalibParams(folderName) {
 
     const receivedCount = [calibReadState.calib, calibReadState.angle, calibReadState.delay].filter(Boolean).length
     if (receivedCount < 3) {
-      logger.warn(`[Calib] 标定参数读取不完整(${receivedCount}/3)，未读取项使用默认值`)
+      logger.warn(`[Calib] 标定参数读取不完整(${receivedCount}/3)，未读取项沿用默认值`)
     }
-
-    await saveCalibParamsToFile(folderName)
   } catch (e) {
-    logger.warn('[Calib] 读取标定参数失败，使用默认值写入:', e)
-    try {
-      await saveCalibParamsToFile(folderName)
-    } catch (writeErr) {
-      logger.error('[Calib] 写入 calib_params.txt 失败:', writeErr)
-    }
+    logger.warn('[Calib] 读取标定参数失败，沿用当前标定参数:', e)
   }
-}
-
-/**
- * 将当前标定参数写入项目根目录 calib_params.txt（key=value 格式）
- * @param {string} folderName - 项目文件夹名
- */
-async function saveCalibParamsToFile(folderName) {
-  const lines = [
-    `calib_x_mm=${calibSavedParams.x.toFixed(2)}`,
-    `calib_y_mm=${calibSavedParams.y.toFixed(2)}`,
-    `calib_z_mm=${calibSavedParams.z.toFixed(2)}`,
-    `angle_offset_x_rad=${calibSavedParams.angleX.toFixed(6)}`,
-    `angle_offset_y_rad=${calibSavedParams.angleY.toFixed(6)}`,
-    `angle_offset_z_rad=${calibSavedParams.angleZ.toFixed(6)}`,
-    `pitch_delay_rad=${calibSavedParams.pitchDelay.toFixed(6)}`,
-  ]
-  await Filesystem.writeFile({
-    path: `pointcloud/${folderName}/calib_params.txt`,
-    data: lines.join('\n'),
-    directory: Directory.External,
-    encoding: FilesystemEncoding.UTF8,
-  })
-  logger.debug(`[Calib] 标定参数已保存: pointcloud/${folderName}/calib_params.txt`)
 }
 
 // ==============================================
@@ -2561,7 +2648,8 @@ async function init() {
         target: { x: 0, y: 0, z: 0 },
         controls: {
           minDistance: initialCameraHeight / 2, // 5米（初始的1/2）
-          maxDistance: initialCameraHeight * 2, // 20米（初始的2倍）
+          // 采集渲染为分米单位，拉远上限约为改动前20的四倍，便于看到越界点云
+          maxDistance: initialCameraHeight * 8, // 80
           maxPolarAngle: Math.PI / 2,
           // minDistance: initialCameraHeight / 10,
           // maxDistance: initialCameraHeight * 10,
@@ -2987,7 +3075,7 @@ onActivated(async () => {
       pointSize: isMobile ? 0.4 : 0.5,
       cameraFov: 60,
       cameraNear: 0.1,
-      cameraFar: 200,
+      cameraFar: 2000,
     }
 
     renderer = usePointCloudRenderer(container.value, baseConfig)
@@ -2998,7 +3086,8 @@ onActivated(async () => {
       target: { x: 0, y: 0, z: 0 },
       controls: {
         minDistance: initialCameraHeight / 2,
-        maxDistance: initialCameraHeight * 2,
+        // 采集渲染为分米单位，拉远上限约为改动前20的四倍，便于看到越界点云
+        maxDistance: initialCameraHeight * 8, // 80
         maxPolarAngle: Math.PI / 2,
       },
     }
@@ -3426,10 +3515,19 @@ function jumpToBatchDetail(stationId) {
   color: rgba(255, 255, 255, 0.6);
 }
 
-.stitch-btn {
+/* ========== 拼接 + 采集模式按钮组 ========== */
+.stitch-mode-group {
   position: absolute;
   top: 16px;
   right: calc(44px + 16px + 32px + 44px + 16px);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.stitch-btn {
   padding: 0 10px;
   height: 28px;
   min-width: 44px;
@@ -3443,7 +3541,6 @@ function jumpToBatchDetail(stationId) {
   letter-spacing: 0.5px;
   box-shadow: 0 4px 12px rgba(0, 200, 83, 0.25);
   pointer-events: auto;
-  z-index: 11;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -3497,6 +3594,98 @@ function jumpToBatchDetail(stationId) {
   width: 24px;
   height: 24px;
   pointer-events: auto;
+}
+
+/* ========== 采集模式选择 ========== */
+.mode-selector {
+  position: relative;
+  pointer-events: auto;
+}
+
+.mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: all 0.2s ease;
+}
+
+.mode-btn:hover:not(:disabled),
+.mode-btn.active {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mode-arrow {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.mode-arrow.expanded {
+  transform: rotate(180deg);
+}
+
+/* 下拉面板：从按钮下方展开 */
+.mode-dropdown {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  min-width: 118px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(14, 20, 32, 0.95);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  z-index: 13;
+}
+
+.mode-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 12px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.mode-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mode-option.selected {
+  color: #2a7aff;
+}
+
+.mode-check {
+  color: #2a7aff;
+  font-size: 12px;
 }
 
 /* ========== 采集按钮 ========== */
@@ -4103,8 +4292,15 @@ function jumpToBatchDetail(stationId) {
     right: calc(40px + 16px + 16px);
   }
 
-  .stitch-btn {
+  .stitch-mode-group {
     right: calc(40px + 16px + 16px + 40px + 16px);
+    gap: 16px;
+  }
+
+  .mode-btn {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
   }
 
   .capture-btn {

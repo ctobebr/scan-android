@@ -155,6 +155,37 @@ export class parseBleData {
     this._ackResolvers = {}       // ACK Promise resolvers { cmd_key: resolveFn }
     this.lastProcessedPhoto = { yaw: 0, pitch: 0 }  // 幂等：最后处理的拍照角度（弧度）
     this.photoSessionEnded = false                  // 幂等：拍照会话是否已结束（0x82已处理过）
+
+    // ====== 仅采集模式 ======
+    // 拍照流程指令（0x83/0x81/0x82）静默丢弃：不 ACK、不启动预览、不拍照。
+    // 注意：必须连 ACK 都不回，下位机重传 0x83 超时（约 900ms）后才会自动放弃拍照任务并回到空闲态；
+    // 若回 ACK 但不发 0x91，下位机会无限等待 0x91 导致流程卡死
+    this.collectOnly = false
+    this.scanOnlyBatchFinalized = false // 幂等：仅采集模式下 0x83 是否已触发过批次收尾（下位机会重传多帧）
+
+    // ====== 转台激光几何模型标定参数与扫描方向 ======
+    // calibration: { t: [tx,ty,tz](米), rpy: [ω,φ,κ](rad), syncDelta: Δθ(rad) }
+    // 由外部 setCalibration 注入；缺失时坐标转换退化为旧球面公式
+    this.calibration = null
+    // 上一个点的俯仰角（rad），用于按俯仰角局部单调趋势推断扫描方向 d
+    this.lastPitch = 0
+    // 当前扫描方向：+1 俯仰角递增 / -1 俯仰角递减（据 lastPitch 单调推断，默认 +1）
+    this._pitchDir = 1
+  }
+
+  /**
+   * 设置标定参数并用于新几何模型坐标转换
+   * @param {object} param
+   * @param {number[]} [param.t]        平移 [tx,ty,tz]，单位米（mm 参数需先 /1000）
+   * @param {number[]} [param.rpy]      旋转角 [ω,φ,κ]（rad），对应 R=Rx(ω)Ry(φ)Rz(κ)
+   * @param {number}   [param.syncDelta] 双向扫描同步修正角 Δθ（rad）
+   */
+  setCalibration({ t, rpy, syncDelta }) {
+    this.calibration = {
+      t: t && t.length === 3 ? [t[0], t[1], t[2]] : [0, 0, 0],
+      rpy: rpy && rpy.length === 3 ? [rpy[0], rpy[1], rpy[2]] : [0, 0, 0],
+      syncDelta: typeof syncDelta === 'number' && Number.isFinite(syncDelta) ? syncDelta : 0,
+    }
   }
 
   pause() {
@@ -197,10 +228,23 @@ export class parseBleData {
     this._clearAllAckTimers()
     this.photoSessionEnded = false
     this.lastProcessedPhoto = { yaw: 0, pitch: 0 }
+
+    // 重置仅采集模式收尾标志（collectOnly 为用户选择，跨批次保持，不在此重置）
+    this.scanOnlyBatchFinalized = false
   }
 
   isPaused() {
     return this._paused
+  }
+
+  /**
+   * 设置采集模式
+   * @param {boolean} only - true: 仅采集（静默丢弃拍照流程指令）；false: 采集+拍照（默认）
+   */
+  setCollectOnly(only) {
+    this.collectOnly = !!only
+    this.scanOnlyBatchFinalized = false // 切换模式时重置收尾标志
+    logger.info(`采集模式切换为: ${this.collectOnly ? '仅采集' : '采集+拍照'}`)
   }
 
   // 验证数据包
@@ -227,6 +271,29 @@ export class parseBleData {
    * @param {Uint8Array} data - 数据区内容
    */
   handleProtocolPacket(cmd, data) {
+    // 仅采集模式：静默丢弃拍照流程指令（0x83/0x81/0x82），不 ACK、不进任何拍照逻辑
+    if (
+      this.collectOnly &&
+      (cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START ||
+        cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA ||
+        cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_COMPLETE)
+    ) {
+      if (cmd === DEVICE_DATA_COMMANDS.CMD_CTRL_CAMERA_START && !this.scanOnlyBatchFinalized) {
+        // 0x83 是下位机"扫描结束"的明确信号，仅对第一帧触发批次收尾（后续为重传帧）
+        this.scanOnlyBatchFinalized = true
+        logger.info('◀── 仅采集模式：收到 0x83（扫描结束信号），静默丢弃并触发批次收尾')
+        if (this.options.onScanOnlyComplete) {
+          const result = this.options.onScanOnlyComplete()
+          if (result && typeof result.catch === 'function') {
+            result.catch((err) => logger.error('onScanOnlyComplete 回调错误', err))
+          }
+        }
+      } else {
+        logger.debug('◀── 仅采集模式：丢弃拍照流程指令（重传帧）')
+      }
+      return
+    }
+
     // if (typeof cmd === 'number') {
     //   logger.debug('cmd::', cmd.toString(16).padStart(2, '0'))
     // } else {
@@ -366,8 +433,16 @@ export class parseBleData {
       const yaw_rad = yaw_int16 / 1000.0 // 弧度
       // const pitch_rad = -pitch_int16 / 1000.0 + (68 / 180) * 3.1415926 // 弧度 目前每个结构的偏移角度都不一致，打算后期在下位机上去做这个角度偏移校准，上位机这边不再处理角度偏移------对于parseBinaryPointDataXYZ这部分也是直接收到的下位机已经处理过后，已经添加偏移的值
       const pitch_rad = -pitch_int16 / 1000.0
-      const distance_m = distance_u16 / 100.0 // 分米
-      // const pitch_rad1 = -pitch_int16 / 1000.0  //
+      // 下位机距离单位为毫米，转台激光几何模型的平移/旋转参数(标定)均以米计，
+      // 因此此处换算成米再参与模型计算；sphericalToCartesian 内部得米，输出再转回分米
+      const distance_m = distance_u16 / 1000.0 // 米
+
+      // 依据俯仰角局部单调趋势推断双向扫描方向 d：
+      // 相邻点俯仰角增大→d=+1；减小→d=-1；相等（转折处同值）沿用上一次方向
+      const pitchDiff = pitch_rad - this.lastPitch
+      if (pitchDiff > 0) this._pitchDir = 1
+      else if (pitchDiff < 0) this._pitchDir = -1
+      this.lastPitch = pitch_rad
 
       // 转换为笛卡尔坐标
       const point = this.sphericalToCartesian(pitch_rad, yaw_rad, distance_m, 1.0)
@@ -386,35 +461,79 @@ export class parseBleData {
     }
     return points
   }
-  // pitch: 俯仰角（从水平面向上的角度，-π/2到π/2）
-  // yaw: 方位角（在水平面上的角度，-π到π）
-  // r: 距离（分米）
+  // pitch: 俯仰角（弧度）
+  // yaw: 方位角/转台方位角（弧度）
+  // r: 距离（米，传入前已由毫米换算为米）
   // intensity: 强度
+  // 转台激光扫描几何模型坐标转换：
+  //   θc = pitch + d·Δθ
+  //   q = [0, r·cosθc, r·sinθc]
+  //   m = Rx(ω)Ry(φ)Rz(κ)·q + t
+  //   [xm, ym, zm] = Rz(yaw)·m
+  // 模型内部以米计算（标定平移 t 单位为米），返回值统一再换算为"分米"，
+  // 与全局单位约定一致（渲染用分米，txt 写入时 /10 得到米）
   sphericalToCartesian(pitch, yaw, r, intensity) {
-    // 计算笛卡尔坐标
-    const x1 = r * Math.cos(pitch) * Math.cos(yaw)
-    const y1 = r * Math.sin(pitch) // 高度
-    const z1 = r * Math.cos(pitch) * Math.sin(yaw)
-    const x = r * Math.cos(pitch) * Math.cos(yaw)
-    const y = r * Math.sin(pitch) // 高度
-    const z = r * Math.cos(pitch) * Math.sin(yaw)
-    // 返回点对象，包含原始数据方便调试
+    let xm, ym, zm
+    const calib = this.calibration
+    // 新几何模型始终生效；标定缺失时按零参数（平移0、旋转0、同步修正0）处理
+    const [tx, ty, tz] = (calib && calib.t) || [0, 0, 0]
+    const [omega, phi, kappa] = (calib && calib.rpy) || [0, 0, 0]
+    const syncDelta = calib && Number.isFinite(calib.syncDelta) ? calib.syncDelta : 0
+
+    // 1) 方向相关俯仰同步修正
+    const thetaC = pitch + this._pitchDir * syncDelta
+
+    // 2) 局部扫描平面点 q = [0, r·cosθc, r·sinθc]
+    const qy = r * Math.cos(thetaC)
+    const qz = r * Math.sin(thetaC)
+
+    // 3) 固定安装旋转 R_opk = Rx(ω)Ry(φ)Rz(κ)，列向量右侧先作用
+    const c1 = Math.cos(omega)
+    const s1 = Math.sin(omega)
+    const c2 = Math.cos(phi)
+    const s2 = Math.sin(phi)
+    const c3 = Math.cos(kappa)
+    const s3 = Math.sin(kappa)
+
+    // a = Rz(κ)·q（q_x = 0）
+    const qx = 0
+    const ax = c3 * qx - s3 * qy
+    const ay = s3 * qx + c3 * qy
+    const az = qz
+    // b = Ry(φ)·a
+    const bx = c2 * ax + s2 * az
+    const by = ay
+    const bz = -s2 * ax + c2 * az
+    // m = Rx(ω)·b + t
+    const mx = bx + tx
+    const my = c1 * by - s1 * bz + ty
+    const mz = s1 * by + c1 * bz + tz
+
+    // 4) 转台方位旋转 Rz(yaw)
+    const C = Math.cos(yaw)
+    const S = Math.sin(yaw)
+    xm = C * mx - S * my
+    ym = S * mx + C * my
+    zm = mz
+
+    // 内部以米计算，输出统一换算为分米（1 米 = 10 分米）
+    const dm = 10
     return {
-      x1,
-      y1,
-      z1, // 分米
-      x,
-      y,
-      z,
+      x1: xm * dm,
+      y1: ym * dm,
+      z1: zm * dm, // 分米
+      x: xm * dm,
+      y: ym * dm,
+      z: zm * dm,
       pitch: pitch, // 弧度
       yaw: yaw, // 弧度
-      distance: r * 1000,
+      distance: r * dm, // 分米（与 distanceM 一致）
       intensity: intensity,
 
-      // 角度版本（方便查看） => 弧度转角度  (degree * 180 / π)
+      // 角度版本（方便查看） => 弧度转角度
       pitchDeg: (pitch * 180) / Math.PI, // 角度
       yawDeg: (yaw * 180) / Math.PI, // 角度
-      distanceM: r, // 这里是分米，这里如果转成米，点云显示会很密集
+      distanceM: r * dm, // 分米
     }
   }
 

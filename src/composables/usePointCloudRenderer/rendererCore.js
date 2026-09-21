@@ -55,7 +55,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
     // 相机参数
     const cameraFov = config.cameraFov || 60
     const cameraNear = config.cameraNear || 0.1
-    const cameraFar = config.cameraFar || 200
+    const cameraFar = config.cameraFar || 2000
 
     camera = new THREE.PerspectiveCamera(
       cameraFov,
@@ -139,7 +139,7 @@ export function createRendererCore({ container, config, bufferManager, colorCalc
       logger.info('✅使用自定义设置', JSON.stringify(customCameraConfig.controls))
     } else {
       controls.minDistance = 4
-      controls.maxDistance = 100
+      controls.maxDistance = 80
       controls.maxPolarAngle = Math.PI / 2
       logger.info('⚠️使用通用相机设置设置', JSON.stringify(customCameraConfig))
     }
