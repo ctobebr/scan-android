@@ -823,7 +823,9 @@ async function parseAndRenderTxt(txtRelPath) {
     const y = parseFloat(parts[1])
     const z = parseFloat(parts[2])
     if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) continue
-    points.push({ x, y, z })
+    // txt 落盘单位为米，渲染时 ×10 转分米，与采集时实时渲染的分米制保持一致
+    // 注意：仅做渲染换算，不修改 txt 文件内部数据单位
+    points.push({ x: x * 10, y: y * 10, z: z * 10 })
   }
   if (points.length > 0 && renderer) {
     renderer.resetPointCloud()
@@ -1381,7 +1383,9 @@ function updateHLMRFAnchorsFromMap() {
 
   for (const [batchNo, pos] of sortedPositions) {
     const sprite = createHLMRFAnchorSprite(batchNo)
-    sprite.position.set(pos.x, pos.y + 0.5, pos.z)
+    // 锚点 Map 中存储米制平移（与 global_poses 文件单位一致），
+    // 渲染时 ×10 转分米，与分米制渲染的点云保持对齐
+    sprite.position.set(pos.x * 10, pos.y * 10 + 0.5, pos.z * 10)
     sprite.scale.set(1.5, 1.5, 1)
     sprite.userData = { stationId: batchNo - 1, isAnchor: true, isHLMRFAnchor: true }
     scene.add(sprite)

@@ -22,9 +22,10 @@
 // 导入协议常量，避免硬编码
 // 原因：统一常量管理，消除重复定义
 //点云渲染分三种模式
-// ①下位机直接发 XYZ 坐标，渲染直接用下位机发送的 XYZ
-// ②下位机发极坐标，上位机转笛卡尔，渲染用上位机转换后的 XYZ
-// ③双格式模式（下位机同时发 XYZ + 极坐标），渲染优先使用下位机发送的 XYZ（更精确）
+// ①下位机直接发 XYZ 坐标，渲染直接用下位机发送的 XYZ（不含极坐标，无法走新几何模型）
+// ②下位机发极坐标，上位机经新几何模型转笛卡尔，渲染用上位机转换后的 XYZ
+// ③双格式模式（下位机同时发 XYZ + 极坐标），统一使用新几何模型转换结果；
+//   下位机 XYZ 帧仅用于双格式配对同步（保证点完整性），不再直接采用
 import {
   CONTROL_COMMANDS,
   DEVICE_DATA_COMMANDS,
@@ -1312,10 +1313,12 @@ export class parseBleData {
 
   /**
    * 合并XYZ和极坐标数据并输出
-   * 注意: 合并后的点使用XYZ的坐标(更精确),同时保留极坐标的原始数据用于保存
+   * 注意: 合并后的点统一使用极坐标经新几何模型转换的坐标（与仅极坐标模式保持一致，
+   * 保证 txt 前三列 xyz 可由后三列极坐标 + 标定参数复算验证）；
+   * 下位机 XYZ 帧仅用于双格式配对同步（确保两种格式到齐才输出，避免丢点），不再直接采用
    *
-   * @param {Array} xyzPoints - XYZ格式的点数据
-   * @param {Array} polarPoints - 极坐标格式的点数据
+   * @param {Array} xyzPoints - XYZ格式的点数据（仅用于配对计数）
+   * @param {Array} polarPoints - 极坐标格式的点数据（含新几何模型转换后的 xyz）
    */
   _mergeAndOutputPoints(xyzPoints, polarPoints) {
     const count = Math.min(xyzPoints.length, polarPoints.length)
@@ -1327,13 +1330,13 @@ export class parseBleData {
     }
 
     for (let i = 0; i < count; i++) {
-      const xyz = xyzPoints[i]
       const polar = polarPoints[i]
 
       const mergedPoint = {
-        x: xyz.x,
-        y: xyz.y,
-        z: xyz.z,
+        // 统一使用新几何模型转换结果（极坐标帧解析时已由 sphericalToCartesian 计算）
+        x: polar.x,
+        y: polar.y,
+        z: polar.z,
         pitch: polar.pitch,
         yaw: polar.yaw,
         distanceM: polar.distanceM,
