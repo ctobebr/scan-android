@@ -2368,8 +2368,10 @@ async function startDataStream() {
 
   hasStarted = true
 
-  // 每次开始采集时，从下位机读取标定参数（注入解析器用于新几何关系转换，不落盘）
-  await readCalibParamsFromDevice()
+  // 每次开始采集时，从下位机读取标定参数（注入解析器用于新几何关系转换，
+  // 并落盘到项目根目录 calib_params.txt，供分享/校验使用）
+  const calibSaveFolder = currentFolderName || storage.path.getTempSessionName(currentSessionId)
+  await readCalibParamsFromDevice(calibSaveFolder)
 
   // 发送读取扫描时间指令（复用已有订阅通道）
   await readScanTimeFromDevice()
@@ -2499,13 +2501,16 @@ function pushCalibrationToParser() {
 /**
  * 从下位机读取标定参数（7 项：x/y/z mm、三轴零偏角 rad、俯仰同步角 rad）
  * 读取到的值通过 parser 回调实时注入解析器（见 handleCalibParamResponse 等），
- * 供新几何关系坐标转换使用；此处不落盘到 txt。
+ * 供新几何关系坐标转换使用；读取完成后落盘到项目根目录 calib_params.txt。
  * 在每次开始采集时调用；读取失败/超时时沿用上次已注入的标定参数。
+ * @param {string} folderName - 项目文件夹名（用于定位 calib_params.txt 写入路径）
  */
-async function readCalibParamsFromDevice() {
+async function readCalibParamsFromDevice(folderName) {
   try {
     if (bluetoothStore.connectionStatus !== 2) {
       logger.debug('[Calib] 设备未连接，沿用当前标定参数')
+      // 未连接时也用当前（默认/上次）标定落盘，保证项目根目录始终包含 calib_params.txt
+      await saveCalibParamsToFile(folderName)
       return
     }
 
@@ -2531,9 +2536,42 @@ async function readCalibParamsFromDevice() {
     if (receivedCount < 3) {
       logger.warn(`[Calib] 标定参数读取不完整(${receivedCount}/3)，未读取项沿用默认值`)
     }
+
+    // 读取完成（无论完整与否）后落盘一次：标定参数已聚合到 calibSavedParams（已注入解析器）
+    await saveCalibParamsToFile(folderName)
   } catch (e) {
     logger.warn('[Calib] 读取标定参数失败，沿用当前标定参数:', e)
+    try {
+      await saveCalibParamsToFile(folderName)
+    } catch (writeErr) {
+      logger.error('[Calib] 写入 calib_params.txt 失败:', writeErr)
+    }
   }
+}
+
+/**
+ * 将当前标定参数写入项目根目录 calib_params.txt（key=value 格式）
+ * 与解析器使用的标定参数同源（calibSavedParams），不重复读取下位机
+ * @param {string} folderName - 项目文件夹名（pointcloud 下的目录名）
+ */
+async function saveCalibParamsToFile(folderName) {
+  if (!folderName) return
+  const lines = [
+    `calib_x_mm=${calibSavedParams.x.toFixed(2)}`,
+    `calib_y_mm=${calibSavedParams.y.toFixed(2)}`,
+    `calib_z_mm=${calibSavedParams.z.toFixed(2)}`,
+    `angle_offset_x_rad=${calibSavedParams.angleX.toFixed(6)}`,
+    `angle_offset_y_rad=${calibSavedParams.angleY.toFixed(6)}`,
+    `angle_offset_z_rad=${calibSavedParams.angleZ.toFixed(6)}`,
+    `pitch_delay_rad=${calibSavedParams.pitchDelay.toFixed(6)}`,
+  ]
+  await Filesystem.writeFile({
+    path: `pointcloud/${folderName}/calib_params.txt`,
+    data: lines.join('\n'),
+    directory: Directory.External,
+    encoding: FilesystemEncoding.UTF8,
+  })
+  logger.debug(`[Calib] 标定参数已保存: pointcloud/${folderName}/calib_params.txt`)
 }
 
 // ==============================================
