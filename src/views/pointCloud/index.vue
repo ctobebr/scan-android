@@ -2692,7 +2692,9 @@ async function init() {
           minDistance: initialCameraHeight / 2, // 5米（初始的1/2）
           // 采集渲染为分米单位，拉远上限约为改动前20的四倍，便于看到越界点云
           maxDistance: initialCameraHeight * 8, // 80
-          maxPolarAngle: Math.PI / 2,
+          // 垂直旋转上限约110°（超过水平90°）：网格平面在 y=-10，极角上限需超过90°
+          // 才能让相机下沉到网格平面高度，上滑到极限时网格呈现地平线（一条线）效果
+          maxPolarAngle: (110 * Math.PI) / 180,
           // minDistance: initialCameraHeight / 10,
           // maxDistance: initialCameraHeight * 10,
         },
@@ -3130,7 +3132,9 @@ onActivated(async () => {
         minDistance: initialCameraHeight / 2,
         // 采集渲染为分米单位，拉远上限约为改动前20的四倍，便于看到越界点云
         maxDistance: initialCameraHeight * 8, // 80
-        maxPolarAngle: Math.PI / 2,
+        // 垂直旋转上限约110°（超过水平90°）：网格平面在 y=-10，极角上限需超过90°
+        // 才能让相机下沉到网格平面高度，上滑到极限时网格呈现地平线（一条线）效果
+        maxPolarAngle: (110 * Math.PI) / 180,
       },
     }
 
