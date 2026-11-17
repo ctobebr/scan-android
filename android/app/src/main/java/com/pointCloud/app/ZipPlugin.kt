@@ -1,4 +1,4 @@
-package com.ptcr.mobile
+package com.pointCloud.app
 
 import android.net.Uri
 import android.util.Log

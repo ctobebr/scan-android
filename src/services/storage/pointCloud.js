@@ -50,7 +50,6 @@ import {
 // 原因：统一日志管理，消除代码重复
 // 注意：直接从 logger.js 导入，避免与 utils/index.js 的循环依赖
 import { createLogger, configureLogger } from '@/utils/logger'
-import { HLMRF_OUTPUT, HLMRF_SESSION } from '@/config/hlmrf'
 
 // ========== 日志工具 ==========
 // 使用全局日志工具创建模块专用记录器
@@ -635,6 +634,12 @@ export async function listBatches(folderName) {
   }
 }
 
+/**
+ * 查找最新的拼接结果文件路径
+ * 从最后一个批次向前查找 stitch/stitch_output/final_dense_registered_cloud.txt
+ * @param {string} folderName - 会话文件夹名
+ * @returns {Promise<string|null>} 找到的文件路径，未找到返回 null
+ */
 export async function findLatestAlignedBlock(folderName) {
   validateSessionId(folderName)
   const batches = await listBatches(folderName)
@@ -770,102 +775,62 @@ export async function deleteBatch(folderName, batchId, options = {}) {
 }
 
 /**
- * 删除站位并重建点云（完整编排函数）
+ * 删除站位（新算法版）
  *
- * 执行顺序：删除文件夹 → 从 global_poses_all.txt 移除位姿 → 重建合并点云 → 重命名批次 → 更新位姿编号
- * 确保"先重建后重命名"以避免批次编号与 stitch_output 内容不一致
+ * 执行顺序：删除批次文件夹 → 重索引剩余批次 → 删除项目根 final.ply（拼接结果失效，需重新拼接）
+ * 原始点云 txt 与照片是 gpd 算法的输入，保持不动
  *
  * @param {string} folderName - 会话文件夹名
  * @param {number|string} batchId - 要删除的批次ID（0-based，如 Batch_000 的 batchId=0）
- * @returns {Promise<{rebuiltPath: string, remainingCount: number}>} 重建结果
+ * @returns {Promise<{remainingCount: number}>} 删除后剩余站位数
  * @throws {FilePathError} 当操作失败时抛出
  */
 export async function deleteBatchAndRebuild(folderName, batchId) {
   validateSessionId(folderName)
   validateBatchId(batchId)
 
-  const deletedBatchNo = parseInt(batchId) + 1
-  const batchFolderName = `Batch_${String(batchId).padStart(3, '0')}`
+  console.log(`[deleteBatchAndRebuild] 🔥 删除 Batch_${String(batchId).padStart(3, '0')}, folderName=${folderName}`)
 
-  console.log(`[deleteBatchAndRebuild] 🔥 删除 Batch_${String(batchId).padStart(3, '0')} (batchNo=${deletedBatchNo}), folderName=${folderName}`)
-
-  logger.info('[deleteBatchAndRebuild] 开始删除并重建', { folderName, batchId, deletedBatchNo })
+  logger.info('[deleteBatchAndRebuild] 开始删除站位', { folderName, batchId })
 
   try {
-    const {
-      readGlobalPosesAll,
-      writeGlobalPosesAll,
-      rebuildDenseCloud,
-    } = await import('@/utils/pointCloud/reconstruction')
-
-    // 步骤0: 读取当前全局位姿
-    const oldPoses = await readGlobalPosesAll(folderName)
-    console.log(`[deleteBatchAndRebuild] 📋 当前 ${oldPoses.size} 个站位, batchNos=[${Array.from(oldPoses.keys()).sort((a, b) => a - b).join(', ')}]`)
-
     // 步骤1: 删除批次文件夹（跳过重索引）
     await deleteBatch(folderName, batchId, { skipReindex: true })
 
-    // 步骤2: 从位姿 Map 中移除被删除的站位
-    oldPoses.delete(deletedBatchNo)
-    console.log(`[deleteBatchAndRebuild] 📋 移除 batchNo=${deletedBatchNo}, 剩余 ${oldPoses.size} 个: [${Array.from(oldPoses.keys()).sort((a, b) => a - b).join(', ')}]`)
-
-    // 步骤3: 用原始编号重建合并点云（此时文件夹尚未重命名，编号匹配）
-    console.log(`[deleteBatchAndRebuild] 🔨 重建合并点云...`)
-    const rebuiltPath = await rebuildDenseCloud(folderName, oldPoses)
-
-    // 步骤4: 重命名剩余批次文件夹（连续编号）
+    // 步骤2: 重命名剩余批次文件夹（连续编号）
     await reindexBatches(folderName)
 
-    // 步骤5: 将位姿重新编号为连续编号，与重命名后的文件夹一致
-    const sortedEntries = Array.from(oldPoses.entries()).sort(([a], [b]) => a - b)
-    const newPoses = new Map()
-    for (let i = 0; i < sortedEntries.length; i++) {
-      newPoses.set(i + 1, sortedEntries[i][1])
-    }
-    await writeGlobalPosesAll(folderName, newPoses)
-
-    // 步骤6: 验证矩阵数量与实际站位数量是否匹配
-    const batchFolders = await listBatches(folderName)
-    const actualBatchCount = batchFolders.length
-    const matrixCount = newPoses.size
-    if (actualBatchCount === matrixCount) {
-      console.log(`[deleteBatchAndRebuild] ✅ 数量匹配: ${matrixCount} = ${actualBatchCount} (站位=${batchFolders.join(', ') || '无'})`)
-    } else {
-      console.error(`[deleteBatchAndRebuild] ❌ 数量不匹配: 矩阵=${matrixCount}, 站位=${actualBatchCount}`)
-    }
-
-    // 步骤7: 所有站位已删除，清理会话级文件
-    if (newPoses.size === 0) {
-      const sessionDir = sessionFolder(folderName)
-      console.log(`[deleteBatchAndRebuild] 🧹 所有站位已删除，清理会话级文件`)
-      for (const file of [HLMRF_SESSION.GLOBAL_POSES_ALL_FILE, HLMRF_OUTPUT.DENSE_CLOUD_FILE]) {
-        try {
-          await deleteFile(`${sessionDir}/${file}`)
-        } catch (_) { /* 文件可能不存在 */ }
+    // 步骤3: 删除项目根 final.ply，使拼接结果失效
+    const finalPlyPath = `${sessionFolder(folderName)}/final.ply`
+    try {
+      if (await exists(finalPlyPath)) {
+        await deleteFile(finalPlyPath)
+        console.log('[deleteBatchAndRebuild] 🧹 已删除拼接结果 final.ply（需重新拼接）')
       }
-    }
+    } catch (_) { /* 文件可能不存在 */ }
 
-    console.log(`[deleteBatchAndRebuild] 🎉 完成: 剩余 ${newPoses.size} 个站位`)
+    // 步骤4: 统计剩余站位数
+    const batchFolders = await listBatches(folderName)
+    const remainingCount = batchFolders.length
+
+    console.log(`[deleteBatchAndRebuild] 🎉 完成: 剩余 ${remainingCount} 个站位`)
 
     // 触发更新事件
     dispatchFolderUpdate('partial_update', {
-      action: 'batch_rebuilt',
+      action: 'batch_deleted',
       folders: [folderName],
     })
 
-    logger.info(
-      `[deleteBatchAndRebuild] 完成: 剩余 ${newPoses.size} 个站位`,
-    )
+    logger.info(`[deleteBatchAndRebuild] 完成: 剩余 ${remainingCount} 个站位`)
 
     return {
-      rebuiltPath,
-      remainingCount: newPoses.size,
+      remainingCount,
     }
   } catch (e) {
     logger.error('[deleteBatchAndRebuild] 失败', { folderName, batchId, error: e.message })
     throw new FilePathError(
       ErrorCodes.FILESYSTEM_ERROR,
-      `删除并重建失败: ${e.message}`,
+      `删除站位失败: ${e.message}`,
     )
   }
 }

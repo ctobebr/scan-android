@@ -1,6 +1,5 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'com.chaquo.python'
 
 android {
     namespace "com.pointCloud.app"
@@ -20,21 +19,6 @@ android {
         
         ndk {
             abiFilters "arm64-v8a"
-        }
-        
-        python {
-            version '3.10'
-            buildPython 'D:\\softwarePackage\\python3.10\\python.exe'
-            pip {
-                install "numpy"
-                install "opencv-python-headless"
-                install "Pillow"
-                options "--index-url", "https://pypi.tuna.tsinghua.edu.cn/simple"
-                options "--extra-index-url", "https://chaquo.com/pypi-13.1"
-                options "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
-                options "--trusted-host", "chaquo.com"
-                options "--default-timeout", "300"
-            }
         }
     }
     buildTypes {
@@ -62,9 +46,6 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
-    
-    // ONNX Runtime
-    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
 }
 
 apply from: 'capacitor.build.gradle'

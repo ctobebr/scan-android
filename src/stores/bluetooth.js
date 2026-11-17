@@ -69,7 +69,6 @@ export const useBluetoothStore = defineStore('bluetooth', {
         await showDialog({
           title: '提示',
           message: '扫描过程中出错',
-          theme: 'round-button',
         })
       } finally {
         this.scanning = false
@@ -105,7 +104,6 @@ export const useBluetoothStore = defineStore('bluetooth', {
         await showDialog({
           title: '提示',
           message: '蓝牙初始化失败，请重试',
-          theme: 'round-button',
         })
         return false
       }
@@ -118,7 +116,6 @@ export const useBluetoothStore = defineStore('bluetooth', {
         await showDialog({
           title: '提示',
           message: '请先打开手机蓝牙',
-          theme: 'round-button',
         })
         return false
       }

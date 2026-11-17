@@ -94,14 +94,13 @@ import FileList from './FileList.vue'
 import ProjectList from './ProjectList.vue'
 import SettingList from '@/views/settings/index.vue'
 import { bluetoothService } from '@/services/bluetooth'
-// import { showToast } from '@/utils/ui/toast'
 import { useBluetoothStore } from '@/stores/bluetooth'
 import { useFoldersStore } from '@/stores/folders'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { lockToPortrait } from '@/utils/device/screen'
 import { StatusBar } from '@capacitor/status-bar'
-import { showLoadingToast, closeToast, showToast } from 'vant'
+import { showToast } from 'vant'
 
 const router = useRouter()
 const bluetoothStore = useBluetoothStore()

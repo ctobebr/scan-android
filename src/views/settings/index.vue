@@ -643,7 +643,7 @@ import { bluetoothService } from '@/services/bluetooth'
 import { App } from '@capacitor/app'
 import { parseBleData } from '@/utils/format/bleProtocol'
 import { NUS_SERVICE_UUID, NUS_NOTIFY_CHAR_UUID } from '@/constants/bluetooth'
-import { showLoadingToast, closeToast, showToast } from 'vant'
+import { showToast } from 'vant'
 import { SETTING_DEFAULT_VALUES } from '@/constants/bluetooth'
 import { showConfirmDialog } from 'vant'
 
