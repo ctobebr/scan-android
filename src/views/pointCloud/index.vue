@@ -20,7 +20,7 @@
         <!-- <button @click="openSaveDialog" class="save-btn" :disabled="saving "> -->
 
         <!-- <button @click="handleOverivew" class="preview-btn" > -->
-        <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave">
+        <button @click="handleOverivew" class="preview-btn" :disabled="saving || !enableSave || isCollecting || isStitching">
           预览
         </button>
         <!-- 拼接按钮 + 采集模式选择（模式按钮在拼接左侧，采集中禁用切换） -->
@@ -48,11 +48,15 @@
               </button>
             </div>
           </div>
-          <button class="stitch-btn" :disabled="saving || !enableSave || isStitching">
+          <button
+            class="stitch-btn"
+            :disabled="saving || !enableSave || isStitching || isCollecting"
+            @click="handleStitchClick"
+          >
             {{ isStitching ? stitchProgressText || '拼接中...' : '拼接' }}
           </button>
         </div>
-        <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave">
+        <button @click="openSaveDialog" class="save-btn" :disabled="saving || !enableSave || isStitching || isCollecting">
           {{ saving ? '保存中...' : '保存' }}
         </button>
 
@@ -60,7 +64,7 @@
           <img src="@/assets/img/edit.png" class="editIcon" @click="handleEditClick" alt="编辑" />
           <button
             class="capture-btn"
-            :disabled="bluetoothStore.connectionStatus !== 2 || isCollecting.value"
+            :disabled="bluetoothStore.connectionStatus !== 2"
             @click="startDataStream"
           ></button>
           <img
@@ -101,7 +105,36 @@
         <!-- 内存调试按钮（仅开发环境显示） -->
         <!-- <button v-if="isDev" class="debug-memory-btn" @click="showMemoryStats">内存</button> -->
 
-        <!-- 保存对话框 -->
+        <!-- 保存对话框（浅色，统一 vant 样式）；teleport 到 body 以脱离 pointer-events:none 的 HUD 容器 -->
+        <van-dialog
+          v-model:show="showSaveDialog"
+          teleport="body"
+          title="完成"
+          show-cancel-button
+          confirm-button-text="保存"
+          cancel-button-text="取消"
+          :before-close="onSaveDialogBeforeClose"
+        >
+          <div class="save-dialog-field">
+            <van-field
+              ref="saveInput"
+              v-model="projectName"
+              placeholder="输入项目名称"
+              maxlength="10"
+              clearable
+            />
+          </div>
+        </van-dialog>
+
+        <!--
+          ============================================================
+          【已停用】深色保存弹窗 / 拼接引导弹窗（原自定义深色样式）
+          停用原因：点云页弹窗统一改为浅色 vant 样式（van-dialog / showConfirmDialog），
+          与页面内其他确认弹窗保持一致；深色方案仅注释保留、不删除，
+          便于后续需要时切换回深色弹窗。
+          恢复方式：取消注释下方模板，并同步恢复 script 中 showStitchGuide
+          状态与 confirmSave 原实现、样式区的深色弹窗注释。
+          ============================================================
         <div v-if="showSaveDialog" class="save-dialog-overlay">
           <div class="save-dialog-content">
             <div class="save-dialog-card">
@@ -120,6 +153,22 @@
             </div>
           </div>
         </div>
+
+        <div v-if="showStitchGuide" class="save-dialog-overlay">
+          <div class="save-dialog-content">
+            <div class="save-dialog-card">
+              <h3>提示</h3>
+              <p class="stitch-guide-text">
+                项目尚未拼接，拼接完成后将生成全局彩色点云（耗时较长）。是否立即拼接并保存？
+              </p>
+              <div class="save-actions">
+                <button @click="stitchThenSave" :disabled="isStitching || saving">拼接并保存</button>
+                <button @click="saveWithoutStitch" :disabled="isStitching || saving">仅保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        -->
       </div>
     </div>
   </div>
@@ -156,6 +205,7 @@ import { App } from '@capacitor/app'
 import { createLogger } from '@/utils/logger'
 // 导入多站点支持
 import * as THREE from 'three'
+import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { stations } from '@/config/pointCloudStations.js'
 import { loadAllStations, loadStation } from '@/utils/pointCloudLoader.js'
 
@@ -167,11 +217,9 @@ import {
 } from '@/utils/device/screen'
 
 import * as storage from '@/api/pointCloudStorage'
-import PtcrPlugin from '@/plugins/ptcr'
-import HLMRFPlugin from '@/plugins/hlmrf'
-import { HLMRF_OUTPUT, HLMRF_STITCH } from '@/config/hlmrf'
+import GpdPlugin from '@/plugins/gpd'
 import { setPanoramaCache } from '@/utils/panoramaCache'
-import { showToast, showLoadingToast, closeToast } from 'vant'
+import { showToast, showLoadingToast, closeToast, showConfirmDialog } from 'vant'
 import { generateOptimizedSessionId } from '@/utils/format/sessionId'
 import { Filesystem, Directory, FilesystemEncoding } from '@capacitor/filesystem'
 import { appendFile } from '@/services/storage/fileSystem'
@@ -205,6 +253,10 @@ const savedDuringDialog = ref(false)
 
 const isStitching = ref(false)
 const stitchProgressText = ref('')
+// 拼接引导对话框（保存时项目尚未拼接）
+// 【已停用】拼接引导改用 showConfirmDialog 浅色弹窗（见 showStitchGuideDialog），状态保留备查
+// const showStitchGuide = ref(false)
+const pendingSaveFolder = ref('')
 
 // ==============================================
 // 采集模式（'photo': 采集+拍照（默认） | 'only': 仅采集）
@@ -315,8 +367,6 @@ const isDev = true
 let anchorSprites = [] // 锚点精灵数组
 const raycaster = new THREE.Raycaster() // 射线检测器
 const mouse = new THREE.Vector2() // 鼠标位置
-let _hlmrfClickRegistered = false // 是否已注册HLMRF锚点点击事件
-let hlmrfAnchorPositions = new Map() // 持久化锚点位置 Map<batchNo, {x, y, z}>
 
 // ==============================================
 // 采集进度相关状态
@@ -476,14 +526,44 @@ const closeSaveDialog = async () => {
 }
 
 /**
+ * 执行保存并返回主页（保存流程统一入口）
+ * @param {string} folderName - 目标文件夹名
+ */
+const doSaveAndBack = (folderName) => {
+  lastSavedFolder.value = folderName
+  savedDuringDialog.value = false
+
+  showLoadingToast({
+    message: '保存中...',
+    forbidClick: true,
+  })
+  // 执行保存操作（非阻塞），完成后立即返回主页
+  performSave(folderName).finally(() => {
+    closeToast()
+    router.back()
+  })
+}
+
+/**
+ * 保存弹窗关闭前拦截：点确认时执行校验，校验失败则阻止弹窗关闭
+ * @param {string} action - 触发关闭的动作（'confirm' | 'cancel'）
+ * @returns {boolean|Promise<boolean>} 是否允许关闭
+ */
+const onSaveDialogBeforeClose = (action) => {
+  if (action !== 'confirm') return true
+  return confirmSave()
+}
+
+/**
  * 确认保存操作
+ * @returns {Promise<boolean>} 流程是否通过（true 允许保存弹窗关闭）
  */
 const confirmSave = async () => {
   const name = (projectName.value || '').trim()
 
   if (name && name.length > 10) {
     showToast({ message: '项目名称不能超过10个字符', position: 'bottom' })
-    return
+    return false
   }
 
   const validRe = /^[\u4e00-\u9fa5A-Za-z0-9 _-]*$/
@@ -492,38 +572,68 @@ const confirmSave = async () => {
       message: '项目名称包含非法字符，仅允许中文、字母、数字、空格、下划线和短横线',
       position: 'bottom',
     })
-    return
+    return false
   }
 
   const folderName = name ? `${name}_${currentSessionId}` : currentSessionId
-  lastSavedFolder.value = folderName
-  savedDuringDialog.value = false
 
-  // 先关闭保存对话框
-  closeSaveDialog()
-
+  // 保存前检查是否已拼接：未拼接则引导"拼接并保存 / 仅保存"
   try {
-    showLoadingToast({
-      message: '保存中...',
-      forbidClick: true,
-    })
-    // 执行保存操作（非阻塞）
-    performSave(folderName).finally(() => {
-      // 保存完成后关闭加载提示
-      // 立即执行返回操作
-      closeToast()
-      router.back()
-    })
-
-    // Todo  后续完成之后上传云端，不允许再次继续采集站位数据，只能查看
-  } catch (error) {
-    closeToast()
-    showToast({
-      message: '保存失败',
-      position: 'bottom',
-    })
-    router.back()
+    const dataFolder = await getDataDir()
+    const finalPlyPath = `${storage.path.sessionFolder(dataFolder)}/final.ply`
+    const hasFinalPly = await storage.file.exists(finalPlyPath)
+    if (!hasFinalPly) {
+      pendingSaveFolder.value = folderName
+      showStitchGuideDialog()
+      return true
+    }
+  } catch (e) {
+    logger.warn('[PointCloud] 检查 final.ply 失败，按未拼接处理', e)
+    pendingSaveFolder.value = folderName
+    showStitchGuideDialog()
+    return true
   }
+
+  // 已拼接：直接保存并返回
+  doSaveAndBack(folderName)
+  return true
+
+  // Todo  后续完成之后上传云端，不允许再次继续采集站位数据，只能查看
+}
+
+/**
+ * 拼接引导弹窗（浅色 showConfirmDialog，替代原深色引导弹窗）
+ * 确认：拼接并保存；取消：仅保存
+ */
+const showStitchGuideDialog = async () => {
+  try {
+    await showConfirmDialog({
+      title: '提示',
+      message: '项目尚未拼接，拼接完成后将生成全局彩色点云（耗时较长）。是否立即拼接并保存？',
+      confirmButtonText: '拼接并保存',
+      cancelButtonText: '仅保存',
+    })
+    await stitchThenSave()
+  } catch (e) {
+    saveWithoutStitch()
+  }
+}
+
+/**
+ * 拼接引导对话框 - 仅保存（跳过拼接）
+ */
+const saveWithoutStitch = () => {
+  doSaveAndBack(pendingSaveFolder.value)
+}
+
+/**
+ * 拼接引导对话框 - 拼接并保存（拼接完成后自动保存并返回）
+ */
+const stitchThenSave = async () => {
+  const folderName = pendingSaveFolder.value
+  const ok = await runGpdProject()
+  if (!ok) return
+  doSaveAndBack(folderName)
 }
 
 // ==============================================
@@ -801,96 +911,32 @@ function getCurrentBatchNo() {
   return String(Math.max(0, idx)).padStart(3, '0')
 }
 
-async function parseAndRenderTxt(txtRelPath) {
-  const readResult = await Filesystem.readFile({
-    path: txtRelPath,
-    directory: Directory.External,
-    encoding: FilesystemEncoding.UTF8,
-  })
-  if (!readResult || !readResult.data) {
-    throw new Error('文件读取返回空数据')
-  }
-  const rawText = readResult.data
-  const lines = rawText.trim().split('\n')
-  const points = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-    const parts = line.split(/\s+/)
-    if (parts.length < 3) continue
-    // 跳过非数据行（如 header "x(m) y(m) z(m)" 或格式损坏的行）
-    const x = parseFloat(parts[0])
-    const y = parseFloat(parts[1])
-    const z = parseFloat(parts[2])
-    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(z)) continue
-    // txt 落盘单位为米，渲染时 ×10 转分米，与采集时实时渲染的分米制保持一致
-    // 注意：仅做渲染换算，不修改 txt 文件内部数据单位
-    points.push({ x: x * 10, y: y * 10, z: z * 10 })
-  }
-  if (points.length > 0 && renderer) {
-    renderer.resetPointCloud()
-    renderer.addPoints(points)
-    pointCount.value = points.length
-  }
-}
-
-async function findFirstBatchTxt(folderName) {
-  const batchDir = `${storage.path.sessionFolder(folderName)}/Batch_000`
-  try {
-    const { files } = await Filesystem.readdir({
-      path: batchDir,
-      directory: Directory.External,
-    })
-    const txtFile = files.find(
-      (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
-    )
-    if (txtFile) {
-      return `${batchDir}/${txtFile.name}`
-    }
-  } catch (_) {}
-  return null
-}
-
 async function loadAndRenderProjectData(folderName) {
   showLoadingToast({ message: '加载点云中...', forbidClick: false })
 
   try {
-    const { getSessionDenseCloudPath, sessionDenseCloudExists } = await import(
-      '@/utils/pointCloud/reconstruction'
-    )
+    // 优先加载 gpd 拼接结果 final.ply（项目根目录，米制坐标）
+    const finalPlyPath = `${storage.path.sessionFolder(folderName)}/final.ply`
+    let hasFinalPly = false
+    try {
+      hasFinalPly = await storage.file.exists(finalPlyPath)
+    } catch (_) {}
 
-    const sessionCloudPath = getSessionDenseCloudPath(folderName)
-    const sessionCloudAvailable = await sessionDenseCloudExists(folderName)
-
-    if (sessionCloudAvailable) {
-      console.log(`[ViewMode] 👁 加载会话级合并点云, ${pointCount.value} 个点`)
-      await parseAndRenderTxt(sessionCloudPath)
+    if (hasFinalPly) {
+      const rendered = await loadAndRenderFinalPly(finalPlyPath)
       closeToast()
-      await loadHLMRFAnchorsForViewMode(folderName)
-      return
-    }
-
-    const alignedPath = await storage.stitch.findLatestAlignedBlock(folderName)
-    if (alignedPath) {
-      console.log(`[ViewMode] 👁 降级加载 alignedBlock, ${pointCount.value} 个点`)
-      await parseAndRenderTxt(alignedPath)
-      closeToast()
-      await loadHLMRFAnchorsForViewMode(folderName)
-      return
-    }
-
-    const firstBatchPath = await findFirstBatchTxt(folderName)
-    if (firstBatchPath) {
-      console.log(`[ViewMode] 👁 降级加载原始点云, ${pointCount.value} 个点`)
-      await parseAndRenderTxt(firstBatchPath)
-      closeToast()
-      await loadHLMRFAnchorsForViewMode(folderName)
-      return
+      if (rendered) return
     }
 
     closeToast()
-    logger.info('[PointCloud] 查看模式 - 该项目暂无点云数据')
-    showToast({ message: '该项目暂无点云数据，可开始采集', position: 'bottom', duration: 3000 })
+    const batches = await storage.batch.list(folderName).catch(() => [])
+    if (batches.length === 0) {
+      logger.info('[PointCloud] 查看模式 - 该项目暂无点云数据')
+      showToast({ message: '该项目暂无点云数据，可开始采集', position: 'bottom', duration: 3000 })
+    } else {
+      logger.info('[PointCloud] 查看模式 - 项目尚未拼接')
+      showToast({ message: '项目尚未拼接，点击"拼接"生成点云', position: 'bottom', duration: 3000 })
+    }
   } catch (e) {
     closeToast()
     logger.error('[PointCloud] 加载项目数据失败', e)
@@ -898,627 +944,198 @@ async function loadAndRenderProjectData(folderName) {
   }
 }
 
+// ==============================================
+// gpd 拼接与 final.ply 渲染
+// ==============================================
+
+const plyLoader = new PLYLoader()
+// final.ply 渲染抽稀上限（低于渲染器 maxPoints=50 万，预留余量）
+const FINAL_PLY_MAX_POINTS = 480000
+
 /**
- * 查看模式下：遍历所有批次的 global_poses.txt，加载所有站位的锚点坐标
- * 每个批次的 stitch_output/global_poses.txt 包含两个位姿矩阵：
- *   - 矩阵1（标签 "1:"）= 站位1坐标
- *   - 矩阵2（标签 "2:"）= 该批次的站位坐标
- * 通过遍历所有批次，汇总得到全部站位的锚点坐标（统一坐标系中）
- *
- * @param {string} folderName - 项目文件夹名
+ * 加载并渲染 gpd 拼接结果 final.ply
+ * 坐标为米，渲染时 ×10 转分米，与采集时实时渲染的分米制保持一致
+ * @param {string} plyPath - final.ply 相对外部存储路径
+ * @returns {Promise<boolean>} 渲染是否成功
  */
-async function loadHLMRFAnchorsForViewMode(folderName) {
+async function loadAndRenderFinalPly(plyPath) {
   try {
-    const { readGlobalPosesAll, getPoseTranslation } = await import(
-      '@/utils/pointCloud/reconstruction'
-    )
-
-    const poses = await readGlobalPosesAll(folderName)
-
-    if (poses.size === 0) {
-      await loadHLMRFAnchorsFromBatchStitch(folderName)
-      return
+    // 大文件走 WebView URL fetch 读取，避免 readFile base64 通道导致 Java 堆 OOM 崩溃
+    const plyBuffer = await storage.file.readLargeFile(plyPath)
+    const geometry = plyLoader.parse(plyBuffer)
+    const posAttr = geometry.getAttribute('position')
+    const colorAttr = geometry.getAttribute('color')
+    const total = posAttr.count
+    if (!total) {
+      geometry.dispose()
+      throw new Error('PLY 文件无点数据')
     }
 
-    hlmrfAnchorPositions.clear()
-    for (const [batchNo, matrix] of poses) {
-      hlmrfAnchorPositions.set(batchNo, getPoseTranslation(matrix))
-    }
-    console.log(`[HLMRF] 📍 查看模式 - 加载 ${hlmrfAnchorPositions.size} 个锚点`)
-    updateHLMRFAnchorsFromMap()
-  } catch (e) {
-    console.warn('[HLMRF] 查看模式 - 加载锚点失败:', e.message)
-    await loadHLMRFAnchorsFromBatchStitch(folderName)
-  }
-}
+    // 等间隔抽稀，控制在渲染上限内
+    const stride = Math.ceil(total / FINAL_PLY_MAX_POINTS)
+    const chunkSize = 50000
+    const buffer = []
+    let renderedCount = 0
 
-/**
- * 兼容旧数据：从每个批次的 stitch_output 读取 global_poses.txt 来加载锚点
- * 仅在没有 global_poses_all.txt 时作为降级方案
- *
- * @param {string} folderName - 项目文件夹名
- */
-async function loadHLMRFAnchorsFromBatchStitch(folderName) {
-  try {
-    const batches = await storage.batch.list(folderName)
-    if (!batches || batches.length === 0) {
-      return
-    }
-
-    hlmrfAnchorPositions.clear()
-    const dataDir = await getDataDir()
-
-    for (let i = 0; i < batches.length; i++) {
-      const batchFolder = storage.path.batchFolder(dataDir, i)
-      const stitchOutputDir = `${batchFolder}/${HLMRF_STITCH.STITCH_DIR}/${HLMRF_STITCH.OUTPUT_DIR}`
-      const posesPath = `${stitchOutputDir}/${HLMRF_OUTPUT.GLOBAL_POSES_FILE}`
-
-      try {
-        await storage.file.stat(posesPath)
-      } catch (_) {
-        continue
+    renderer.resetPointCloud()
+    for (let i = 0; i < total; i += stride) {
+      const point = {
+        x: posAttr.getX(i) * 10,
+        y: posAttr.getY(i) * 10,
+        z: posAttr.getZ(i) * 10,
       }
-
-      const readResult = await Filesystem.readFile({
-        path: posesPath,
-        directory: Directory.External,
-        encoding: FilesystemEncoding.UTF8,
-      })
-
-      if (!readResult || !readResult.data) continue
-
-      const positions = parseGlobalPosesContent(readResult.data, i)
-      for (const pos of positions) {
-        hlmrfAnchorPositions.set(pos.batchNo, { x: pos.x, y: pos.y, z: pos.z })
+      // PLY 含顶点色时直写颜色，否则由渲染器按高度着色
+      if (colorAttr) {
+        point.r = colorAttr.getX(i)
+        point.g = colorAttr.getY(i)
+        point.b = colorAttr.getZ(i)
+      }
+      buffer.push(point)
+      if (buffer.length >= chunkSize) {
+        renderer.addPoints(buffer)
+        renderedCount += buffer.length
+        buffer.length = 0
       }
     }
-
-    if (hlmrfAnchorPositions.size > 0) {
-      console.log(`[HLMRF] 📍 降级模式 - 加载 ${hlmrfAnchorPositions.size} 个锚点`)
-      updateHLMRFAnchorsFromMap()
+    if (buffer.length > 0) {
+      renderer.addPoints(buffer)
+      renderedCount += buffer.length
     }
-  } catch (e) {
-    console.warn('[HLMRF] 降级模式 - 加载锚点失败:', e.message)
-  }
-}
 
-// ==============================================
-// 自动拼接算法相关函数
-// ==============================================
-
-/**
- * 触发自动拼接（拍照完成后调用）
- */
-async function triggerAutoStitch() {
-  setTimeout(async () => {
-    try {
-      const dataDir = await getDataDir()
-      const batchNo = getCurrentBatchNo()
-      console.log(`[AutoStitch] 🚀 开始 (batchNo=${batchNo})`)
-
-      const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
-
-      // 诊断插件健康状况
-      const diagResult = await debugCheckPlugin()
-      if (!diagResult.ok) {
-        console.error('[AutoStitch] ❌ PtcrPlugin 不可用:', diagResult.error)
-        isStitching.value = false
-        showToast({
-          message: `PtcrPlugin 不可用: ${diagResult.error}`,
-          position: 'bottom',
-          duration: 5000,
-        })
-        return
-      }
-
-      // 显示 UI 进度提示
-      isStitching.value = true
-      stitchProgressText.value = '准备中...'
-
-      // 设置进度监听器
-      let progressHandle = null
-      const progressHandler = (event) => {
-        stitchProgressText.value = `${event.stage}: ${event.message}`
-        if (event.stage === 'error') {
-          console.error(`[AutoStitch] ❌ 拼接失败: ${event.message}`)
-        }
-      }
-
-      try {
-        progressHandle = await PtcrPlugin.addListener('ptcrProgress', progressHandler)
-      } catch (e) {
-        console.warn('[AutoStitch] ⚠️ 无法注册进度监听器:', e.message)
-      }
-
-      // 选择生成算法: 'cloud0' | 'raw' | 'standard'
-      //    修改下面 method 变量即可切换: 'cloud0' | 'raw' | 'standard'
-      //    cloud0:    无 ONNX 深度估计，稀疏彩色点云（最快 ~30s），输出 ply_raw.ply
-      //    raw:       ONNX 深度估计(raw)，密集彩色点云（~70s），输出 fused_raw.ply
-      //    standard:  ONNX 深度估计(standard)+垂直矫正，高质量密集彩色点云（~151s），输出 fused_standard.ply
-      const method = 'cloud0'
-
-      let result
-      const startTime = Date.now()
-
-      if (method === 'cloud0') {
-        result = await PtcrPlugin.generateCloud0({ dataDir, batchNo })
-      } else if (method === 'raw') {
-        result = await PtcrPlugin.generateCloudByRaw({ dataDir, batchNo })
-      } else if (method === 'standard') {
-        result = await PtcrPlugin.generateCloudByStandard({ dataDir, batchNo })
-      }
-
-      const elapsed = Date.now() - startTime
-
-      if (result.ok) {
-        console.log(`[AutoStitch] ✅ 成功 (${(elapsed / 1000).toFixed(1)}s), output: ${result.outputFile || '(无)'}`)
-        if (result.outputFile) {
-          await checkOutputFiles(result.outputFile, dataDir, batchNo, method)
-        }
-        isStitching.value = false
-        stitchProgressText.value = '拼接完成'
-        preCachePanorama(dataDir, batchNo, method)
-        showToast({ message: '全景图生成成功', position: 'bottom', duration: 2000 })
-      } else {
-        console.error(`[AutoStitch] ❌ 失败: ${result.error}, 耗时 ${(elapsed / 1000).toFixed(1)}s`)
-        isStitching.value = false
-        stitchProgressText.value = '拼接失败'
-        showToast({
-          message: `拼接失败: ${result.error || '未知错误'}`,
-          position: 'bottom',
-          duration: 3000,
-        })
-      }
-    } catch (error) {
-      console.error(`[AutoStitch] ❌ 异常: ${error.message}`)
-      isStitching.value = false
-      stitchProgressText.value = '拼接异常'
-      showToast({
-        message: 'PtcrPlugin 未安装到手机，请重新构建 APK',
-        position: 'bottom',
-        duration: 5000,
-      })
-    }
-  }, 2000)
-}
-
-async function triggerHLMRFRegistration() {
-  setTimeout(async () => {
-    try {
-      const dataDir = await getDataDir()
-      const currentIdx = parseInt(getCurrentBatchNo())
-
-      if (currentIdx < 1) {
-        console.log('[HLMRF] 🏁 首个站位 (Batch_000) - 初始化会话级文件')
-        hlmrfAnchorPositions.set(1, { x: 0, y: 0, z: 0 })
-        updateHLMRFAnchorsFromMap()
-        const { initGlobalPosesAll } = await import('@/utils/pointCloud/reconstruction')
-        await initGlobalPosesAll(dataDir)
-        return
-      }
-
-      const currentIdx1Based = currentIdx + 1
-      const previousIdx = currentIdx - 1
-
-      const currentBatchFolder = storage.path.batchFolder(dataDir, currentIdx)
-      const previousBatchFolder = storage.path.batchFolder(dataDir, previousIdx)
-
-      console.log(`[HLMRF] 🔄 多站点拼接: Batch_${String(currentIdx).padStart(3, '0')} ← Batch_${String(previousIdx).padStart(3, '0')}`)
-
-      const { files: currentFiles } = await storage.file.readDir(currentBatchFolder)
-      const currentPointCloudFile = currentFiles.find(
-        (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
-      )
-      if (!currentPointCloudFile) {
-        logger.warn('[HLMRF] 当前批次无点云文件，跳过拼接')
-        return
-      }
-
-      const stitchDir = `${currentBatchFolder}/${HLMRF_STITCH.STITCH_DIR}`
-      const stitchInputDir = `${stitchDir}/${HLMRF_STITCH.INPUT_DIR}`
-      const stitchOutputDir = `${stitchDir}/${HLMRF_STITCH.OUTPUT_DIR}`
-
-      await storage.file.ensureDir(stitchInputDir)
-      await storage.file.ensureDir(stitchOutputDir)
-
-      const { copyFile } = await import('@/services/storage/fileSystem')
-
-      // 复制当前批次点云到 stitch_input
-      await copyFile(
-        `${currentBatchFolder}/${currentPointCloudFile.name}`,
-        `${stitchInputDir}/${currentPointCloudFile.name}`,
-      )
-
-      const { getSessionDenseCloudPath, sessionDenseCloudExists } = await import(
-        '@/utils/pointCloud/reconstruction'
-      )
-
-      // 查找并复制累积点云作为 stitch_input 的 merged cloud
-      const sessionDenseCloudPath = getSessionDenseCloudPath(dataDir)
-      let sessionCloudExists = false
-      try { await storage.file.stat(sessionDenseCloudPath); sessionCloudExists = true } catch (_) {}
-
-      if (sessionCloudExists) {
-        await copyFile(sessionDenseCloudPath, `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
-      } else {
-        const previousStitchOutput = `${previousBatchFolder}/${HLMRF_STITCH.STITCH_DIR}/${HLMRF_STITCH.OUTPUT_DIR}`
-        const previousDenseCloudPath = `${previousStitchOutput}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`
-        let previousDenseCloudExists = false
-        try { await storage.file.stat(previousDenseCloudPath); previousDenseCloudExists = true } catch (_) {}
-
-        if (previousDenseCloudExists) {
-          await copyFile(previousDenseCloudPath, `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
-        } else {
-          const { files: prevFiles } = await storage.file.readDir(previousBatchFolder)
-          const prevPointCloudFile = prevFiles.find(
-            (f) => f.type === 'file' && f.name.startsWith('pointCloud_data_') && f.name.endsWith('.txt'),
-          )
-          if (!prevPointCloudFile) { logger.warn('[HLMRF] 上一批次无点云文件，跳过拼接'); return }
-          // 必须改名为累积云标准文件名（DENSE_CLOUD_FILE）再放入 stitch_input：
-          // 插件仅将以此命名的文件视为累积云并与当前站位合并输出单文件；
-          // 若保留 pointCloud_data_*.txt 原名，插件会把两站分开输出（_1.txt），
-          // 导致当前站位点云从累积结果中丢失
-          await copyFile(`${previousBatchFolder}/${prevPointCloudFile.name}`, `${stitchInputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`)
-        }
-      }
-
-      const result = await HLMRFPlugin.runRegistration({
-        inputDir: stitchInputDir,
-        outputDir: stitchOutputDir,
-      })
-
-      console.log(`[HLMRF] ${result.ok ? '✅' : '❌'} 拼接结果: ok=${result.ok}`)
-
-      if (result.ok) {
-        const denseCloudPath = `${stitchOutputDir}/${HLMRF_OUTPUT.DENSE_CLOUD_FILE}`
-        try {
-          await parseAndRenderTxt(denseCloudPath)
-          logger.info(`[HLMRF] 渲染完成: ${pointCount.value} 个点`)
-          showToast({ message: `多站点拼接完成, ${pointCount.value.toLocaleString()} 点`, position: 'bottom', duration: 3000 })
-        } catch (renderError) {
-          logger.error('[HLMRF] 渲染拼接结果失败:', renderError.message)
-        }
-
-        const { syncDenseCloudToSession, appendPoseToGlobalPosesAll } = await import('@/utils/pointCloud/reconstruction')
-        await syncDenseCloudToSession(denseCloudPath, dataDir)
-        console.log('[HLMRF] 💾 已同步到会话根目录')
-
-        const positions = await readGlobalPosesFromStitch(stitchOutputDir, currentIdx)
-        if (positions.length > 0) {
-          for (const pos of positions) {
-            hlmrfAnchorPositions.set(pos.batchNo, { x: pos.x, y: pos.y, z: pos.z })
-          }
-          updateHLMRFAnchorsFromMap()
-          console.log(`[HLMRF] 📍 锚点已更新: ${hlmrfAnchorPositions.size} 个`)
-        }
-
-        // 从 per-stitch global_poses.txt 解析新站位的 4x4 矩阵，追加到 global_poses_all.txt
-        const globalPosesPath = `${stitchOutputDir}/${HLMRF_OUTPUT.GLOBAL_POSES_FILE}`
-        try {
-          const readResult = await Filesystem.readFile({
-            path: globalPosesPath, directory: Directory.External, encoding: FilesystemEncoding.UTF8,
-          })
-          if (readResult?.data) {
-            const lines = readResult.data.trim().split('\n')
-            for (let i = 0; i < lines.length; i++) {
-              const match = lines[i].trim().match(/^(\d+):$/)
-              if (match && parseInt(match[1]) === 2 && i + 4 <= lines.length) {
-                const matrix = [
-                  lines[i + 1].trim().split(/\s+/).map(parseFloat),
-                  lines[i + 2].trim().split(/\s+/).map(parseFloat),
-                  lines[i + 3].trim().split(/\s+/).map(parseFloat),
-                  lines[i + 4].trim().split(/\s+/).map(parseFloat),
-                ]
-                await appendPoseToGlobalPosesAll(dataDir, currentIdx1Based, matrix)
-                console.log(`[HLMRF] 🔑 已追加站位 ${currentIdx1Based} 位姿到 global_poses_all.txt`)
-                break
-              }
-            }
-          }
-        } catch (_) {
-          console.warn('[HLMRF] ⚠️ 无法读取 global_poses.txt，跳过位姿追加')
-        }
-
-        // 关键修复：写入 global_poses_all.txt 后重新加载锚点
-        // stitch_output 中的位姿可能是相对变换，global_poses_all.txt 包含正确的绝对坐标
-        await loadHLMRFAnchorsForViewMode(dataDir)
-        console.log(`[HLMRF] 📍 从 global_poses_all.txt 重新加载锚点完成: ${hlmrfAnchorPositions.size} 个`)
-      } else {
-        showToast({ message: '多站点拼接失败', position: 'bottom', duration: 3000 })
-      }
-    } catch (error) {
-      console.error(`[HLMRF] ❌ 异常: ${error.message}`)
-      showToast({ message: `HLMRF 拼接异常: ${error.message || '未知错误'}`, position: 'bottom', duration: 5000 })
-    }
-  }, 2000)
-}
-
-/**
- * 预缓存全景图到内存
- */
-async function preCachePanorama(dataDir, batchNo, method) {
-  const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
-  const panoNames =
-    method === 'standard'
-      ? ['pano_standard.png', 'pano_raw.png']
-      : ['pano_raw.png', 'pano_standard.png']
-
-  for (const panoName of panoNames) {
-    try {
-      const panoPath = `${batchFolder}/ptcr_output/${panoName}`
-      const readResult = await Filesystem.readFile({
-        path: panoPath,
-        directory: Directory.External,
-      })
-      if (readResult?.data) {
-        const dataUri = `data:image/png;base64,${readResult.data}`
-        setPanoramaCache(panoPath, dataUri)
-        return
-      }
-    } catch (e) {}
-  }
-  console.warn('[AutoStitch] 预缓存全景图失败（不影响功能）')
-}
-
-async function checkOutputFiles(outputFile, dataDir, batchNo, method) {
-  const batchFolder = storage.path.batchFolder(dataDir, parseInt(batchNo))
-  const outputDir = `${batchFolder}/ptcr_output`
-
-  const plyFileName =
-    method === 'raw'
-      ? 'fused_raw.ply'
-      : method === 'standard'
-        ? 'fused_standard.ply'
-        : 'ply_raw.ply'
-
-  const outputPath = `${outputDir}/${plyFileName}`
-  try {
-    const exists = await storage.file.exists(outputPath)
-    if (exists) {
-      const stat = await storage.file.stat(outputPath)
-      const fileSize = stat.size ? `${(stat.size / 1024 / 1024).toFixed(2)} MB` : '未知'
-      console.log(`[AutoStitch] ✅ 点云输出: ${plyFileName} (${fileSize})`)
-    } else {
-      console.log(`[AutoStitch] ⚠️ 点云输出文件不存在: ${plyFileName}`)
-    }
-  } catch (error) {
-    console.error(`[AutoStitch] ❌ 检查输出文件失败: ${error.message}`)
-  }
-}
-
-// ==============================================
-// HLMRF 位姿解析与锚点渲染
-// ==============================================
-
-/**
- * 解析 global_poses.txt 内容，提取所有站位的设备采集坐标
- *
- * HLMRF 拼接输出格式：
- *   每次拼接输出的 global_poses.txt 只包含两个位姿矩阵：
- *     - 第一个矩阵（标签 "1:"）：始终代表站位1在统一坐标系下的位姿
- *     - 第二个矩阵（标签 "2:"）：代表本次拼接中被注册的新站位在统一坐标系下的位姿
- *   例如：
- *     - 拼接 站位1 & 站位2 → 输出矩阵1=站位1坐标, 矩阵2=站位2坐标
- *     - 拼接 站位2 & 站位3 → 输出矩阵1=站位1坐标, 矩阵2=站位3坐标
- *
- * global_poses.txt 格式示例:
- *   1:
- *    1  0  0  0
- *    0  1  0  0
- *    0  0  1  0
- *    0  0  0  1
- *   2:
- *     0.918865  0.0448933   0.392009   -2.20237
- *    -0.0518019   0.998632 0.00705846  0.0179284
- *     -0.391156 -0.0267926   0.919934  -0.561387
- *             0          0          0          1
- *
- * 每个站位对应一个 4x4 变换矩阵，平移分量（设备坐标）在最后一列的前三行
- *
- * @param {string} content - global_poses.txt 文件内容
- * @param {number} currentIdx - 当前拼接的站位编号（新站位的 batchNo）
- * @returns {Array<{batchNo: number, x: number, y: number, z: number}>}
- */
-function parseGlobalPosesContent(content, currentIdx) {
-  const lines = content.trim().split('\n')
-  const positions = []
-
-  let i = 0
-  while (i < lines.length) {
-    const line = lines[i].trim()
-    const match = line.match(/^(\d+):$/)
-    if (match) {
-      const fileLabel = parseInt(match[1])
-      if (i + 4 <= lines.length) {
-        const row1 = lines[i + 1].trim().split(/\s+/)
-        const row2 = lines[i + 2].trim().split(/\s+/)
-        const row3 = lines[i + 3].trim().split(/\s+/)
-
-        if (row1.length >= 4 && row2.length >= 4 && row3.length >= 4) {
-          const x = parseFloat(row1[3])
-          const y = parseFloat(row2[3])
-          const z = parseFloat(row3[3])
-
-          let batchNo
-          if (fileLabel === 1) {
-            batchNo = 1
-          } else {
-            batchNo = currentIdx + 1
-          }
-
-          positions.push({ batchNo, x, y, z })
-        }
-        i += 4
-      }
-    }
-    i++
-  }
-
-  return positions
-}
-
-/**
- * 根据持久化的锚点位置 Map 更新 3D 场景中的锚点精灵
- * 所有站位坐标均基于统一的全局坐标系（以站位1为原点建立）
- */
-function updateHLMRFAnchorsFromMap() {
-  if (!renderer || !isRendererReady.value) return
-
-  const scene = renderer.getScene()
-  if (!scene) return
-
-  anchorSprites.forEach((sprite) => {
-    scene.remove(sprite)
-    if (sprite.material && sprite.material.map) sprite.material.map.dispose()
-    if (sprite.material) sprite.material.dispose()
-  })
-  anchorSprites = []
-
-  if (container.value && !_hlmrfClickRegistered) {
-    container.value.addEventListener('click', onContainerClick)
-    _hlmrfClickRegistered = true
-  }
-
-  const sortedPositions = Array.from(hlmrfAnchorPositions.entries()).sort(([a], [b]) => a - b)
-
-  for (const [batchNo, pos] of sortedPositions) {
-    const sprite = createHLMRFAnchorSprite(batchNo)
-    // 锚点 Map 中存储米制平移（与 global_poses 文件单位一致），
-    // 渲染时 ×10 转分米，与分米制渲染的点云保持对齐
-    sprite.position.set(pos.x * 10, pos.y * 10 + 0.5, pos.z * 10)
-    sprite.scale.set(1.5, 1.5, 1)
-    sprite.userData = { stationId: batchNo - 1, isAnchor: true, isHLMRFAnchor: true }
-    scene.add(sprite)
-    anchorSprites.push(sprite)
-  }
-
-  console.log(
-    `[HLMRF] 锚点更新完成: ${sortedPositions.length} 个站位`,
-    sortedPositions.map(
-      ([batchNo, p]) => `站${batchNo}(${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)})`,
-    ),
-  )
-
-  if (renderer && typeof renderer.markNeedsRender === 'function') {
+    pointCount.value = renderedCount
     renderer.markNeedsRender()
-  }
-}
+    geometry.dispose()
 
-/**
- * 创建 HLMRF 站位锚点精灵
- * @param {number} batchNo - 站位编号（从1开始）
- * @returns {THREE.Sprite}
- */
-function createHLMRFAnchorSprite(batchNo) {
-  const canvas = document.createElement('canvas')
-  canvas.width = 256
-  canvas.height = 256
-  const ctx = canvas.getContext('2d')
-
-  ctx.beginPath()
-  ctx.arc(128, 128, 112, 0, Math.PI * 2)
-  ctx.fillStyle = '#ffffff'
-  ctx.fill()
-  ctx.strokeStyle = '#2a7aff'
-  ctx.lineWidth = 12
-  ctx.stroke()
-
-  ctx.fillStyle = '#000000'
-  ctx.font = 'bold 96px Arial'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(String(batchNo), 128, 128)
-
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.minFilter = THREE.LinearFilter
-  texture.magFilter = THREE.LinearFilter
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    depthTest: false,
-    depthWrite: false,
-  })
-  return new THREE.Sprite(material)
-}
-
-/**
- * 读取 stitch_output 目录下的 global_poses.txt 并解析为站位坐标
- * @param {string} stitchOutputDir - stitch_output 目录路径
- * @param {number} currentIdx - 当前拼接的站位编号（新站位的 batchNo）
- * @returns {Promise<Array<{batchNo: number, x: number, y: number, z: number}>>}
- */
-async function readGlobalPosesFromStitch(stitchOutputDir, currentIdx) {
-  const posesPath = `${stitchOutputDir}/${HLMRF_OUTPUT.GLOBAL_POSES_FILE}`
-
-  try {
-    await storage.file.stat(posesPath)
-  } catch (_) {
-    return []
-  }
-
-  const readResult = await Filesystem.readFile({
-    path: posesPath,
-    directory: Directory.External,
-    encoding: FilesystemEncoding.UTF8,
-  })
-
-  if (!readResult || !readResult.data) {
-    return []
-  }
-
-  return parseGlobalPosesContent(readResult.data, currentIdx)
-}
-
-// ==============================================
-// PtcrPlugin 诊断函数
-// ==============================================
-
-/**
- * 诊断 PtcrPlugin 是否完整可用
- * 可在控制台直接调用: debugCheckPlugin()
- */
-async function debugCheckPlugin() {
-  const result = {
-    ok: false,
-    error: null,
-    detail: { python: '', scripts: '', onnx: '' },
-  }
-
-  try {
-    if (!PtcrPlugin) {
-      result.error = 'PtcrPlugin 未导入'
-      return result
-    }
-
-    try {
-      const hc = await PtcrPlugin.healthCheck()
-      result.ok = hc.ok === true
-      result.detail.python = hc.ok
-        ? `Python OK (task: ${hc.task})`
-        : `Python 失败: ${hc.error || '未知'}`
-      result.detail.scripts = hc.log || ''
-
-      if (!result.ok) {
-        result.error = hc.error || 'healthCheck 返回失败'
-      }
-    } catch (hcError) {
-      result.error = hcError.message || String(hcError)
-      result.detail.python = `healthCheck 调用失败: ${result.error}`
-
-      if (result.error.includes('not implemented on android')) {
-        result.detail.python = 'PtcrPlugin 未安装到 APK（not implemented on android）'
-        result.detail.scripts = '需要在 build.gradle 中包含 PtcrPlugin 并重新构建'
-        result.detail.onnx = 'APK 重建后自动部署'
-        return result
-      }
-    }
-
-    return result
+    logger.info(`[PointCloud] final.ply 渲染完成: ${renderedCount}/${total} 个点`)
+    return true
   } catch (e) {
-    result.error = e.message || String(e)
-    console.error('[PtcrDiag] ❌ 诊断异常:', result.error)
+    logger.error('[PointCloud] final.ply 渲染失败', e)
+    showToast({ message: '拼接结果渲染失败', position: 'bottom' })
+    return false
+  }
+}
+
+/**
+ * 点击"拼接"按钮：确认后执行 gpd 全流程拼接（长任务，页面停留）
+ */
+async function handleStitchClick() {
+  if (isStitching.value || saving.value) return
+  if (dataBatchCounter.value === 0) {
+    showToast({ message: '暂无采集数据，无法拼接', position: 'bottom' })
+    return
   }
 
-  return result
+  try {
+    await showConfirmDialog({
+      title: '拼接确认',
+      message: `将对 ${dataBatchCounter.value} 个站位执行全景与拼接计算，耗时较长，请保持 App 在前台运行。`,
+      confirmButtonText: '开始拼接',
+      cancelButtonText: '取消',
+    })
+  } catch (_) {
+    return
+  }
+
+  await runGpdProject()
+}
+
+/**
+ * 拼接耗时格式化：X 分 Y 秒 / Y 秒
+ */
+function formatStitchDuration(ms) {
+  const totalSec = Math.floor(ms / 1000)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return min > 0 ? `${min} 分 ${sec} 秒` : `${sec} 秒`
+}
+
+/**
+ * gpd 拼接主流程：调用原生插件 → 渲染 final.ply → 预缓存各站全景
+ * @returns {Promise<boolean>} 拼接是否成功
+ */
+async function runGpdProject() {
+  let folderName
+  try {
+    folderName = await getDataDir()
+  } catch (e) {
+    logger.error('[PointCloud] 获取项目目录失败', e)
+    showToast({ message: '获取项目目录失败', position: 'bottom' })
+    return false
+  }
+
+  isStitching.value = true
+  stitchProgressText.value = '全景与拼接计算中，请耐心等待...'
+  const stitchStartAt = Date.now()
+
+  try {
+    await GpdPlugin.runProject({
+      dataDir: `pointcloud/${folderName}`,
+      mode: 'default',
+      profile: 'low-memory',
+    })
+    const stitchCostMs = Date.now() - stitchStartAt
+
+    isStitching.value = false
+    stitchProgressText.value = ''
+
+    const finalPlyPath = `${storage.path.sessionFolder(folderName)}/final.ply`
+    const rendered = await loadAndRenderFinalPly(finalPlyPath)
+    if (rendered) {
+      showToast({ message: '拼接完成', position: 'bottom' })
+      // 后台预缓存各站全景图，供批次详情页查看（不阻塞弹窗）
+      precacheBatchPanoramas(folderName)
+      // ===== 临时调试：拼接耗时弹窗（测试用，后续整段删除）=====
+      await showConfirmDialog({
+        title: '拼接完成',
+        message: `本次拼接耗时 ${formatStitchDuration(stitchCostMs)}。`,
+        showCancelButton: false,
+        confirmButtonText: '关闭',
+      })
+      // ===== 临时调试结束 =====
+    }
+    return rendered
+  } catch (e) {
+    isStitching.value = false
+    stitchProgressText.value = ''
+    const failCostMs = Date.now() - stitchStartAt
+    logger.error('[PointCloud] gpd 拼接失败', e)
+    showToast({
+      message: `拼接失败：${e?.message || '未知错误'}`,
+      position: 'bottom',
+      duration: 4000,
+    })
+    // ===== 临时调试：失败耗时弹窗（测试用，后续整段删除）=====
+    await showConfirmDialog({
+      title: '拼接失败',
+      message: `本次拼接已耗时 ${formatStitchDuration(failCostMs)}。原因：${e?.message || '未知错误'}`,
+      showCancelButton: false,
+      confirmButtonText: '关闭',
+    })
+    // ===== 临时调试结束 =====
+    return false
+  }
+}
+
+/**
+ * 预缓存各批次全景图（gpd 输出 Batch_xxx/out/panorama.png）
+ * 供批次详情页直接命中缓存，失败静默忽略
+ */
+async function precacheBatchPanoramas(folderName) {
+  try {
+    const batches = await storage.batch.list(folderName).catch(() => [])
+    for (let i = 0; i < batches.length; i++) {
+      const panoPath = `${storage.path.batchFolder(folderName, i)}/out/panorama.png`
+      try {
+        // getUri 不校验存在性，先确认文件存在再缓存 URL（保持原 readFile 的跳过语义）
+        const fileExists = await storage.file.exists(panoPath)
+        if (!fileExists) continue
+        // 缓存 WebView 直访 URL（替代 readFile base64，避免大图导致 Java 堆 OOM）
+        setPanoramaCache(panoPath, await storage.file.getWebViewFileUrl(panoPath))
+      } catch (_) {}
+    }
+  } catch (e) {
+    logger.warn('[PointCloud] 预缓存全景图失败', e)
+  }
 }
 
 // ==============================================
@@ -1786,8 +1403,6 @@ function cleanupMultiStationResources() {
     }
   }
   anchorSprites = []
-  hlmrfAnchorPositions.clear()
-  _hlmrfClickRegistered = false
 }
 
 /**
@@ -2001,10 +1616,8 @@ function checkDeviceConnection() {
 
 /**
  * 批次收尾（拍照会话结束 / 仅采集模式收到扫描结束信号后调用）
- * @param {Object} options
- * @param {boolean} options.withPanorama - 是否生成全景图（仅采集模式无照片，跳过）
  */
-async function finalizeBatchData({ withPanorama }) {
+async function finalizeBatchData() {
   // 1. 刷新延迟渲染并停止
   await flushDeferredRender()
   stopBackgroundRender()
@@ -2031,14 +1644,6 @@ async function finalizeBatchData({ withPanorama }) {
   if (parser) parser.pause()
   clearAccumulationBuffer()
   resetSessionParserState()
-
-  // 7. 触发 HLMRF 多站点拼接（仅依赖点云，两种模式均执行）
-  triggerHLMRFRegistration()
-
-  // 8. PtcrPlugin 单站点拼接（依赖照片，仅"采集+拍照"模式执行）
-  if (withPanorama) {
-    triggerAutoStitch()
-  }
 }
 
 /**
@@ -2101,7 +1706,7 @@ function createSessionParser() {
     },
     onPhotoSessionEnded: async () => {
       console.log(`[PhotoSession] 📸 会话结束: 点位=${dataBatchCounter.value}, 点云=${currentBatchData.pointCount}, 照片=${currentBatchData.photos.length}`)
-      await finalizeBatchData({ withPanorama: true })
+      await finalizeBatchData()
     },
     // 仅采集模式：收到 0x83（下位机扫描结束信号）时触发批次收尾
     // 前端对 0x83 完全静默（不 ACK），下位机重传约 3 次后自动放弃拍照任务并回到空闲态
@@ -2112,7 +1717,7 @@ function createSessionParser() {
       // 防止收尾 flush 早于最后一批点的写入导致丢点
       await new Promise((resolve) => setTimeout(resolve, 300))
 
-      await finalizeBatchData({ withPanorama: false })
+      await finalizeBatchData()
     },
   })
 
@@ -3141,19 +2746,11 @@ onActivated(async () => {
     renderer.init(cameraConfig)
     isRendererReady.value = true
     window.addEventListener('resize', renderer.onResize)
-
-    // 重新注册 HLMRF 锚点点击事件（renderer 重建后旧的事件绑定失效）
-    if (container.value && !_hlmrfClickRegistered) {
-      container.value.addEventListener('click', onContainerClick)
-      _hlmrfClickRegistered = true
-    }
   }
 
-  // 修复：使用 loadAndRenderProjectData 统一加载点云数据，支持所有降级路径
-  // （session dense cloud → alignedBlock → first batch txt）
-  // loadAndRenderProjectData 内部会调用 loadHLMRFAnchorsForViewMode 加载锚点
+  // 加载项目数据（优先 final.ply，未拼接则提示）
   await loadAndRenderProjectData(dataDir)
-  console.log(`[PointCloud]    ✅ 数据加载完成: ${pointCount.value} 个点, ${hlmrfAnchorPositions.size} 个锚点`)
+  console.log(`[PointCloud]    ✅ 数据加载完成: ${pointCount.value} 个点`)
 })
 
 /**
@@ -3163,6 +2760,13 @@ onActivated(async () => {
  */
 onBeforeRouteLeave(async (to, from, next) => {
   logger.debug('[PointCloud] 执行 beforeRouteLeave 守卫')
+
+  // 拼接计算期间禁止离开页面（gpd 长任务）
+  if (isStitching.value) {
+    showToast({ message: '拼接计算进行中，请等待完成', position: 'bottom' })
+    next(false)
+    return
+  }
 
   try {
     // 检查是否离开会话页面
@@ -4002,7 +3606,12 @@ function jumpToBatchDetail(stationId) {
   transform: translateY(1px);
 }
 
-/* ========== 保存对话框 ========== */
+/* ============================================================
+   【已停用】深色保存 / 拼接引导弹窗样式（与模板中注释掉的弹窗配套）
+   停用原因：点云页弹窗统一改为浅色 vant 样式，本套深色样式仅注释保留、
+   不删除，便于后续切换回深色方案时直接恢复。
+   恢复方式：取消本段注释，并恢复模板/script 中对应的深色弹窗代码。
+   ============================================================
 .save-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -4062,6 +3671,19 @@ function jumpToBatchDetail(stationId) {
   -webkit-touch-callout: none;
 }
 
+.stitch-guide-text {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  text-align: center;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .save-dialog-card label {
   display: block;
   margin-bottom: 8px;
@@ -4102,7 +3724,7 @@ function jumpToBatchDetail(stationId) {
   color: rgba(255, 255, 255, 0.3);
 }
 
-/* 对话框按钮容器 */
+—— 对话框按钮容器 ——
 .save-actions {
   display: flex;
   justify-content: flex-end;
@@ -4126,7 +3748,7 @@ function jumpToBatchDetail(stationId) {
   -webkit-touch-callout: none;
 }
 
-/* 完成按钮 */
+—— 完成按钮 ——
 .save-actions button:first-child {
   background: var(--brand-gradient);
   color: white;
@@ -4145,7 +3767,7 @@ function jumpToBatchDetail(stationId) {
   box-shadow: 0 2px 8px var(--brand-glow);
 }
 
-/* 取消按钮 */
+—— 取消按钮 ——
 .save-actions button:last-child {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
@@ -4162,6 +3784,7 @@ function jumpToBatchDetail(stationId) {
   background: rgba(255, 255, 255, 0.05);
   transform: translateY(1px);
 }
+*/
 
 /* 禁用状态 */
 .save-actions button:disabled,
@@ -4174,6 +3797,12 @@ function jumpToBatchDetail(stationId) {
   transform: none !important;
   box-shadow: none;
   border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ========== 浅色保存弹窗（van-dialog）输入区适配 ========== */
+/* van-dialog 挂载于 body，此处样式作用于本组件的插槽元素 */
+.save-dialog-field {
+  padding: 16px 24px 8px;
 }
 
 /* ========== 采集进度卡片 ========== */
@@ -4382,6 +4011,7 @@ function jumpToBatchDetail(stationId) {
     font-size: 13px;
   }
 
+  /* 【已停用】深色弹窗小屏适配（随上方深色弹窗样式一并保留，便于恢复）
   .save-dialog-card {
     width: 85vw;
     padding: 20px;
@@ -4397,6 +4027,7 @@ function jumpToBatchDetail(stationId) {
     min-width: 80px;
     font-size: 14px;
   }
+  */
 
   /* 移动端采集进度卡片适配 */
   .collection-progress-card {

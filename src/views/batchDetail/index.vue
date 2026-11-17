@@ -116,7 +116,7 @@ async function getPanoramaUrl() {
     candidateFolders.push(tempFolderName)
 
     for (const folder of candidateFolders) {
-      const panoPath = `${storage.path.batchFolder(folder, batchId)}/ptcr_output/pano_raw.png`
+      const panoPath = `${storage.path.batchFolder(folder, batchId)}/out/panorama.png`
 
       const cached = getPanoramaCache(panoPath)
       if (cached) {
@@ -135,19 +135,13 @@ async function getPanoramaUrl() {
         continue
       }
 
-      logger.debug('[getPanoramaUrl] 缓存未命中，从磁盘读取, 路径:', panoPath)
+      logger.debug('[getPanoramaUrl] 缓存未命中，生成 WebView 文件 URL, 路径:', panoPath)
 
       try {
-        const readResult = await Filesystem.readFile({
-          path: panoPath,
-          directory: Directory.External,
-        })
-        if (readResult && readResult.data) {
-          logger.debug('[getPanoramaUrl] 读取成功, base64长度:', readResult.data.length)
-          return `data:image/png;base64,${readResult.data}`
-        }
+        // 大图走 WebView 直访 URL，避免 readFile base64 通道导致 Java 堆 OOM 崩溃
+        return await storage.file.getWebViewFileUrl(panoPath)
       } catch (readErr) {
-        logger.warn('[getPanoramaUrl] readFile 失败:', readErr)
+        logger.warn('[getPanoramaUrl] 获取文件 URL 失败:', readErr)
       }
     }
 

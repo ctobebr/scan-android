@@ -124,6 +124,8 @@ import {
   deleteDirectory,
   listFilesRecursive,
   exists,
+  getWebViewFileUrl,
+  readLargeFile,
 } from '@/services/storage/fileSystem'
 
 /**
@@ -143,6 +145,10 @@ export const file = {
   listRecursive: listFilesRecursive,
   /** 检查文件是否存在 */
   exists,
+  /** 获取文件的 WebView 直访 URL（大文件加载专用，避免 readFile base64 导致 Java 堆 OOM） */
+  getWebViewFileUrl,
+  /** 以 ArrayBuffer 读取大文件（fetch WebView URL，避免 readFile base64 导致 Java 堆 OOM） */
+  readLargeFile,
 }
 
 // ============================================

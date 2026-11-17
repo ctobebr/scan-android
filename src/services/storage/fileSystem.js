@@ -7,6 +7,7 @@
  */
 
 import { Filesystem, Directory } from '@capacitor/filesystem'
+import { Capacitor } from '@capacitor/core'
 import {
   ErrorCodes,
   MAX_RECURSION_DEPTH,
@@ -212,6 +213,46 @@ export async function getUri(path) {
       }),
     `获取URI ${sanitizedPath}`,
   )
+}
+
+/**
+ * 获取文件的 WebView 直访 URL（大文件加载专用）
+ *
+ * 背景：Filesystem.readFile（不带 encoding）会在 Java 侧将整个文件
+ * base64 编码后经桥传输，内存放大约 3 倍，读取大文件（如 final.ply、
+ * panorama.png）易触发 Java 堆 OOM 崩溃（进程被杀，JS 层无法捕获兜底）。
+ *
+ * 应对：通过 getUri + convertFileSrc 生成 WebView 可直接访问的 URL，
+ * 配合 readLargeFile（fetch ArrayBuffer）读取二进制，或直接作为
+ * <img>/纹理资源地址使用，文件内容不经过 Java 堆。
+ *
+ * 注意：getUri 不校验文件存在性，调用方需自行确认文件存在。
+ *
+ * @param {string} path - 文件路径（相对于 Directory.External）
+ * @returns {Promise<string>} WebView 可访问的 URL
+ * @throws {FilePathError} 当路径无效或获取 URI 失败时抛出
+ */
+export async function getWebViewFileUrl(path) {
+  const { uri } = await getUri(path)
+  return Capacitor.convertFileSrc(uri)
+}
+
+/**
+ * 以 ArrayBuffer 读取大文件（fetch WebView URL，绕过 readFile 的 base64 通道）
+ * @param {string} path - 文件路径（相对于 Directory.External）
+ * @returns {Promise<ArrayBuffer>} 文件二进制内容
+ * @throws {FilePathError|TypeError} 当路径无效或 fetch 读取失败时抛出
+ */
+export async function readLargeFile(path) {
+  const url = await getWebViewFileUrl(path)
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new FilePathError(
+      ErrorCodes.FILESYSTEM_ERROR,
+      `读取大文件 ${path} 失败: HTTP ${response.status}`,
+    )
+  }
+  return response.arrayBuffer()
 }
 
 /**
